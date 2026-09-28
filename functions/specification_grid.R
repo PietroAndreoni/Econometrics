@@ -179,6 +179,132 @@ grid_plot_data <- function(coefficients, factor_levels) {
   out
 }
 
+# The continuous BHM terms that accompany the signed-deviation bins. Keep the
+# two level effects next to their corresponding long-run-climate interactions.
+BASE_TERM_LABELS <- c(
+  TM = "Temperature level",
+  "TM:mean_TM_all" = "Temperature x long-run mean temperature",
+  RR = "Precipitation level",
+  "RR:mean_RR_all" = "Precipitation x long-run mean precipitation"
+)
+
+# Base-term coefficients in percentage points with ordered specification
+# factors, ready for the robustness plots below.
+grid_base_plot_data <- function(base_terms, factor_levels) {
+  out <- base_terms %>%
+    filter(term %in% names(BASE_TERM_LABELS)) %>%
+    mutate(
+      term_label = factor(
+        unname(BASE_TERM_LABELS[term]),
+        levels = unname(BASE_TERM_LABELS)
+      ),
+      across(c(estimate, conf_low, conf_high), ~100 * .x)
+    )
+  for (f in names(factor_levels)) {
+    out[[f]] <- factor(out[[f]], levels = factor_levels[[f]])
+  }
+  out
+}
+
+# The four non-deviation coefficients for every specification. Climate source
+# is on the horizontal axis and in colour; an optional second choice such as
+# weighting is encoded by marker shape. Each coefficient has its own y-scale.
+plot_base_term_grid <- function(plot_data, facet, colour, colour_name,
+                                shape = NULL, shape_values = NULL,
+                                shape_labels = waiver(), shape_name = NULL,
+                                title = NULL, subtitle = NULL,
+                                caption = NULL) {
+  colour_levels <- levels(plot_data[[colour]])
+  shape_factor <- if (is.null(shape)) colour else shape
+  shape_levels <- levels(plot_data[[shape_factor]])
+  if (is.null(shape_values)) shape_values <- grid_shapes(shape_levels)
+  dodge <- position_dodge(width = if (is.null(shape)) 0 else 0.55)
+  group_cols <- unique(c(colour, shape_factor))
+
+  ggplot(
+    plot_data,
+    aes(
+      x = .data[[colour]], y = estimate,
+      colour = .data[[colour]], shape = .data[[shape_factor]],
+      group = interaction(!!!rlang::syms(group_cols))
+    )
+  ) +
+    geom_hline(yintercept = 0, colour = GRID_MUTED, linewidth = 0.3) +
+    geom_linerange(
+      aes(ymin = conf_low, ymax = conf_high),
+      position = dodge, linewidth = 0.45, alpha = 0.7
+    ) +
+    geom_point(position = dodge, size = 2) +
+    facet_grid(
+      stats::as.formula(paste("term_label ~", facet)),
+      scales = "free_y"
+    ) +
+    scale_colour_manual(
+      values = grid_colours(colour_levels), name = colour_name
+    ) +
+    scale_shape_manual(
+      values = shape_values, labels = shape_labels,
+      name = if (is.null(shape)) colour_name else shape_name
+    ) +
+    labs(
+      title = title,
+      subtitle = subtitle,
+      caption = paste(
+        c(caption, "Each coefficient row has an independent vertical scale."),
+        collapse = " "
+      ),
+      x = "Climate data",
+      y = "Coefficient estimate (pp)"
+    ) +
+    theme_results() +
+    theme(axis.text.x = element_text(angle = 30, hjust = 1))
+}
+
+# Mean, interquartile range and min-max of each non-deviation coefficient across
+# specifications, shown separately for maximum and common samples.
+plot_base_term_range <- function(plot_data, sample_labels, title, subtitle) {
+  range_data <- plot_data %>%
+    group_by(sample, term_label) %>%
+    summarise(
+      mean = mean(estimate),
+      low = min(estimate),
+      high = max(estimate),
+      q25 = stats::quantile(estimate, 0.25),
+      q75 = stats::quantile(estimate, 0.75),
+      .groups = "drop"
+    ) %>%
+    mutate(sample = factor(sample, levels = names(sample_labels)))
+  sample_colours <- grid_colours(names(sample_labels))
+
+  ggplot(range_data, aes(sample, mean, colour = sample, shape = sample)) +
+    geom_hline(yintercept = 0, colour = GRID_MUTED, linewidth = 0.3) +
+    geom_linerange(aes(ymin = low, ymax = high), linewidth = 0.5) +
+    geom_linerange(aes(ymin = q25, ymax = q75), linewidth = 2) +
+    geom_point(size = 3, colour = "white", show.legend = FALSE) +
+    geom_point(size = 1.8) +
+    facet_wrap(~term_label, scales = "free_y", ncol = 2) +
+    scale_colour_manual(
+      values = sample_colours, labels = sample_labels, name = NULL
+    ) +
+    scale_shape_manual(
+      values = grid_shapes(names(sample_labels)),
+      labels = sample_labels, name = NULL
+    ) +
+    scale_x_discrete(labels = sample_labels) +
+    labs(
+      title = title,
+      subtitle = subtitle,
+      caption = paste(
+        "Thin line: min-max; thick line: interquartile range.",
+        "Each coefficient panel has an independent vertical scale."
+      ),
+      x = NULL,
+      y = "Coefficient estimate (pp)"
+    ) +
+    theme_results() +
+    theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+}
+
 # Response curves of one variable: one column per `facet`, one colour (and
 # shape) per `colour`, optionally one line type per `linetype`.
 .bin_panel <- function(d, var, facet, colour, colour_values, colour_name,
