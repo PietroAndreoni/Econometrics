@@ -1,9 +1,8 @@
 # Shared climate-series transforms.
 #
-# These functions are used both by `prepare_climate_data.R`, which builds the
-# regional TM/RR panels, and by `prepare_global_climate_data.R`, which builds the
-# single global temperature series. Keeping one copy guarantees the global series
-# is filtered and standardised by exactly the same operators as the local panels.
+# Used by derive_climate_moments() in functions/climate_panel.R. Keeping one copy
+# guarantees every climate series (regional or global) is filtered and
+# standardised by exactly the same operators.
 
 # Hamilton (2018) regression filter. For a single series y ordered by year, the
 # trend is the fitted value of

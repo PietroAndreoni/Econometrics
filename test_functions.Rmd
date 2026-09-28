@@ -21,18 +21,20 @@ precipitation effects on subnational GDP-per-capita growth. Every model uses the
 same climate controls, fixed effects, panel identifiers, and clustered standard
 errors so that differences can be attributed to the tested response function.
 
-By default, the notebook loads the processed economic and climate parquet files
-from `econometrics/data`. Set `project_setup_script` only when project-specific
-setup is needed before those files are loaded. Set `econ_data` to `PWT`, `WDI`,
-`DOSE` (DOSE v2.14); the loader selects the corresponding GADM0 or GADM1
-climate files automatically.
+All functions live in `functions/` and are loaded by `load_functions.R`; the
+estimation panel comes from `build_dat()` in `functions/build_dat.R`, which
+builds and caches it from the raw sources in `data/`. Set
+`project_setup_script` only when project-specific setup is needed first. Set
+`econ_data` to `DOSE` (DOSE v2.14) or `KUMMU` (gridded Kummu 2025 aggregated to
+GADM 4.1 ADM1) for GADM1, or `PWT` (PWT 11.0) or `WB` (World Bank WDI) for
+GADM0; the matching climate resolution is selected automatically.
 
 # Setup
 
 ```{r setup, message=FALSE, warning=FALSE}
 required_packages <- c(
   "arrow", "curl", "dplyr", "fixest", "ggplot2", "jsonlite", "purrr",
-  "readxl", "tibble", "tidyselect", "zoo"
+  "readxl", "splines", "tibble", "tidyselect", "zoo"
 )
 missing_packages <- required_packages[
   !vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)
@@ -45,9 +47,7 @@ if (length(missing_packages)) {
   )
 }
 
-library(dplyr)
-library(fixest)
-library(ggplot2)
+source("load_functions.R")
 
 knitr::opts_chunk$set(message = FALSE, warning = FALSE)
 
@@ -75,25 +75,7 @@ model <- paste(base_climate, "+ zRR^2 + zTM^2")
 
 ECON_YEAR_MIN <- 1950
 
-# Climate selection, passed straight to the Weighted Climate Dataset downloader
-# (Gortan, Testa, Fagiolo and Lamperti 2024). CRU TS starts in 1901, so the
-# 30-year trailing window is complete from 1930 rather than from 1970 as it is
-# with ERA5's 1940 start. "concurrent population" weights each year by that
-# year's population instead of by a single base year, so it carries no base
-# year and `CLIMATE_WEIGHT_YEAR` is ignored.
-CLIMATE_SOURCE <- "CRU TS"
-CLIMATE_SOURCE_CODE <- "cru"
-CLIMATE_WEIGHT <- "concurrent population"
-CLIMATE_WEIGHT_YEAR <- NULL
-
-# Fixed reference periods and Hamilton-filter settings. 
-PERIOD_ALL <- c(1990L, 2019L)
-PERIOD_PRE <- c(1960L, 1989L)
-HAMILTON_LAGS <- 4L
-HAMILTON_H_FIXED <- 2L
-
 CLIMATE_VELOCITY_YEARS <- as.integer(params$climate_velocity_years)
-CLIMATE_WINDOWS <- c(5L, 10L, 20L, 30L)
 
 if (length(CLIMATE_VELOCITY_YEARS) != 1L ||
     is.na(CLIMATE_VELOCITY_YEARS) ||
@@ -101,19 +83,28 @@ if (length(CLIMATE_VELOCITY_YEARS) != 1L ||
   stop("params$climate_velocity_years must be an integer of at least 2.")
 }
 
-# Retain enough pre-estimation climate observations to calculate the first
+# Panel settings; see panel_config() in functions/build_dat.R for the climate
+# source, weighting, rolling windows, reference periods and Hamilton filter.
+# Enough pre-estimation climate years are retained to calculate the first
 # trailing climate-velocity window, as well as the six-year model lags.
-CLIM_HISTORY_YEARS <- max(6L, CLIMATE_VELOCITY_YEARS - 1L)
+panel_cfg <- panel_config(
+  econ_year_min = ECON_YEAR_MIN,
+  clim_history_years = max(6L, CLIMATE_VELOCITY_YEARS - 1L)
+)
 
+# The notebook's specification bound to the shared estimator in
+# functions/model_spec.R.
 make_formula <- function(terms) {
-  as.formula(paste(outcome, "~", terms, "|", fixed_effects))
+  make_panel_formula(terms, outcome = outcome, fixed_effects = fixed_effects)
 }
 
 fit_climate_model <- function(terms, model_data = data) {
-  fixest::feols(
-    make_formula(terms),
-    data = model_data,
-    panel.id = pan_id,
+  fit_panel_model(
+    terms,
+    model_data,
+    outcome = outcome,
+    fixed_effects = fixed_effects,
+    panel_id = pan_id,
     cluster = ~GID_1
   )
 }
@@ -129,531 +120,12 @@ are kept as lag carriers and to calculate climate velocity at the beginning of
 the estimation period.
 
 ```{r build-data}
-est_row <- function(d) !is.na(d$dlgrp_pc_usd)
+# build_dat() joins the economic panel to the derived climate moments and adds
+# the weather-response variables; both halves are built from raw sources and
+# cached under data/cache (see functions/build_dat.R).
+data <- build_dat(econ_data = params$econ_data, config = panel_cfg)
 
-# Match on calendar year so that gaps produce NA rather than an incorrect lag.
-lag_by_year <- function(x, year, k = 1) {
-  x[match(year - k, year)]
-}
-
-# The climate series now come straight from the Weighted Climate Dataset
-# through the repository's downloader, so the notebook no longer depends on a
-# pre-processed climate parquet and derives the moments itself.
-# `hamilton_trend()` is shared with prepare_climate_data.R so the trend operator
-# is identical to the one that produced the previous inputs.
-local({
-  helpers <- c("download_weighted_climate_data.R", "climate_transforms.R")
-  for (helper in helpers) {
-    candidates <- unique(c(
-      helper, file.path("..", helper), file.path("econometrics", helper)
-    ))
-    existing <- candidates[file.exists(candidates)]
-    if (!length(existing)) {
-      stop("Helper script not found: ", helper)
-    }
-    source(existing[[1]], local = globalenv())
-  }
-})
-
-# Annual series for one geographical resolution. Temperature is the mean of the
-# monthly values and precipitation their sum, which is how the dashboard
-# aggregates them. Precipitation is converted from millimetres to metres so the
-# level bins further down stay in metres. Downloads are cached on disk by the
-# helper, so repeated calls cost nothing after the first.
-load_climate_series <- function(geo_resolution) {
-  is_national <- identical(geo_resolution, "gadm0")
-  id_col <- if (is_national) "GID_0" else "GID_1"
-  # The dashboard names gadm1 units "AFG_1_1" while GADM and the economic
-  # panels use "AFG.1_1", so the first underscore becomes a dot. gadm0 ids are
-  # plain ISO3 codes and need no change. Units that do not match the expected
-  # shape are dropped, as in prepare_climate_data.R.
-  unit_pattern <- if (is_national) "^[A-Z0-9]{3}$" else "^[A-Z0-9]{3}\\..+"
-
-  fetch <- function(variable, value_code, value_name) {
-    out <- tibble::as_tibble(wcd_get(
-      variable = variable,
-      source = CLIMATE_SOURCE,
-      geo_resolution = geo_resolution,
-      weight = CLIMATE_WEIGHT,
-      weight_year = CLIMATE_WEIGHT_YEAR,
-      time_frequency = "yearly",
-      verbose = FALSE
-    ))
-    missing_cols <- setdiff(c("date", id_col, value_code), names(out))
-    if (length(missing_cols)) {
-      stop(
-        "The downloader returned no ", paste(missing_cols, collapse = ", "),
-        " column for ", variable, " at ", geo_resolution, "."
-      )
-    }
-    out %>%
-      transmute(
-        year = as.integer(date),
-        unit = .data[[id_col]],
-        !!value_name := .data[[value_code]]
-      )
-  }
-
-  inner_join(
-    fetch("avg. temperature", "tmp", "TM"),
-    fetch("precipitation", "pre", "RR"),
-    by = c("year", "unit")
-  ) %>%
-    mutate(
-      GID_1 = if (is_national) unit else sub("^([^_]+)_", "\\1.", unit)
-    ) %>%
-    filter(grepl(unit_pattern, GID_1)) %>%
-    transmute(
-      gadm_level = geo_resolution,
-      climate_source = CLIMATE_SOURCE_CODE,
-      GID_0 = substr(GID_1, 1, 3),
-      GID_1,
-      year,
-      TM,
-      RR = RR / 1000
-    ) %>%
-    filter(!is.na(TM) | !is.na(RR))
-}
-
-# Rolling moments are right-aligned and include the current year, exactly as in
-# prepare_climate_data.R. The models lag them by one year so that a realisation
-# never enters its own baseline.
-add_rolling_moments <- function(unit_series) {
-  for (variable in c("TM", "RR")) {
-    values <- unit_series[[variable]]
-    for (window in CLIMATE_WINDOWS) {
-      unit_series[[paste0("mean_", variable, "_", window)]] <-
-        zoo::rollmeanr(values, k = window, fill = NA_real_)
-      unit_series[[paste0("sd_", variable, "_", window)]] <-
-        zoo::rollapplyr(values, width = window, FUN = stats::sd, fill = NA_real_)
-    }
-  }
-  unit_series
-}
-
-in_period <- function(year, period) {
-  year >= period[[1]] & year <= period[[2]]
-}
-
-# Fixed-period moments and trends, plus the trailing rolling moments. The
-# rolling operators assume a gap-free annual series within each unit, which is
-# checked rather than assumed.
-derive_climate_moments <- function(series) {
-  gaps <- series %>%
-    group_by(gadm_level, GID_1) %>%
-    summarise(
-      complete = n() == max(year) - min(year) + 1L,
-      .groups = "drop"
-    ) %>%
-    filter(!complete)
-  if (nrow(gaps)) {
-    stop(
-      "Gaps in the annual climate series for ", nrow(gaps),
-      " unit(s), e.g. ", paste(utils::head(gaps$GID_1, 3), collapse = ", "),
-      ". The rolling moments assume consecutive years."
-    )
-  }
-
-  series %>%
-    group_by(gadm_level, climate_source, GID_0, GID_1) %>%
-    arrange(year, .by_group = TRUE) %>%
-    group_modify(~add_rolling_moments(.x)) %>%
-    mutate(
-      dTM = TM - lag_by_year(TM, year),
-      dRR = RR - lag_by_year(RR, year),
-      mean_TM_all = mean(TM[in_period(year, PERIOD_ALL)], na.rm = TRUE),
-      sd_TM_all = sd(TM[in_period(year, PERIOD_ALL)], na.rm = TRUE),
-      mean_RR_all = mean(RR[in_period(year, PERIOD_ALL)], na.rm = TRUE),
-      sd_RR_all = sd(RR[in_period(year, PERIOD_ALL)], na.rm = TRUE),
-      mean_TM_pre = mean(TM[in_period(year, PERIOD_PRE)], na.rm = TRUE),
-      sd_TM_pre = sd(TM[in_period(year, PERIOD_PRE)], na.rm = TRUE),
-      mean_RR_pre = mean(RR[in_period(year, PERIOD_PRE)], na.rm = TRUE),
-      sd_RR_pre = sd(RR[in_period(year, PERIOD_PRE)], na.rm = TRUE),
-      trend_TM = hamilton_trend(
-        TM, h = HAMILTON_H_FIXED, p = HAMILTON_LAGS
-      ),
-      trend_RR = hamilton_trend(
-        RR, h = HAMILTON_H_FIXED, p = HAMILTON_LAGS
-      )
-    ) %>%
-    ungroup()
-}
-
-# rmarkdown may knit from either the project root or this notebook's directory,
-# so data paths are resolved against both.
-data_root <- function() {
-  if (dir.exists("data")) "data" else file.path("..", "data")
-}
-
-data_file <- function(name) {
-  path <- file.path(data_root(), name)
-  if (!file.exists(path)) {
-    stop("Raw input not found: ", path)
-  }
-  path
-}
-
-# Derived panels are cached on disk so a session does not repeat the climate
-# download, the rolling moments, or the Excel read. Each cache carries a JSON
-# sidecar recording exactly the specification that produced it; when the current
-# settings no longer match the sidecar the panel is rebuilt and both are
-# rewritten. Deleting the cache directory is always safe.
-# The sidecar records the settings that produced a cache, but settings alone do
-# not pin the result: editing a builder while the constants stay put would
-# otherwise leave a stale panel in place. Including the builders' own source in
-# the specification makes any change to the derivation invalidate the cache.
-code_fingerprint <- function(...) {
-  vapply(
-    list(...),
-    function(f) paste(deparse(body(f)), collapse = "\n"),
-    character(1)
-  )
-}
-
-cached_panel <- function(tag, spec, build) {
-  cache_dir <- file.path(data_root(), "cache")
-  dir.create(cache_dir, showWarnings = FALSE, recursive = TRUE)
-  panel_path <- file.path(cache_dir, paste0(tag, ".parquet"))
-  spec_path <- file.path(cache_dir, paste0(tag, ".json"))
-  spec_json <- as.character(
-    jsonlite::toJSON(spec, auto_unbox = TRUE, digits = NA, null = "null")
-  )
-
-  if (file.exists(panel_path) && file.exists(spec_path)) {
-    stored <- paste(readLines(spec_path, warn = FALSE), collapse = "")
-    if (identical(stored, spec_json)) {
-      message("Reusing cached ", basename(panel_path))
-      return(tibble::as_tibble(arrow::read_parquet(panel_path)))
-    }
-    message("Specification changed, rebuilding ", basename(panel_path))
-  }
-
-  panel <- build()
-  arrow::write_parquet(panel, panel_path)
-  writeLines(spec_json, spec_path)
-  panel
-}
-
-# Economic panels are built from their raw sources here, so the notebook no
-# longer needs prepare_econ_data.R to have been run. Only the two sources this
-# notebook uses are covered.
-ECON_RAW_FILES <- c(
-  DOSE_V2_14 = "DOSE_V2.14.csv",
-  PWT110 = "pwt110.xlsx"
-)
-
-read_econ_source <- function(stored_source) {
-  raw_file <- data_file(ECON_RAW_FILES[[stored_source]])
-
-  if (identical(stored_source, "DOSE_V2_14")) {
-    utils::read.csv(raw_file) %>%
-      select(year, GID_0, GID_1, grp_pc_usd_2015, ag_grp_pc_usd_2015, pop) %>%
-      rename(grp_pc_usd = grp_pc_usd_2015) %>%
-      mutate(
-        share_ag_gdp = ag_grp_pc_usd_2015 / grp_pc_usd,
-        econ_source = "DOSE_V2_14",
-        gadm_level = "gadm1"
-      ) %>%
-      select(-ag_grp_pc_usd_2015) %>%
-      filter(!GID_1 %in% c(" ", ""))
-  } else {
-    # Penn World Table 11.0. `rgdpna` and `rnna` are the constant-national-prices
-    # pair, so real GDP and the capital stock are deflated the same way and their
-    # ratio is meaningful over time; the chained-PPP series are the ones for
-    # cross-country LEVEL comparisons, which is not what this panel is used for.
-    # Both are millions of 2021 US$ against millions of people, so the ratios are
-    # 2021 US$ per person -- a different base year from DOSE's 2015 US$, which is
-    # fine because the sources are only ever compared through growth rates.
-    readxl::read_excel(raw_file, sheet = "Data") %>%
-      mutate(across(c(rgdpna, rnna, pop, emp), as.numeric)) %>%
-      transmute(
-        year = as.integer(year),
-        GID_0 = as.character(countrycode),
-        GID_1 = as.character(countrycode),
-        grp_pc_usd = rgdpna / pop,      # Real GDP per capita, 2021 US$.
-        k_pc_usd = rnna / pop,          # Capital stock per capita, 2021 US$.
-        share_emp_pop = emp / pop,      # Persons engaged per head.
-        share_ag_gdp = NA_real_,
-        econ_source = "PWT110",
-        gadm_level = "gadm0"
-      )
-  }
-}
-
-# Growth rates are matched on calendar year, so a gap in a unit's series yields
-# NA rather than a growth rate silently spanning the gap. prepare_econ_data.R
-# used a positional lag here, which is the one substantive difference between
-# this builder and that script.
-build_econ_panel <- function(stored_source) {
-  read_econ_source(stored_source) %>%
-    filter(!is.na(grp_pc_usd), grp_pc_usd > 0) %>%
-    group_by(GID_1, gadm_level, econ_source) %>%
-    arrange(year, .by_group = TRUE) %>%
-    mutate(
-      lgrp_pc_usd = log(grp_pc_usd),
-      lag_lgrp_pc_usd = lag_by_year(lgrp_pc_usd, year),
-      dlgrp_pc_usd = lgrp_pc_usd - lag_lgrp_pc_usd,
-      dg = grp_pc_usd / lag_by_year(grp_pc_usd, year) - 1,
-      lag_share_ag_gdp = lag_by_year(share_ag_gdp, year)
-    ) %>%
-    mutate(lag_dlgrp_pc_usd = lag_by_year(dlgrp_pc_usd, year)) %>%
-    ungroup() %>%
-    mutate(GID_0 = dplyr::coalesce(GID_0, substr(GID_1, 1, 3)))
-}
-
-load_econ_panel <- function(stored_source) {
-  cached_panel(
-    paste0("econ_", tolower(stored_source)),
-    list(
-      econ_source = stored_source,
-      raw_file = unname(ECON_RAW_FILES[[stored_source]]),
-      code = code_fingerprint(read_econ_source, build_econ_panel)
-    ),
-    function() build_econ_panel(stored_source)
-  )
-}
-
-load_climate_panel <- function(geo_resolution) {
-  cached_panel(
-    paste0(
-      "climate_", geo_resolution, "_", CLIMATE_SOURCE_CODE, "_",
-      gsub("[^a-z0-9]+", "_", tolower(CLIMATE_WEIGHT))
-    ),
-    list(
-      geo_resolution = geo_resolution,
-      climate_source = CLIMATE_SOURCE,
-      weight = CLIMATE_WEIGHT,
-      weight_year = if (is.null(CLIMATE_WEIGHT_YEAR)) "none" else CLIMATE_WEIGHT_YEAR,
-      windows = CLIMATE_WINDOWS,
-      period_all = PERIOD_ALL,
-      period_pre = PERIOD_PRE,
-      hamilton_h = HAMILTON_H_FIXED,
-      hamilton_p = HAMILTON_LAGS,
-      code = code_fingerprint(
-        load_climate_series, add_rolling_moments, derive_climate_moments
-      )
-    ),
-    function() derive_climate_moments(load_climate_series(geo_resolution))
-  )
-}
-
-# Both halves of the panel are built from raw sources and cached, so a fresh
-# checkout needs no preprocessing script: the economic series come from the DOSE
-# csv or the PWT workbook, the climate series from the Weighted Climate Dataset.
-build_dat <- function(
-    econ_data = c("DOSE", "DOSE_V2_14", "PWT", "PWT110"),
-    climate_series = NULL
-) {
-  econ_data <- match.arg(econ_data)
-
-  # "DOSE" and "PWT" are version-agnostic aliases, so a version bump is a change
-  # to ECON_RAW_FILES and to the alias target rather than to every caller.
-  econ_source_aliases <- c(
-    PWT = "PWT110",
-    PWT110 = "PWT110",
-    DOSE = "DOSE_V2_14",
-    DOSE_V2_14 = "DOSE_V2_14"
-  )
-  gadm_level_by_source <- c(
-    PWT = "gadm0",
-    PWT110 = "gadm0",
-    DOSE = "gadm1",
-    DOSE_V2_14 = "gadm1"
-  )
-
-  stored_econ_source <- unname(econ_source_aliases[[econ_data]])
-  target_gadm_level <- unname(gadm_level_by_source[[econ_data]])
-
-  econ <- load_econ_panel(stored_econ_source) %>%
-    select(
-      year, GID_0, GID_1, grp_pc_usd, lgrp_pc_usd, dlgrp_pc_usd,
-      econ_source, gadm_level
-    ) %>%
-    distinct() %>%
-    filter(
-      gadm_level == target_gadm_level,
-      year >= ECON_YEAR_MIN,
-      !is.na(dlgrp_pc_usd)
-    )
-
-  if (!nrow(econ)) {
-    stop(
-      "No ", target_gadm_level, " economic observations found for econ_data = '",
-      econ_data, "' (stored source '", stored_econ_source, "')."
-    )
-  }
-
-  # `climate_series` lets a caller pass an already derived panel, which bypasses
-  # the cache entirely when experimenting with alternative moments.
-  climate <- climate_series
-  if (is.null(climate)) {
-    climate <- load_climate_panel(target_gadm_level)
-  }
-  climate <- climate %>% filter(gadm_level == target_gadm_level)
-
-  if (!nrow(climate)) {
-    stop(
-      "No ", target_gadm_level, " climate observations for econ_data = '",
-      econ_data, "'. Check CLIMATE_SOURCE and CLIMATE_WEIGHT."
-    )
-  }
-
-  # The moments are already computed over the full series, so trimming the
-  # history here only drops rows that carry no lag any model needs.
-  climate %>%
-    filter(year >= ECON_YEAR_MIN - CLIM_HISTORY_YEARS) %>%
-    left_join(
-      econ,
-      by = c("gadm_level", "GID_0", "GID_1", "year")
-    ) %>%
-    group_by(gadm_level, GID_1) %>%
-    filter(any(!is.na(dlgrp_pc_usd))) %>%
-    filter(year <= max(year[!is.na(dlgrp_pc_usd)])) %>%
-    mutate(
-      log_gdp_av = log(mean(grp_pc_usd, na.rm = TRUE)),
-      mean_TM_sample = mean(TM[!is.na(dlgrp_pc_usd)], na.rm = TRUE),
-      mean_RR_sample = mean(RR[!is.na(dlgrp_pc_usd)], na.rm = TRUE)
-    ) %>%
-    arrange(year, .by_group = TRUE) %>%
-    mutate(
-      mean_TM_lag_30 = lag_by_year(mean_TM_30, year),
-      mean_RR_lag_30 = lag_by_year(mean_RR_30, year),
-      mean_TM_lag_20 = lag_by_year(mean_TM_20, year),
-      mean_RR_lag_20 = lag_by_year(mean_RR_20, year),
-      mean_TM_lag_10 = lag_by_year(mean_TM_10, year),
-      mean_RR_lag_10 = lag_by_year(mean_RR_10, year),
-      mean_TM_lag_5 = lag_by_year(mean_TM_5, year),
-      mean_RR_lag_5 = lag_by_year(mean_RR_5, year),
-      sd_TM_lag_30 = lag_by_year(sd_TM_30, year),
-      sd_RR_lag_30 = lag_by_year(sd_RR_30, year),
-      sd_TM_lag_20 = lag_by_year(sd_TM_20, year),
-      sd_RR_lag_20 = lag_by_year(sd_RR_20, year),
-      sd_TM_lag_10 = lag_by_year(sd_TM_10, year),
-      sd_RR_lag_10 = lag_by_year(sd_RR_10, year),
-      sd_TM_lag_5 = lag_by_year(sd_TM_5, year),
-      sd_RR_lag_5 = lag_by_year(sd_RR_5, year),
-    ) %>%
-    ungroup() %>%
-  mutate(
-    # Center the cross-sectional adaptation covariates so that the main bin
-    # coefficients describe a region at the estimation-sample means.
-    log_gdp_av_c = log_gdp_av - mean(
-      log_gdp_av[!is.na(dlgrp_pc_usd)], na.rm = TRUE
-    ),
-    mean_TM_sample_c = mean_TM_sample - mean(
-      mean_TM_sample[!is.na(dlgrp_pc_usd)], na.rm = TRUE
-    ),
-    mean_RR_sample_c = mean_RR_sample - mean(
-      mean_RR_sample[!is.na(dlgrp_pc_usd)], na.rm = TRUE
-    ),
-    mean_TM = mean_TM_lag_30,
-    mean_RR = mean_RR_lag_30,
-    zTM = (TM - mean_TM_lag_30) / sd_TM_lag_30,
-    zRR = (RR - mean_RR_lag_30) / sd_RR_lag_30,
-    abs_zTM = abs(zTM),
-    abs_zRR = abs(zRR),
-    # Magnitudes of positive (+) and negative (-) standardized deviations.
-    abs_zTMp = pmax(zTM, 0),
-    abs_zTMm = pmax(-zTM, 0),
-    abs_zRRp = pmax(zRR, 0),
-    abs_zRRm = pmax(-zRR, 0),
-
-    TM_0_05 = pmin(abs_zTM, 0.5),
-    TM_05_15 = pmin(pmax(abs_zTM - 0.5, 0), 1.5),
-    TM_15_25 = pmin(pmax(abs_zTM - 1.5, 0), 2.5),
-    TM_25p = pmax(abs_zTM - 2.5, 0),
-
-    RR_0_05 = pmin(abs_zRR, 0.5),
-    RR_05_15 = pmin(pmax(abs_zRR - 0.5, 0), 1.5),
-    RR_15_25 = pmin(pmax(abs_zRR - 0.5, 0), 2.5),
-    RR_25p = pmax(abs_zRR - 2.5, 0),
-
-    TM_bin = cut(
-      abs_zTM,
-      breaks = c(0, 1, 2, Inf),
-      labels = c("0-1", "1-2", ">2"),
-      include.lowest = TRUE,
-      right = FALSE
-    ),
-    RR_bin = cut(
-      abs_zRR,
-      breaks = c(0, 1, 2, Inf),
-      labels = c("0-1", "1-2", ">2"),
-      include.lowest = TRUE,
-      right = FALSE
-    ),
-    TM_bin_fine = cut(
-      abs_zTM,
-      breaks = c(0, 0.5, 1, 1.5, 2, 2.5, Inf),
-      labels = c(
-        "0-.5", ".5-1", "1-1.5", "1.5-2",
-        "2-2.5", ">2.5"
-      ),
-      include.lowest = TRUE,
-      right = FALSE
-    ),
-    RR_bin_fine = cut(
-      abs_zRR,
-      breaks = c(0, 0.5, 1, 1.5, 2, 2.5, Inf),
-      labels = c(
-        "0-.5", ".5-1", "1-1.5", "1.5-2",
-        "2-2.5", ">2.5"
-      ),
-      include.lowest = TRUE,
-      right = FALSE
-    ),
-    TM_bin_level = cut(
-      TM,
-      breaks = c(-Inf, 0, 5, 10, 15, 20, 25, Inf),
-      labels = c(
-        "<0", "0-5", "5-10", "10-15", "15-20", "20-25", ">=25"
-      ),
-      right = FALSE
-    ),
-    RR_bin_level = cut(
-      RR,
-      breaks = c(-Inf, 0.5, 1, 1.5, 2, 2.5, Inf),
-      labels = c(
-        "<0.5", "0.5-1", "1-1.5", "1.5-2", "2-2.5", ">=2.5"
-      ),
-      right = FALSE
-    )
-  ) %>%
-  mutate(
-    TM_bin_signed = case_when(
-      zTM < -2.5 ~ -2.75,
-      zTM < -2.0 ~ -2.25,
-      zTM < -1.5 ~ -1.75,
-      zTM < -1.0 ~ -1.25,
-      zTM < -0.5 ~ -0.75,
-      zTM <  0.5 ~  0.00,
-      zTM <  1.0 ~  0.75,
-      zTM <  1.5 ~  1.25,
-      zTM <  2.0 ~  1.75,
-      zTM <  2.5 ~  2.25,
-      zTM >= 2.5 ~  2.75
-    ),
-    RR_bin_signed = case_when(
-      zRR < -2.5 ~ -2.75,
-      zRR < -2.0 ~ -2.25,
-      zRR < -1.5 ~ -1.75,
-      zRR < -1.0 ~ -1.25,
-      zRR < -0.5 ~ -0.75,
-      zRR <  0.5 ~  0.00,
-      zRR <  1.0 ~  0.75,
-      zRR <  1.5 ~  1.25,
-      zRR <  2.0 ~  1.75,
-      zRR <  2.5 ~  2.25,
-      zRR >= 2.5 ~  2.75
-    )
-  )
-}
-
-
-data <- build_dat(econ_data = params$econ_data)
-
-data_iso3 <- build_dat(econ_data = "PWT")
-
+data_iso3 <- build_dat(econ_data = "PWT", config = panel_cfg)
 ```
 
 ## Weather-response variables
@@ -776,7 +248,6 @@ etable(
   fitstat = ~n + r2 + wr2 + aic + bic
 )
 
-iplot(m_base)
 ```
 
 
@@ -800,7 +271,8 @@ How much memory is in the system?
 ```{r test lags}
 
 data <- data |> group_by(GID_1) |> 
-  mutate(dTM=TM-lag_by_year(TM,year),dRR=RR-lag_by_year(RR,year))
+  mutate(dTM=TM-lag_by_year(TM,year),dRR=RR-lag_by_year(RR,year)) |>
+  ungroup()
 
 model_lags <- paste(
 #  "l(TM,0:5) + l(TM,0:5):mean_TM_all",
@@ -817,133 +289,14 @@ etable(m_lags, fitstat = ~n + r2 + wr2)
 ```
 
 ```{r plot-distributed-lags, fig.width=10, fig.height=6}
-# Plot both each lag coefficient and the cumulative response through that lag.
-# The cumulative confidence intervals retain the cross-lag covariances from the
-# GID_1-clustered variance-covariance matrix used to estimate m_lags. Terms and
-# lag ranges are discovered from the fitted model, so this chunk does not need
-# to be updated when model_lags changes.
+# Each lag coefficient and the cumulative response through that lag; see
+# distributed_lag_effects() in functions/response_functions.R.
 lag_confidence_level <- 0.95
-lag_z_critical <- qnorm(1 - (1 - lag_confidence_level) / 2)
-
-lag_coefficients <- coef(m_lags)
-lag_vcov <- vcov(m_lags)
-lag_coefficient_names <- names(lag_coefficients)
-lag_coefficient_names_normalized <- gsub(
-  "[[:space:]]",
-  "",
-  lag_coefficient_names
+distributed_lag_data <- distributed_lag_effects(
+  m_lags,
+  conf_level = lag_confidence_level
 )
-
-lag_name_pattern <- "^l\\((.*),([0-9]+)\\)$"
-lagged_positions <- grep(
-  lag_name_pattern,
-  lag_coefficient_names_normalized
-)
-
-if (!length(lagged_positions)) {
-  stop("m_lags contains no coefficients named l(term, lag).")
-}
-
-lag_term_index <- tibble::tibble(
-  expression = sub(
-    lag_name_pattern,
-    "\\1",
-    lag_coefficient_names_normalized[lagged_positions]
-  ),
-  lag = as.integer(sub(
-    lag_name_pattern,
-    "\\2",
-    lag_coefficient_names_normalized[lagged_positions]
-  )),
-  term = lag_coefficient_names[lagged_positions]
-)
-
-distributed_lag_data <- purrr::map_dfr(
-  unique(lag_term_index$expression),
-  function(lag_expression) {
-    lag_terms <- lag_term_index %>%
-      filter(expression == lag_expression) %>%
-      arrange(lag)
-
-    # Also support specifications written as term + l(term, 1:k), where fixest
-    # prints the contemporaneous coefficient without the l(., 0) wrapper.
-    if (!0L %in% lag_terms$lag) {
-      lag_zero_position <- match(
-        lag_expression,
-        lag_coefficient_names_normalized
-      )
-      if (!is.na(lag_zero_position)) {
-        lag_terms <- bind_rows(
-          tibble::tibble(
-            expression = lag_expression,
-            lag = 0L,
-            term = lag_coefficient_names[lag_zero_position]
-          ),
-          lag_terms
-        ) %>%
-          arrange(lag)
-      }
-    }
-
-    if (anyDuplicated(lag_terms$lag)) {
-      stop("Duplicate coefficients found for ", lag_expression, ".")
-    }
-
-    purrr::map_dfr(lag_terms$lag, function(current_lag) {
-      current_term <- lag_terms$term[lag_terms$lag == current_lag]
-      cumulative_terms <- lag_terms$term[lag_terms$lag <= current_lag]
-
-      current_effect <- unname(lag_coefficients[current_term])
-      current_se <- sqrt(max(
-        as.numeric(lag_vcov[current_term, current_term]),
-        0
-      ))
-      cumulative_effect <- sum(lag_coefficients[cumulative_terms])
-      cumulative_se <- sqrt(max(
-        sum(lag_vcov[cumulative_terms, cumulative_terms, drop = FALSE]),
-        0
-      ))
-
-      tibble::tibble(
-        expression = lag_expression,
-        lag = current_lag,
-        horizon = c("Effect at lag", "Cumulative through lag"),
-        effect = c(current_effect, cumulative_effect),
-        standard_error = c(current_se, cumulative_se)
-      )
-    })
-  }
-) %>%
-  mutate(
-    expression = factor(
-      expression,
-      levels = unique(lag_term_index$expression)
-    ),
-    horizon = factor(
-      horizon,
-      levels = c("Effect at lag", "Cumulative through lag")
-    ),
-    lower = effect - lag_z_critical * standard_error,
-    upper = effect + lag_z_critical * standard_error
-  )
-
-ggplot(distributed_lag_data, aes(x = lag, y = effect)) +
-  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.4) +
-  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.18) +
-  geom_line(linewidth = 0.8) +
-  geom_point(size = 1.6) +
-  facet_grid(expression ~ horizon, scales = "free_y") +
-  scale_x_continuous(breaks = sort(unique(distributed_lag_data$lag))) +
-  labs(
-    x = "Lag (years)",
-    y = "Effect on log GDP per-capita growth",
-    title = "Distributed-lag coefficient paths",
-    caption = paste0(
-      "Ribbons = ", round(100 * lag_confidence_level),
-      "% clustered CI; cumulative intervals include cross-lag covariance"
-    )
-  ) +
-  theme_classic()
+plot_distributed_lags(distributed_lag_data, conf_level = lag_confidence_level)
 ```
 
 ```{r test windows}
@@ -1200,147 +553,6 @@ m_bins_level_signed_heterogeneous <- fit_climate_model(
   model_bins_level_signed_heterogeneous
 )
 
-make_carleton_scenarios <- function(
-    model_data,
-    climate_var,
-    climate_centered_var,
-    climate_group_labels
-) {
-  income_group_labels <- c("Low income", "Middle income", "High income")
-
-  model_data %>%
-    ungroup() %>%
-    filter(!is.na(dlgrp_pc_usd)) %>%
-    distinct(
-      GID_1,
-      log_gdp_av,
-      log_gdp_av_c,
-      .data[[climate_var]],
-      .data[[climate_centered_var]]
-    ) %>%
-    mutate(
-      income_group = factor(
-        income_group_labels[dplyr::ntile(log_gdp_av, 3L)],
-        levels = income_group_labels
-      ),
-      climate_group = factor(
-        climate_group_labels[dplyr::ntile(.data[[climate_var]], 3L)],
-        levels = climate_group_labels
-      )
-    ) %>%
-    group_by(income_group, climate_group) %>%
-    summarise(
-      income_value = mean(log_gdp_av_c),
-      climate_value = mean(.data[[climate_centered_var]]),
-      regions = n(),
-      .groups = "drop"
-    )
-}
-
-carleton_bin_response <- function(
-    fitted_model,
-    model_data,
-    bin_var,
-    reference_bin,
-    income_var,
-    climate_var,
-    scenarios
-) {
-  model_coef <- stats::coef(fitted_model)
-  model_vcov <- stats::vcov(fitted_model)
-  coefficient_names <- names(model_coef)
-  bin_levels <- levels(droplevels(model_data[[bin_var]]))
-
-  purrr::map_dfr(seq_len(nrow(scenarios)), function(scenario_id) {
-    scenario <- scenarios[scenario_id, ]
-
-    purrr::map_dfr(bin_levels, function(bin_level) {
-      if (identical(bin_level, reference_bin)) {
-        return(tibble::tibble(
-          bin = bin_level,
-          estimate = 0,
-          std_error = 0
-        ))
-      }
-
-      main_coefficient <- paste0(bin_var, "::", bin_level)
-      income_coefficient <- paste0(
-        main_coefficient, ":", income_var
-      )
-      climate_coefficient <- paste0(
-        main_coefficient, ":", climate_var
-      )
-      required_coefficients <- c(
-        main_coefficient,
-        income_coefficient,
-        climate_coefficient
-      )
-      missing_coefficients <- setdiff(
-        required_coefficients,
-        coefficient_names
-      )
-
-      if (length(missing_coefficients)) {
-        stop(
-          "Heterogeneous bin coefficients missing from the model: ",
-          paste(missing_coefficients, collapse = ", ")
-        )
-      }
-
-      contrast <- setNames(numeric(length(model_coef)), coefficient_names)
-      contrast[[main_coefficient]] <- 1
-      contrast[[income_coefficient]] <- scenario$income_value[[1]]
-      contrast[[climate_coefficient]] <- scenario$climate_value[[1]]
-
-      estimate <- sum(contrast * model_coef)
-      variance <- drop(t(contrast) %*% model_vcov %*% contrast)
-
-      tibble::tibble(
-        bin = bin_level,
-        estimate = estimate,
-        std_error = sqrt(max(variance, 0))
-      )
-    }) %>%
-      mutate(
-        income_group = scenario$income_group[[1]],
-        climate_group = scenario$climate_group[[1]],
-        regions = scenario$regions[[1]]
-      )
-  }) %>%
-    mutate(
-      bin = factor(bin, levels = bin_levels),
-      conf_low = estimate - stats::qnorm(0.975) * std_error,
-      conf_high = estimate + stats::qnorm(0.975) * std_error
-    )
-}
-
-plot_carleton_response <- function(plot_data, title, x_label) {
-  ggplot(plot_data, aes(x = bin, y = estimate, group = 1)) +
-    geom_hline(yintercept = 0, color = "grey55", linewidth = 0.4) +
-    geom_line(linewidth = 0.55, color = "#0072B2") +
-    geom_errorbar(
-      aes(ymin = conf_low, ymax = conf_high),
-      width = 0.18,
-      linewidth = 0.45,
-      color = "#0072B2"
-    ) +
-    geom_point(size = 1.8, color = "#0072B2") +
-    facet_grid(income_group ~ climate_group) +
-    labs(
-      title = title,
-      subtitle = paste(
-        "Columns: long-run climate tercile; rows: sample-average income tercile"
-      ),
-      x = x_label,
-      y = "Estimated effect relative to reference bin"
-    ) +
-    theme_classic() +
-    theme(
-      axis.text.x = element_text(angle = 45, hjust = 1),
-      strip.background = element_rect(fill = "grey92", color = "grey70")
-    )
-}
-
 temperature_scenarios <- make_carleton_scenarios(
   data,
   climate_var = "mean_TM_sample",
@@ -1455,6 +667,13 @@ m_signed_tlo <- fixest::feols(
   vcov = ~GID_1
 )
 
+m_signed_thi <- fixest::feols(
+  f_bins_signed,
+  data = data_signed_groups %>% filter(mean_temperature_group == "Hot"),
+  panel.id = pan_id,
+  vcov = ~GID_1
+)
+
 
 f_bins_signed_int <- make_formula(paste(
     base_climate,
@@ -1549,109 +768,25 @@ etable(
   fitstat = ~n + r2 + wr2
 )
 
-extract_mean_temperature_bins <- function(model) {
-  if (!inherits(model, "fixest")) {
-    stop("model must be a fixest object.")
-  }
-
-  bin_var <- "TM_bin_signed"
-  group_var <- "mean_temperature_group"
-  interaction_marker <- paste0(":", group_var, "::")
-  model_coef <- coef(model)
-  coef_names <- names(model_coef)
-  selected <- startsWith(coef_names, paste0(bin_var, "::")) &
-    grepl(interaction_marker, coef_names, fixed = TRUE)
-
-  if (!any(selected)) {
-    stop("No temperature-bin by mean-temperature-group coefficients found.")
-  }
-
-  coef_names <- coef_names[selected]
-  coefficient_tail <- substring(coef_names, nchar(bin_var) + 3L)
-  model_ci <- confint(model)
-
-  estimates <- data.frame(
-    estimate = unname(model_coef[coef_names]),
-    ci_low = model_ci[coef_names, 1],
-    ci_high = model_ci[coef_names, 2],
-    bin_label = sub(
-      paste0(interaction_marker, ".*$"),
-      "",
-      coefficient_tail
-    ),
-    temperature_group = sub(
-      paste0("^.*", interaction_marker),
-      "",
-      coefficient_tail
-    )
-  )
-
-  reference <- data.frame(
-    estimate = 0,
-    ci_low = 0,
-    ci_high = 0,
-    bin_label = "0",
-    temperature_group = levels(data_signed_groups$mean_temperature_group)
-  )
-
-  bind_rows(estimates, reference)
-}
-
-mean_temperature_bin_data <- extract_mean_temperature_bins(
-  m_signed_t_common_base
-)
-bin_numeric <- suppressWarnings(
-  as.numeric(mean_temperature_bin_data$bin_label)
-)
-
-if (anyNA(bin_numeric)) {
-  stop("Signed temperature-bin coefficient labels must be numeric.")
-}
-
-mean_temperature_bin_data <- mean_temperature_bin_data %>%
+mean_temperature_bin_data <- interacted_bin_coefs(
+  m_signed_t_common_base,
+  bin_var = "TM_bin_signed",
+  group_var = "mean_temperature_group",
+  group_levels = levels(data_signed_groups$mean_temperature_group)
+) %>%
   mutate(
-    bin_label = factor(
-      as.character(bin_numeric),
-      levels = as.character(sort(unique(bin_numeric)))
-    ),
-    temperature_group = factor(
-      temperature_group,
-      levels = c("Cold", "Hot")
-    )
+    bin_label = numeric_bin_factor(bin_label),
+    group = factor(group, levels = c("Cold", "Hot"))
   )
 
-temperature_group_colors <- c(Cold = "#0072B2", Hot = "#D55E00")
-temperature_group_shapes <- c(Cold = 16, Hot = 17)
-temperature_group_dodge <- position_dodge(width = 0.65)
-
-signed_temperature_bins_by_mean_temperature <- ggplot(
+signed_temperature_bins_by_mean_temperature <- plot_group_bins(
   mean_temperature_bin_data,
-  aes(
-    x = bin_label,
-    y = estimate,
-    color = temperature_group,
-    shape = temperature_group
-  )
-) +
-  geom_hline(yintercept = 0, color = "black", linewidth = 0.4) +
-  geom_errorbar(
-    aes(ymin = ci_low, ymax = ci_high),
-    width = 0.06,
-    linewidth = 0.5,
-    position = temperature_group_dodge
-  ) +
-  geom_point(size = 2, position = temperature_group_dodge) +
-  scale_color_manual(values = temperature_group_colors, drop = FALSE) +
-  scale_shape_manual(values = temperature_group_shapes, drop = FALSE) +
-  labs(
-    title = "Signed temperature-bin coefficients by mean temperature",
-    x = "Signed temperature anomaly bin (standard deviations)",
-    y = "Coefficient estimate",
-    color = "Country group",
-    shape = "Country group"
-  ) +
-  theme_classic() +
-  theme(legend.position = "right")
+  colors = c(Cold = "#0072B2", Hot = "#D55E00"),
+  shapes = c(Cold = 16, Hot = 17),
+  title = "Signed temperature-bin coefficients by mean temperature",
+  group_label = "Country group",
+  x_label = "Signed temperature anomaly bin (standard deviations)"
+)
 
 signed_temperature_bins_by_mean_temperature
 
@@ -1825,132 +960,23 @@ climate_zone_legend <- sub(
 names(climate_zone_colors) <- climate_zone_legend
 names(climate_zone_pch) <- climate_zone_legend
 
-extract_climate_zone_bins <- function(models, i_select) {
-  if (!i_select %in% 1:2) {
-    stop("i_select must be 1 (temperature) or 2 (precipitation).")
-  }
-
-  if (inherits(models, "fixest_multi")) {
-    plot_parameters <- fixest::iplot(
-      models,
-      i.select = i_select,
-      only.params = TRUE
-    )
-    model_tree <- attr(models, "tree")
-    model_labels <- sub("^[0-9]+ ", "", model_tree$sample)
-
-    return(
-      plot_parameters$prms %>%
-        transmute(
-          estimate,
-          ci_low,
-          ci_high,
-          bin_label = as.character(estimate_names),
-          climate_zone = model_labels[match(id, model_tree$id)]
-        )
-    )
-  }
-
-  if (!inherits(models, "fixest")) {
-    stop("models must be a fixest or fixest_multi object.")
-  }
-
-  bin_var <- c("TM_bin_signed", "RR_bin_signed")[[i_select]]
-  model_coef <- coef(models)
-  coef_names <- names(model_coef)
-  selected <- startsWith(coef_names, paste0(bin_var, "::")) &
-    grepl(":climate_zone::", coef_names, fixed = TRUE)
-
-  if (!any(selected)) {
-    stop(
-      "No ", bin_var,
-      " by climate_zone coefficients were found in the model."
-    )
-  }
-
-  coef_names <- coef_names[selected]
-  coefficient_tail <- substring(
-    coef_names,
-    nchar(bin_var) + 3L
-  )
-  model_ci <- confint(models)
-
-  estimates <- data.frame(
-    estimate = unname(model_coef[coef_names]),
-    ci_low = model_ci[coef_names, 1],
-    ci_high = model_ci[coef_names, 2],
-    bin_label = sub(":climate_zone::.*$", "", coefficient_tail),
-    climate_zone = sub(
-      "^.*:climate_zone::",
-      "",
-      coefficient_tail
-    )
-  )
-
-  reference <- data.frame(
-    estimate = 0,
-    ci_low = 0,
-    ci_high = 0,
-    bin_label = "0",
-    climate_zone = climate_zone_legend
-  )
-
-  bind_rows(estimates, reference)
-}
-
+# Split-sample bins, labelled by climate zone without the numeric code prefix.
 plot_climate_zone_bins <- function(models, i_select, title) {
-  plot_data <- extract_climate_zone_bins(models, i_select)
-  bin_numeric <- suppressWarnings(as.numeric(plot_data$bin_label))
-
-  if (anyNA(bin_numeric)) {
-    stop("Signed-bin coefficient labels must be numeric.")
-  }
-
-  bin_levels <- as.character(sort(unique(bin_numeric)))
-  plot_data <- plot_data %>%
+  plot_data <- split_bin_coefs(models, i_select) %>%
     mutate(
-      bin_label = factor(
-        as.character(bin_numeric),
-        levels = bin_levels
-      ),
-      climate_zone = factor(
-        sub("^[0-9]+ ", "", climate_zone),
-        levels = climate_zone_legend
-      )
+      bin_label = numeric_bin_factor(bin_label),
+      group = factor(sub("^[0-9]+ ", "", group), levels = climate_zone_legend)
     )
 
-  bin_dodge <- position_dodge(width = 0.65)
-
-  ggplot(
+  plot_group_bins(
     plot_data,
-    aes(
-      x = bin_label,
-      y = estimate,
-      color = climate_zone,
-      shape = climate_zone
-    )
-  ) +
-    geom_hline(yintercept = 0, color = "black", linewidth = 0.4) +
-    geom_errorbar(
-      aes(ymin = ci_low, ymax = ci_high),
-      width = 0.06,
-      linewidth = 0.5,
-      position = bin_dodge
-    ) +
-    geom_point(size = 2, position = bin_dodge) +
-    scale_color_manual(values = climate_zone_colors, drop = FALSE) +
-    scale_shape_manual(values = climate_zone_pch, drop = FALSE) +
-    labs(
-      title = title,
-      x = "Signed anomaly bin (standard deviations)",
-      y = "Coefficient estimate",
-      color = "Climate zone",
-      shape = "Climate zone"
-    ) +
-    facet_wrap(climate_zone~.,) +
-    theme_classic() +
-    theme(legend.position = "right") +
-    coord_cartesian(ylim = c(-0.1, 0.05))
+    colors = climate_zone_colors,
+    shapes = climate_zone_pch,
+    title = title,
+    group_label = "Climate zone",
+    facet = TRUE,
+    ylim = c(-0.1, 0.05)
+  )
 }
 
 plot_climate_zone_bins(
@@ -2109,245 +1135,18 @@ Their one-sided magnitudes are `zTMp_f` and `zTMm_f`. Outside the corresponding
 run, and at position 1, these equal the original moving-baseline deviations.
 
 ```{r construct-climate-velocity}
-fit_warming_run_rate <- function(year, temperature) {
-  stopifnot(
-    length(year) == length(temperature),
-    length(year) >= 2L,
-    all(is.finite(year)),
-    all(is.finite(temperature)),
-    all(diff(year) == 1L),
-    all(diff(temperature) > 0)
-  )
-
-  # The fitted annual slope is multiplied by 10 to obtain degrees per decade.
-  unname(stats::lm.fit(
-    x = cbind(1, year),
-    y = temperature
-  )$coefficients[[2]]) * 10
-}
-
-fit_cooling_run_rate <- function(year, temperature) {
-  stopifnot(
-    length(year) == length(temperature),
-    length(year) >= 2L,
-    all(is.finite(year)),
-    all(is.finite(temperature)),
-    all(diff(year) == 1L),
-    all(diff(temperature) < 0)
-  )
-
-  # Cooling slopes remain negative and are expressed in degrees per decade.
-  unname(stats::lm.fit(
-    x = cbind(1, year),
-    y = temperature
-  )$coefficients[[2]]) * 10
-}
-
-fit_trailing_climate_velocity <- function(year, temperature, window_years) {
-  stopifnot(
-    length(year) == length(temperature),
-    length(window_years) == 1L,
-    window_years >= 3L
-  )
-
-  vapply(seq_along(year), function(i) {
-    first <- i - window_years + 1L
-
-    if (first < 1L) {
-      return(NA_real_)
-    }
-
-    idx <- seq.int(first, i)
-    year_window <- year[idx]
-    temperature_window <- temperature[idx]
-
-    if (any(!is.finite(year_window)) ||
-        any(!is.finite(temperature_window)) ||
-        !all(diff(year_window) == 1L)) {
-      return(NA_real_)
-    }
-
-    # A trailing annual slope, converted from degrees/year to degrees/decade.
-    unname(stats::lm.fit(
-      x = cbind(1, year_window),
-      y = temperature_window
-    )$coefficients[[2]]) * 10
-  }, numeric(1))
-}
-
-climate_velocity_hist <- data %>%
-  group_by(GID_1) %>%
-  arrange(year, .by_group = TRUE) %>%
-  mutate(
-    consecutive_year = year == dplyr::lag(year) + 1L,
-    dTM_run = if_else(consecutive_year, TM - dplyr::lag(TM), NA_real_),
-    warming_change = !is.na(dTM_run) & dTM_run > 0,
-    warming_run_start = warming_change &
-      !dplyr::lag(warming_change, default = FALSE),
-    warming_change_run_id = if_else(
-      warming_change,
-      cumsum(warming_run_start),
-      NA_integer_
-    ),
-    # Attach the year preceding the first increase to the same run.
-    warming_run_id = coalesce(
-      warming_change_run_id,
-      if_else(
-        dplyr::lead(warming_change, default = FALSE),
-        dplyr::lead(warming_change_run_id),
-        NA_integer_
-      )
-    ),
-    cooling_change = !is.na(dTM_run) & dTM_run < 0,
-    cooling_run_start = cooling_change &
-      !dplyr::lag(cooling_change, default = FALSE),
-    cooling_change_run_id = if_else(
-      cooling_change,
-      cumsum(cooling_run_start),
-      NA_integer_
-    ),
-    # Attach the year preceding the first decrease to the same run.
-    cooling_run_id = coalesce(
-      cooling_change_run_id,
-      if_else(
-        dplyr::lead(cooling_change, default = FALSE),
-        dplyr::lead(cooling_change_run_id),
-        NA_integer_
-      )
-    ),
-    climate_velocity = fit_trailing_climate_velocity(
-      year,
-      TM,
-      window_years = CLIMATE_VELOCITY_YEARS
-    )
-  ) %>%
-  group_by(GID_1, warming_run_id) %>%
-  mutate(
-    warming_run = !is.na(warming_run_id) & n() >= 2L,
-    warming_run_length = if_else(warming_run, row_number(), 1L),
-    warming_run_total_length = if_else(warming_run, n(), 1L),
-    # Sum within-run dTM through this year; position 1 has no within-run change.
-    cumulative_warming = if_else(warming_run, TM - first(TM), 0),
-    mean_TM_warming_f = if_else(
-      warming_run,
-      first(mean_TM_lag_30),
-      mean_TM_lag_30
-    ),
-    sd_TM_warming_f = if_else(
-      warming_run,
-      first(sd_TM_lag_30),
-      sd_TM_lag_30
-    ),
-    zTM_warming_f = (TM - mean_TM_warming_f) / sd_TM_warming_f,
-    warming_run_rate = if (!first(warming_run)) {
-      NA_real_
-    } else {
-      fit_warming_run_rate(year, TM)
-    },
-    warming_run_id = if_else(warming_run, warming_run_id, NA_integer_)
-  ) %>%
-  ungroup() %>%
-  group_by(GID_1, cooling_run_id) %>%
-  mutate(
-    cooling_run = !is.na(cooling_run_id) & n() >= 2L,
-    cooling_run_length = if_else(cooling_run, row_number(), 1L),
-    cooling_run_total_length = if_else(cooling_run, n(), 1L),
-    # Cooling dTM values retain their negative sign.
-    cumulative_cooling = if_else(cooling_run, TM - first(TM), 0),
-    mean_TM_cooling_f = if_else(
-      cooling_run,
-      first(mean_TM_lag_30),
-      mean_TM_lag_30
-    ),
-    sd_TM_cooling_f = if_else(
-      cooling_run,
-      first(sd_TM_lag_30),
-      sd_TM_lag_30
-    ),
-    zTM_cooling_f = (TM - mean_TM_cooling_f) / sd_TM_cooling_f,
-    cooling_run_rate = if (!first(cooling_run)) {
-      NA_real_
-    } else {
-      fit_cooling_run_rate(year, TM)
-    },
-    cooling_run_id = if_else(cooling_run, cooling_run_id, NA_integer_)
-  ) %>%
-  ungroup() %>%
-  mutate(
-    # Activate velocity only during the corresponding runs without discarding
-    # observations outside those runs.
-    climate_velocity_warming = if_else(
-      warming_run & climate_velocity>0,
-      climate_velocity,
-      0
-    ),
-    climate_velocity_cooling = if_else(
-      cooling_run & climate_velocity<0,
-      climate_velocity,
-      0
-    ),
-    zTMp_f = pmax(zTM_warming_f, 0),
-    zTMm_f = pmax(-zTM_cooling_f, 0),
-    # Elapsed run position, with the fifth and later years grouped as 5+.
-    warming_run_length_capped = pmin(warming_run_length, 5L),
-    cooling_run_length_capped = pmin(cooling_run_length, 5L)
-  )
-
-# Every run includes its first year and contains at least two observations.
-stopifnot(all(climate_velocity_hist$warming_run_length >= 1L))
-stopifnot(all(climate_velocity_hist$cooling_run_length >= 1L))
-stopifnot(all(climate_velocity_hist$cumulative_warming >= 0))
-stopifnot(all(climate_velocity_hist$cumulative_cooling <= 0))
-stopifnot(isTRUE(all.equal(
-  climate_velocity_hist$zTMp_f[
-    climate_velocity_hist$warming_run_length == 1L
-  ],
-  climate_velocity_hist$abs_zTMp[
-    climate_velocity_hist$warming_run_length == 1L
-  ],
-  check.attributes = FALSE
-)))
-stopifnot(isTRUE(all.equal(
-  climate_velocity_hist$zTMm_f[
-    climate_velocity_hist$cooling_run_length == 1L
-  ],
-  climate_velocity_hist$abs_zTMm[
-    climate_velocity_hist$cooling_run_length == 1L
-  ],
-  check.attributes = FALSE
-)))
-stopifnot(all(
-  climate_velocity_hist$cumulative_warming[
-    climate_velocity_hist$warming_run_length == 1L
-  ] == 0
-))
-stopifnot(all(
-  climate_velocity_hist$cumulative_cooling[
-    climate_velocity_hist$cooling_run_length == 1L
-  ] == 0
-))
-stopifnot(all(
-  climate_velocity_hist$warming_run |
-    climate_velocity_hist$cooling_run
-))
-stopifnot(all(
-  !climate_velocity_hist$warming_run |
-    climate_velocity_hist$warming_run_total_length >= 2L
-))
-stopifnot(all(
-  !climate_velocity_hist$warming_run |
-    climate_velocity_hist$warming_run_length <=
-      climate_velocity_hist$warming_run_total_length
-))
-stopifnot(all(
-  !climate_velocity_hist$cooling_run |
-    climate_velocity_hist$cooling_run_total_length >= 2L
-))
-stopifnot(all(
-  !climate_velocity_hist$cooling_run |
-    climate_velocity_hist$cooling_run_length <=
-      climate_velocity_hist$cooling_run_total_length
-))
+# Run descriptors and trailing climate velocity; see add_climate_runs() in
+# functions/climate_runs.R. check_climate_runs() asserts that every run includes
+# its first year and at least two observations, and that the fixed-baseline
+# deviations and cumulative changes are as defined above at position 1. It
+# warns about flat-temperature years that belong to neither run.
+climate_velocity_hist <- add_climate_runs(
+  data,
+  velocity_years = CLIMATE_VELOCITY_YEARS,
+  baseline_mean = "mean_TM_lag_30",
+  baseline_sd = "sd_TM_lag_30"
+)
+check_climate_runs(climate_velocity_hist)
 
 warming_run_summary <- climate_velocity_hist %>%
   filter(warming_run) %>%
@@ -2432,28 +1231,6 @@ m_cumulative_change <- fit_climate_model(
   model_cumulative_change,
   model_data = climate_velocity_hist
 )
-
-bin_nonzero_magnitude <- function(x, n_bins = 5L) {
-  if (any(x < 0, na.rm = TRUE)) {
-    stop("Binned magnitudes must be non-negative.")
-  }
-
-  positive <- !is.na(x) & x > 0
-  result <- rep(NA_character_, length(x))
-  result[!is.na(x) & x == 0] <- "0"
-
-  if (!any(positive)) {
-    return(factor(result, levels = "0"))
-  }
-
-  positive_bins <- fixest::bin(
-    x[positive],
-    paste0("cut::", n_bins)
-  )
-  result[positive] <- as.character(positive_bins)
-
-  factor(result, levels = c("0", levels(positive_bins)))
-}
 
 climate_velocity_hist <- climate_velocity_hist %>%
   mutate(
@@ -2544,67 +1321,6 @@ The jointly non-zero results isolate active cumulative change and climate
 velocity from their shared zero reference category.
 
 ```{r cumulative-velocity-bin-association, fig.width=10, fig.height=5}
-summarise_bin_association <- function(
-    data,
-    cumulative_bin,
-    velocity_bin,
-    direction,
-    scope = c("All complete", "Both non-zero")) {
-  scope <- match.arg(scope)
-
-  pairs <- data %>%
-    transmute(
-      cumulative = .data[[cumulative_bin]],
-      velocity = .data[[velocity_bin]]
-    ) %>%
-    filter(!is.na(cumulative), !is.na(velocity))
-
-  if (scope == "Both non-zero") {
-    pairs <- pairs %>%
-      filter(as.character(cumulative) != "0", as.character(velocity) != "0")
-  }
-
-  contingency <- table(
-    droplevels(pairs$cumulative),
-    droplevels(pairs$velocity)
-  )
-  enough_bins <- nrow(contingency) >= 2L && ncol(contingency) >= 2L
-
-  spearman_rho <- if (enough_bins) {
-    stats::cor(
-      as.integer(pairs$cumulative),
-      as.integer(pairs$velocity),
-      method = "spearman"
-    )
-  } else {
-    NA_real_
-  }
-
-  cramers_v <- if (enough_bins) {
-    chi_squared <- suppressWarnings(stats::chisq.test(
-      contingency,
-      correct = FALSE
-    ))$statistic
-    sqrt(
-      unname(chi_squared) /
-        (sum(contingency) * min(
-          nrow(contingency) - 1L,
-          ncol(contingency) - 1L
-        ))
-    )
-  } else {
-    NA_real_
-  }
-
-  tibble::tibble(
-    direction = direction,
-    scope = scope,
-    observations = nrow(pairs),
-    spearman_rho = spearman_rho,
-    cramers_v = cramers_v
-  )
-}
-
 bin_association_summary <- dplyr::bind_rows(
   summarise_bin_association(
     climate_velocity_hist,
@@ -2683,31 +1399,6 @@ ggplot(
 
 ```{r}
 
-
-add_same_run_lags <- function(
-    data,
-    value_column,
-    run_length_column,
-    prefix,
-    max_lag) {
-  data <- data %>%
-    arrange(GID_1, year) %>%
-    group_by(GID_1)
-
-  for (lag_number in seq_len(max_lag)) {
-    lag_column <- paste0(prefix, lag_number, "_same")
-    data <- data %>%
-      mutate(
-        !!lag_column := if_else(
-          .data[[run_length_column]] > lag_number,
-          dplyr::lag(.data[[value_column]], n = lag_number),
-          0
-        )
-      )
-  }
-
-  ungroup(data)
-}
 
 climate_velocity_hist <- climate_velocity_hist %>%
   arrange(GID_1, year) %>%
@@ -2793,8 +1484,17 @@ model_velocity_bool <- paste(
 
 ```{r test SD vs no SD}
 
-data_nosd <- data |> mutate(TM_bin_signed=TM_bin_signed*sd_TM_lag_20,
-                           TM_bin_signed=TM_bin_signed*sd_TM_lag_20)
+# Without region-specific scaling: raw deviations from the same lagged 30-year
+# mean, divided by one common SD (the estimation-sample average) so every region
+# gets bins of the same physical width. Bin codes stay in "average SD" units,
+# which keeps the two models' bins directly comparable.
+sd_TM_common <- mean(data$sd_TM_lag_30[est_row(data)], na.rm = TRUE)
+sd_RR_common <- mean(data$sd_RR_lag_30[est_row(data)], na.rm = TRUE)
+data_nosd <- data |>
+  mutate(
+    TM_bin_signed = signed_anomaly_bin((TM - mean_TM_lag_30) / sd_TM_common),
+    RR_bin_signed = signed_anomaly_bin((RR - mean_RR_lag_30) / sd_RR_common)
+  )
 model_nosd <- paste(
   base_climate,
   paste0(
@@ -2832,27 +1532,18 @@ data_adaptation <- data %>%
   ) %>%
   ungroup()
 
-# `ns()` returns a matrix, which cannot be multiplied directly by the matrix
-# created by `i()`. Store each spline basis as a scalar column so fixest can
-# construct the bin-by-basis interactions separately.
-valid_income_lag <- is.finite(data_adaptation$lag_lgrp_pc_usd_1)
-income_spline <- matrix(
-  NA_real_,
-  nrow = nrow(data_adaptation),
-  ncol = ADAPTATION_SPLINE_DF
-)
-income_spline_fit <- splines::ns(
-  data_adaptation$lag_lgrp_pc_usd_1[valid_income_lag],
-  df = ADAPTATION_SPLINE_DF
-)
-income_spline[valid_income_lag, ] <- income_spline_fit
-spline_columns <- paste0("lag_lgrp_spline_", seq_len(ADAPTATION_SPLINE_DF))
-colnames(income_spline) <- spline_columns
-
-data_adaptation <- bind_cols(
+# Natural-spline basis of lagged income, stored as scalar columns so fixest can
+# interact each one with the i() bins; see add_spline_basis().
+income_spline <- add_spline_basis(
   data_adaptation,
-  tibble::as_tibble(income_spline)
+  "lag_lgrp_pc_usd_1",
+  df = ADAPTATION_SPLINE_DF,
+  prefix = "lag_lgrp_spline_"
 )
+data_adaptation <- income_spline$data
+income_spline_fit <- income_spline$basis
+spline_columns <- income_spline$columns
+valid_income_lag <- is.finite(data_adaptation$lag_lgrp_pc_usd_1)
 
 temperature_adaptation_terms <- paste0(
   "i(TM_bin_signed, ", spline_columns, ", ref = 0)"
@@ -2915,110 +1606,6 @@ income_scenarios$income_label <- factor(
   income_scenarios$income_label,
   levels = income_scenarios$income_label
 )
-
-adaptation_response_data <- function(
-    fitted_model,
-    bin_var,
-    model_data,
-    spline_values,
-    scenarios
-) {
-  model_coef <- stats::coef(fitted_model)
-  model_vcov <- stats::vcov(fitted_model)
-  coefficient_names <- names(model_coef)
-  bin_values <- sort(unique(model_data[[bin_var]][
-    !is.na(model_data[[bin_var]])
-  ]))
-
-  purrr::map_dfr(seq_len(nrow(scenarios)), function(income_id) {
-    purrr::map_dfr(bin_values, function(bin_value) {
-      if (bin_value == 0) {
-        return(tibble::tibble(
-          bin = bin_value,
-          estimate = 0,
-          std_error = 0
-        ))
-      }
-
-      main_coefficient <- paste0(bin_var, "::", bin_value)
-      interaction_coefficients <- paste0(
-        main_coefficient,
-        ":",
-        spline_columns
-      )
-      required_coefficients <- c(
-        main_coefficient,
-        interaction_coefficients
-      )
-      missing_coefficients <- setdiff(
-        required_coefficients,
-        coefficient_names
-      )
-      if (length(missing_coefficients)) {
-        stop(
-          "Adaptation coefficients missing from the model: ",
-          paste(missing_coefficients, collapse = ", ")
-        )
-      }
-
-      contrast <- setNames(
-        numeric(length(model_coef)),
-        coefficient_names
-      )
-      contrast[[main_coefficient]] <- 1
-      contrast[interaction_coefficients] <- spline_values[income_id, ]
-
-      estimate <- sum(contrast * model_coef)
-      variance <- drop(t(contrast) %*% model_vcov %*% contrast)
-
-      tibble::tibble(
-        bin = bin_value,
-        estimate = estimate,
-        std_error = sqrt(max(variance, 0))
-      )
-    }) %>%
-      mutate(
-        income_label = scenarios$income_label[[income_id]],
-        income = scenarios$income[[income_id]]
-      )
-  }) %>%
-    mutate(
-      conf_low = estimate - stats::qnorm(0.975) * std_error,
-      conf_high = estimate + stats::qnorm(0.975) * std_error
-    )
-}
-
-plot_adaptation_response <- function(plot_data, climate_variable) {
-  response_dodge <- position_dodge(width = 0.12)
-
-  ggplot(
-    plot_data,
-    aes(
-      x = bin,
-      y = estimate,
-      color = income_label,
-      group = income_label
-    )
-  ) +
-    geom_hline(yintercept = 0, color = "black", linewidth = 0.4) +
-    geom_line(linewidth = 0.6) +
-    geom_errorbar(
-      aes(ymin = conf_low, ymax = conf_high),
-      width = 0.06,
-      linewidth = 0.5,
-      position = response_dodge
-    ) +
-    geom_point(size = 2, position = response_dodge) +
-    scale_x_continuous(breaks = sort(unique(plot_data$bin))) +
-    labs(
-      title = paste(climate_variable, "response by lagged income"),
-      x = "Signed anomaly bin (standard deviations)",
-      y = "Estimated response",
-      color = "Lagged GDP per capita"
-    ) +
-    theme_classic() +
-    theme(legend.position = "right")
-}
 
 temperature_response_by_income <- adaptation_response_data(
   m_ada,

@@ -1,5 +1,5 @@
 # =============================================================================
-# download_weighted_climate_data.R
+# climate_download.R
 #
 # Programmatic (R) access to the Weighted Climate Dataset (WCD) served by
 #   https://weightedclimatedata.streamlit.app/Download_Data
@@ -27,7 +27,7 @@
 #
 # QUICK START
 # -----------
-#   source("econometrics/download_weighted_climate_data.R")
+#   source("functions/climate_download.R")
 #
 #   # population-weighted CRU mean temperature, countries, yearly, 1960-2019
 #   tmp <- wcd_get(variable = "avg. temperature", source = "CRU TS",
