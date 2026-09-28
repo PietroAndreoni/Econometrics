@@ -118,6 +118,19 @@ build_dat <- function(
   }
   climate <- climate %>% filter(gadm_level == target_gadm_level)
 
+  # SD of the Hamilton cycle (TM - trend_TM, RR - trend_RR) over each unit's
+  # entire climate series, before the panel is trimmed to the estimation
+  # window: the scale of the baseline = "trend" anomaly.
+  if (all(c("trend_TM", "trend_RR") %in% names(climate))) {
+    climate <- climate %>%
+      group_by(gadm_level, GID_1) %>%
+      mutate(
+        sd_TM_trend = stats::sd(TM - trend_TM, na.rm = TRUE),
+        sd_RR_trend = stats::sd(RR - trend_RR, na.rm = TRUE)
+      ) %>%
+      ungroup()
+  }
+
   if (!nrow(climate)) {
     stop(
       "No ", target_gadm_level, " climate observations for econ_data = '",
@@ -229,6 +242,12 @@ build_dat <- function(
 #                                          before (mean_TM_lag_30, ...)
 #   "all"                                  fixed period_all (mean_TM_all)
 #   "pre"                                  fixed period_pre (mean_TM_pre)
+#   "trend"                                Hamilton-filter trend (trend_TM,
+#                                          panel_config() hamilton_h and
+#                                          hamilton_lags); standardized by
+#                                          the SD of TM - trend_TM over the
+#                                          unit's entire climate series
+#                                          (sd_TM_trend)
 # `deviation`:
 #   "standardized"  zTM = (TM - mean) / sd, in standard deviations of the
 #                   baseline (the default and previous behaviour);
@@ -264,8 +283,9 @@ add_weather_variables <- function(panel, baseline = "lag_30",
                                   outcome = "dlgrp_pc_usd") {
   deviation <- match.arg(deviation)
   signed_quantile <- match.arg(signed_quantile)
-  if (length(baseline) != 1L || !grepl("^(lag_[0-9]+|all|pre)$", baseline)) {
-    stop("`baseline` must be \"lag_<window>\", \"all\" or \"pre\".")
+  if (length(baseline) != 1L ||
+      !grepl("^(lag_[0-9]+|all|pre|trend)$", baseline)) {
+    stop("`baseline` must be \"lag_<window>\", \"all\", \"pre\" or \"trend\".")
   }
   in_sample <- !is.na(panel[[outcome]])
 
@@ -297,7 +317,11 @@ add_weather_variables <- function(panel, baseline = "lag_30",
                    signed_quantile = signed_quantile)
 
   for (v in c("TM", "RR")) {
-    mean_col <- paste0("mean_", v, "_", baseline)
+    mean_col <- if (baseline == "trend") {
+      paste0("trend_", v)
+    } else {
+      paste0("mean_", v, "_", baseline)
+    }
     sd_col <- paste0("sd_", v, "_", baseline)
     if (!all(c(mean_col, sd_col) %in% names(panel))) {
       stop("Baseline moments ", mean_col, " and ", sd_col, " are missing; ",
