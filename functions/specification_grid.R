@@ -182,10 +182,10 @@ grid_plot_data <- function(coefficients, factor_levels) {
 # The continuous BHM terms that accompany the signed-deviation bins. Keep the
 # two level effects next to their corresponding long-run-climate interactions.
 BASE_TERM_LABELS <- c(
-  TM = "Temperature level",
-  "TM:mean_TM_all" = "Temperature x long-run mean temperature",
-  RR = "Precipitation level",
-  "RR:mean_RR_all" = "Precipitation x long-run mean precipitation"
+  TM = "TM",
+  "TM:mean_TM_all" = "TM x mean(TM)",
+  RR = "RR",
+  "RR:mean_RR_all" = "RR x mean(RR)"
 )
 
 # Base-term coefficients in percentage points with ordered specification
