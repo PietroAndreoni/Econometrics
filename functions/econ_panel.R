@@ -122,6 +122,10 @@ read_econ_source <- function(stored_source, econ_variable = NULL) {
         grp_pc_usd = .data[[econ_variable]],
         pop,
         share_ag_gdp = .data[[paste0("ag_", econ_variable)]] / .data[[econ_variable]],
+        # DOSE flags the single years in which a region's series is spliced
+        # (StructChange > 0): growth into such a year compares two differently
+        # built series. See build_dat(drop_break_years = ).
+        struct_change = StructChange,
         econ_source = "DOSE_V2_14",
         gadm_level = "gadm1"
       ) %>%

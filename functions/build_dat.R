@@ -72,7 +72,9 @@ resolve_econ_source <- function(econ_data) {
 # `baseline`, `deviation`, `bin_width` and `signed_quantile` choose how the
 # anomalies and bins are defined; see add_weather_variables() below. The
 # defaults (standardized anomalies against the lagged 30-year moments)
-# reproduce the original panel.
+# reproduce the original panel. `drop_break_years = TRUE` sets DOSE growth to
+# missing in the years DOSE flags as series breaks (see below); the number set
+# to missing is returned in attr(panel, "dropped_break_years").
 build_dat <- function(
     econ_data = c("DOSE", "DOSE_V2_14", "KUMMU", "KUMMU2025_GRID",
                   "PWT", "PWT110", "WB"),
@@ -82,7 +84,8 @@ build_dat <- function(
     baseline = "lag_30",
     deviation = c("standardized", "absolute"),
     bin_width = NULL,
-    signed_quantile = c("symmetric", "per_side")
+    signed_quantile = c("symmetric", "per_side"),
+    drop_break_years = FALSE
 ) {
   econ_data <- match.arg(econ_data)
 
@@ -91,7 +94,31 @@ build_dat <- function(
 
   # `econ_variable` picks a DOSE GDP definition (see DOSE_GDP_VARIABLES);
   # NULL uses the default.
-  econ <- load_econ_panel(stored_econ_source, econ_variable) %>%
+  econ <- load_econ_panel(stored_econ_source, econ_variable)
+
+  # DOSE marks the single years in which a region's series is spliced
+  # (StructChange > 0); growth into such a year compares two differently built
+  # series (e.g. Honduras 2001, a log jump of about +1.5 in every region). With
+  # `drop_break_years`, that growth rate is set to missing; the level is kept,
+  # so growth in the following year, within the new series, is unaffected.
+  # Nothing is filled. Other sources carry no break flags.
+  n_break_years <- 0L
+  if (drop_break_years) {
+    if (!"struct_change" %in% names(econ)) {
+      message("build_dat(", econ_data, "): no break flags in this source; ",
+              "drop_break_years has no effect.")
+    } else {
+      is_break <- dplyr::coalesce(econ$struct_change, 0) > 0 &
+        !is.na(econ$dlgrp_pc_usd)
+      n_break_years <- sum(is_break & econ$year >= config$econ_year_min)
+      econ$dlgrp_pc_usd[is_break] <- NA_real_
+      message("build_dat(", econ_data, "): drop_break_years set ",
+              format(n_break_years, big.mark = ","), " growth rates in ",
+              "DOSE break years (StructChange > 0) to missing.")
+    }
+  }
+
+  econ <- econ %>%
     select(
       year, GID_0, GID_1, grp_pc_usd, lgrp_pc_usd, dlgrp_pc_usd,
       econ_source, gadm_level
@@ -228,6 +255,7 @@ build_dat <- function(
     )
 
   attr(panel, "excluded_region_years") <- excluded_region_years
+  attr(panel, "dropped_break_years") <- n_break_years
   panel
 }
 
