@@ -66,14 +66,14 @@ precipitation terms. All tests add alternative weather-response terms to this
 base while retaining the same fixed effects.
 
 ```{r shared-specification}
-fixed_effects <- "year + GID_1[year] + GID_1[year^2]"
+fixed_effects <- "year + GID_1[year]"
 pan_id <- c("GID_1", "year")
 outcome <- "dlgrp_pc_usd"
 
 base_climate <- "TM + TM:mean_TM_all + RR + RR:mean_RR_all"
 model <- paste(base_climate, "+ zRR^2 + zTM^2")
 
-ECON_YEAR_MIN <- 1950
+ECON_YEAR_MIN <- 1900
 
 CLIMATE_VELOCITY_YEARS <- as.integer(params$climate_velocity_years)
 
@@ -123,7 +123,7 @@ the estimation period.
 # build_dat() joins the economic panel to the derived climate moments and adds
 # the weather-response variables; both halves are built from raw sources and
 # cached under data/cache (see functions/build_dat.R).
-data <- build_dat(econ_data = params$econ_data, econ_variable = "usd_2015", config = panel_cfg)
+data <- build_dat(econ_data = params$econ_data, config = panel_cfg)
 
 data_iso3 <- build_dat(econ_data = "PWT", config = panel_cfg)
 ```
@@ -1703,4 +1703,71 @@ m_dem <- fit_climate_model(
 etable(m_dem)
 
 
+```
+
+
+```{r test-absolute}
+
+model_demeaned <- paste(
+    "(TM - mean_TM_all) + (TM - mean_TM_all):mean_TM_all",
+     "+ (RR - mean_RR_all) + (RR - mean_RR_all):mean_RR_all",
+    "+ abs_zTMp + abs_zTMm + abs_zTMp:mean_TM_all + abs_zTMm:mean_TM_all + + abs_zRRp + abs_zRRm + abs_zRRp:mean_RR_all + abs_zTMm:mean_RR_all"
+)
+
+m_dem <- fit_climate_model(
+  model_demeaned
+)
+
+etable(m_dem)
+
+
+```
+
+# Test 12: Signed anomaly bins against the Hamilton trend
+
+The signed-bin specification of Test 6, with the anomalies measured against the
+Hamilton-filter trend instead of the lagged 30-year mean:
+zTM = (TM - trend_TM) / sd(TM - trend_TM), where the SD is taken over each
+region's entire climate series (`build_dat(baseline = "trend")`). The trend
+absorbs warming, so the anomalies are centred much closer to zero. The bins keep
+the same half-SD breaks and codes, so the two models are directly comparable.
+
+```{r test-signed-bins-trend, fig.width=8, fig.height=5}
+data_trend <- build_dat(
+  econ_data = params$econ_data,
+  config = panel_cfg,
+  baseline = "trend"
+)
+
+m_bins_signed_trend <- fit_climate_model(
+  model_bins_signed,
+  model_data = data_trend
+)
+
+# Where the anomalies fall under each baseline.
+table(lagged_30_year_mean = data$TM_bin_signed[!is.na(data$dlgrp_pc_usd)])
+table(hamilton_trend = data_trend$TM_bin_signed[!is.na(data_trend$dlgrp_pc_usd)])
+
+etable(
+  m_bins_signed,
+  m_bins_signed_trend,
+  headers = c("Lagged 30-year mean", "Hamilton trend"),
+  fitstat = ~n + r2 + wr2
+)
+
+iplot(
+  list(m_bins_signed, m_bins_signed_trend),
+  i.select = 1,
+  main = "Signed temperature bins: lagged 30-year mean vs Hamilton trend"
+)
+legend("bottomleft", col = 1:2, pch = c(20, 17),
+       legend = c("Lagged 30-year mean", "Hamilton trend"), bty = "n")
+
+iplot(
+  list(m_bins_signed, m_bins_signed_trend),
+  i.select = 2,
+  main = "Signed precipitation bins: lagged 30-year mean vs Hamilton trend"
+)
+legend("bottomleft", col = 1:2, pch = c(20, 17),
+       legend = c("Lagged 30-year mean", "Hamilton trend"), bty = "n")
 ```
