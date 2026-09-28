@@ -6,6 +6,27 @@
 #   km    <- choose_conley_cutoff(diag)
 #   conley_vcov_check(model, km)
 
+# Centroids of polygons (an sf object with GID_0, GID_1), computed in a global
+# equal-area projection and returned as WGS84 longitude and latitude, the
+# coordinates vcov_conley() expects.
+polygon_centroids <- function(polygons) {
+  old_s2 <- sf::sf_use_s2(FALSE)
+  on.exit(suppressMessages(sf::sf_use_s2(old_s2)), add = TRUE)
+  centres <- polygons %>%
+    sf::st_make_valid() %>%
+    sf::st_transform(6933) %>%
+    sf::st_centroid() %>%
+    sf::st_transform(4326)
+  xy <- sf::st_coordinates(centres)
+  out <- sf::st_drop_geometry(centres) %>%
+    transmute(GID_0, GID_1, longitude = xy[, "X"], latitude = xy[, "Y"])
+  if (any(!is.finite(out$longitude) | !is.finite(out$latitude) |
+          abs(out$longitude) > 180 | abs(out$latitude) > 90)) {
+    stop("Invalid longitude or latitude from the centroid calculation.")
+  }
+  out
+}
+
 # Great-circle distance in kilometres.
 haversine_km <- function(lon1, lat1, lon2, lat2) {
   to_rad <- pi / 180
