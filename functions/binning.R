@@ -17,6 +17,67 @@ signed_anomaly_bin <- function(
   codes[findInterval(z, breaks) + 1L]
 }
 
+# Equal-frequency signed bins centred on zero, coded -n_side..n_side with 0
+# the reference bin, which always contains zero. The break probabilities are
+# (0.5, 1.5, ..., n_side - 0.5) / (n_side + 0.5): the reference bin takes half
+# a bin's share and every other bin a full share. Two ways to apply them:
+#   "symmetric"  (default) quantiles of |x|, mirrored: breaks at +-q, so the
+#                reference bin and each pair of bins are symmetric around zero
+#                and each pair +-k holds the same number of observations, split
+#                by sign.
+#   "per_side"   quantiles of each side of zero separately. Every bin on a side
+#                holds the same number of observations, so the bins are
+#                equal-frequency even when one sign dominates (e.g. warm
+#                anomalies under warming); the reference bin is then not
+#                symmetric in value.
+# `sample` selects the observations the quantiles are computed on (e.g. the
+# estimation rows); every value of `x` is then assigned. The breaks are attached
+# as attr "breaks".
+signed_quantile_bin <- function(x, n_side = 5L, sample = rep(TRUE, length(x)),
+                                method = c("symmetric", "per_side")) {
+  method <- match.arg(method)
+  probs <- (seq_len(n_side) - 0.5) / (n_side + 0.5)
+  side <- function(v) {
+    unname(stats::quantile(v[is.finite(v)], probs, names = FALSE))
+  }
+  breaks <- if (method == "per_side") {
+    c(-rev(side(-x[sample & x < 0])), side(x[sample & x > 0]))
+  } else {
+    q <- side(abs(x[sample]))
+    c(-rev(q), q)
+  }
+  codes <- findInterval(x, breaks) - n_side
+  attr(codes, "breaks") <- breaks
+  codes
+}
+
+# Equal-frequency bins: `n_bins` quantile bins of `x` over `sample`, as a
+# factor labelled by interval. `lower` is the lowest break (0 for magnitudes,
+# -Inf for levels); the top bin is open. Tied quantiles are merged, so a
+# variable with a mass point can end up with fewer bins.
+quantile_bin <- function(x, n_bins, sample = rep(TRUE, length(x)),
+                         lower = -Inf) {
+  interior <- stats::quantile(
+    x[sample & is.finite(x)],
+    probs = seq_len(n_bins - 1L) / n_bins,
+    names = FALSE
+  )
+  breaks <- unique(c(lower, interior, Inf))
+  cut(x, breaks = breaks, labels = interval_labels(breaks), right = FALSE,
+      include.lowest = TRUE)
+}
+
+# "a-b" labels for consecutive breaks, "<b" and ">=a" for open ends.
+interval_labels <- function(breaks, digits = 3L) {
+  f <- function(v) format(signif(v, digits), trim = TRUE, scientific = FALSE,
+                          drop0trailing = TRUE)
+  k <- length(breaks)
+  lo <- breaks[-k]
+  hi <- breaks[-1]
+  ifelse(is.infinite(lo), paste0("<", f(hi)),
+         ifelse(is.infinite(hi), paste0(">=", f(lo)), paste0(f(lo), "-", f(hi))))
+}
+
 # Bin the strictly positive values of a non-negative magnitude into `n_bins`
 # quantile bins, with exact zeros kept as their own "0" reference level.
 bin_nonzero_magnitude <- function(x, n_bins = 5L) {
