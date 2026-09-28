@@ -31,7 +31,8 @@ GDP-per-capita growth.
   - `model_spec.R`: `make_panel_formula()`, `fit_panel_model()`
   - `inference.R`: coefficient tables, linear combinations, Wald rows, EB
     shrinkage, year-block bootstrap
-  - `spatial_inference.R`: residual spatial correlation, Conley cutoff
+  - `spatial_inference.R`: polygon centroids, residual spatial correlation,
+    Conley cutoff
   - `cross_validation.R`: leave-fold-out RMSE on demeaned data
   - `response_functions.R`: distributed lags, bin coefficients, response
     curves, and their plots
@@ -41,11 +42,25 @@ GDP-per-capita growth.
   - `correlation_tests.R`: pairwise and trend correlation tests
   - `specification_grid.R`: one specification over a grid of data choices:
     samples, coefficient and dispersion tables, and the comparison figures
+  - `analysis_spec.R`: `main_spec()`, `build_main_dat()`, `fit_main()`: the
+    main_analysis.Rmd specification shared by the analysis scripts
+  - `climate_slope_bins.R`: free climate-bin slopes and linearity tests
+  - `functional_forms.R`: hinged anomalies, cold/hot symmetry test,
+    coefficient stability
 - `test_functions.Rmd`: tests of alternative climate-response functions
 - `compare_signed_bins_across_datasets.R`: signed-bin specification across
   DOSE, KUMMU, PWT and WB x ERA5, CRU, UDel x population and area weighting
 - `compare_dose_gdp_definitions.R`: signed-bin specification across the five
   DOSE GDP-per-capita definitions x ERA5, CRU, UDel (population weighting)
+- `compare_dose_gdp_definitions_lags.R`: the same grid for the distributed-lag
+  model l(dTM, 0:10) + l(dTM, 0:10):mean_TM_all + the same for dRR
+- `plot_bhm_climate_slope_bins.R`, `plot_bhm_climate_slope_national.R`: free
+  temperature slope per bin of long-run climate vs the linear BHM interaction
+  (DOSE; PWT with DOSE alongside)
+- `plot_preferred_functional_form.R`: hinged-anomaly powers vs the signed bins,
+  cold/hot symmetry, stability of the base coefficients
+- `compare_dose_conley_se.R`: country, region and Conley standard errors for
+  the preferred and quadratic DOSE specifications
 - `harmonize_dose_pwt.R`: DOSE-PWT harmonization
 
 National-vs-subnational growth comparison, ranked subnational outliers and the
