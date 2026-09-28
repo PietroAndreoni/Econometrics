@@ -123,7 +123,7 @@ the estimation period.
 # build_dat() joins the economic panel to the derived climate moments and adds
 # the weather-response variables; both halves are built from raw sources and
 # cached under data/cache (see functions/build_dat.R).
-data <- build_dat(econ_data = params$econ_data, config = panel_cfg)
+data <- build_dat(econ_data = params$econ_data, econ_variable = "usd_2015", config = panel_cfg)
 
 data_iso3 <- build_dat(econ_data = "PWT", config = panel_cfg)
 ```
@@ -314,23 +314,6 @@ etable(m_windows, fitstat = ~n + r2 + wr2)
 ```
 
 
-# Test 2: Piecewise-linear absolute deviations
-
-This test allows the marginal effect of an absolute standardized anomaly to
-change as it crosses increasingly extreme ranges.
-
-```{r test-piecewise}
-model_piece <- paste(
-  base_climate,
-  "+ TM_0_05 + TM_05_15 + TM_15_25 + TM_25p",
-  "+ RR_0_05 + RR_05_15 + RR_15_25 + RR_25p"
-)
-f_piece <- make_formula(model_piece)
-m_piece <- fit_climate_model(model_piece)
-
-etable(m_piece, fitstat = ~n + r2 + wr2)
-```
-
 # Test 3: Coarse unsigned anomaly bins
 
 This nonparametric specification groups absolute anomalies into three broad
@@ -376,29 +359,6 @@ etable(m_bhm,m_base,m_move)
 
 ```
 
-
-
-## Functional-form comparison
-
-The table places the principal alternatives side by side on their common
-fixed-effect specification.
-
-```{r compare-functional-forms}
-etable(
-  m_base,
-  m_piece,
-  m_bin,
-  m_bins,
-  headers = c(
-    "Quadratic",
-    "Piecewise linear",
-    "Coarse bins",
-    "Fine bins"
-  ),
-  fitstat = ~n + r2 + wr2
-)
-```
-
 # Test 5: Variable-specific fine bins
 
 Estimating the fine-bin response for one weather variable at a time makes its
@@ -433,6 +393,7 @@ reference category.
 ```{r test-signed-bins, fig.width=8, fig.height=5}
 
 model_bins_signed <- paste(
+  base_climate,
   "+ i(TM_bin_signed, ref = 0)",
   "+ i(RR_bin_signed, ref = 0)"
 )
@@ -1196,8 +1157,8 @@ model_cumulative_change <- paste(
   base_climate,
   "+ zRR^2 +",
   "+ I(zTMp_f^2) : cumulative_warming",
-  "+ I(zTMp_f^2) : cumulative_cooling",
-  "+ I(zTMp_f^2) + I(zTMp_f^2)",
+  "+ I(zTMm_f^2) : cumulative_cooling",
+  "+ I(zTMp_f^2) + I(zTMm_f^2)",
   "+ l(zTMp_f,1:3) + l(zTMm_f,1:3)"
 )
 
@@ -1727,3 +1688,19 @@ ggplot(
 ```
 
 
+```{r test-absolute}
+
+model_demeaned <- paste(
+    "(TM - mean_TM_lag_30) + (TM - mean_TM_lag_30):mean_TM_lag_30",
+     "+ (RR - mean_RR_lag_30) + (RR - mean_RR_lag_30):mean_RR_lag_30",
+    "+ zTM^2 + zRR^2"
+)
+
+m_dem <- fit_climate_model(
+  model_demeaned
+)
+
+etable(m_dem)
+
+
+```
