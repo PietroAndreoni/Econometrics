@@ -2,20 +2,31 @@
 # to be run first.
 #
 #   source          level  variable                 prices / units
-#   DOSE_V2_14      GADM1  grp_pc_lcu_2015          constant 2015 local currency
+#   DOSE_V2_14      GADM1  grp_pc_lcu2015_usd       constant 2015 local prices,
+#                                                   converted at DOSE's 2015
+#                                                   exchange rate (2015 US$)
 #   KUMMU2025_GRID  GADM1  total GDP / population   PPP, constant 2021 int. $
 #   PWT110          GADM0  rgdpna / pop             constant national prices,
 #                                                   in 2021 PPP US$
-#   WB              GADM0  NY.GDP.PCAP.KD           constant 2015 US$, 2015
-#                                                   market exchange rates
+#   WB              GADM0  NY.GDP.PCAP.KD           constant 2015 local prices,
+#                                                   converted at the 2015 official
+#                                                   exchange rate (2015 US$)
 #
-# All four growth rates are real (volume) growth and comparable. Levels are
-# not comparable across sources, nor across countries for DOSE (each country
-# in its own currency).
+# All four growth rates are real (volume) growth and comparable.
+#
+# Levels: DOSE and WB are in exchange-rate dollars (2015 US$ at 2015 exchange
+# rates) and comparable with each other; KUMMU and PWT are in PPP dollars
+# (2021 international $). The two groups are not comparable in levels: exchange
+# rates understate poorer countries' incomes relative to PPP (IND 2015: 64
+# rupees per US$ at market rates, 19 per international $). Each country's
+# level also depends on its 2015 exchange rate, so a currency that was over- or
+# undervalued that year shifts the whole level (not the growth) by a constant.
 #
 # DOSE's grp_pc_usd_2015 is NOT used: it is current US$ divided by the US GDP
 # deflator, so its growth carries every local-currency movement against the
 # dollar (ARG 2002: -61% against -7% at constant local prices).
+# grp_pc_lcu2015_usd is grp_pc_lcu_2015 times one constant per country, so its
+# growth is exactly constant-local-price growth.
 
 # DOSE as published; no series is converted, interpolated or extrapolated.
 read_dose <- function(path) {
@@ -62,20 +73,55 @@ read_wdi_csv <- function(path) {
     )
 }
 
-read_econ_source <- function(stored_source) {
+# DOSE GDP-per-capita definitions selectable through `econ_variable`. The
+# default is the first; the others exist for robustness comparisons.
+#   lcu2015_usd  constant 2015 local prices at the 2015 exchange rate
+#   lcu_2015     constant 2015 local currency (same growth as lcu2015_usd)
+#   usd_2015     current US\ by the US GDP deflator
+#   lcu          current local currency (nominal: includes inflation)
+#   usd          current US\197121nominal: inflation and exchange rates)
+DOSE_GDP_VARIABLES <- c(
+  lcu2015_usd = "grp_pc_lcu2015_usd",
+  lcu_2015 = "grp_pc_lcu_2015",
+  usd_2015 = "grp_pc_usd_2015",
+  lcu = "grp_pc_lcu",
+  usd = "grp_pc_usd"
+)
+
+# Only DOSE has alternative definitions; NULL selects each source's default.
+resolve_econ_variable <- function(stored_source, econ_variable = NULL) {
+  if (is.null(econ_variable)) {
+    return(if (identical(stored_source, "DOSE_V2_14")) DOSE_GDP_VARIABLES[[1]] else NULL)
+  }
+  if (!identical(stored_source, "DOSE_V2_14")) {
+    stop("econ_variable is only available for DOSE.")
+  }
+  if (econ_variable %in% names(DOSE_GDP_VARIABLES)) {
+    econ_variable <- DOSE_GDP_VARIABLES[[econ_variable]]
+  }
+  if (!econ_variable %in% DOSE_GDP_VARIABLES) {
+    stop("Unknown DOSE GDP variable '", econ_variable, "'. Available: ",
+         paste(names(DOSE_GDP_VARIABLES), collapse = ", "))
+  }
+  econ_variable
+}
+
+read_econ_source <- function(stored_source, econ_variable = NULL) {
   raw_file <- data_file(ECON_RAW_FILES[[stored_source]])
+  econ_variable <- resolve_econ_variable(stored_source, econ_variable)
 
   if (identical(stored_source, "DOSE_V2_14")) {
-    # `grp_pc_usd` keeps its name across sources; for DOSE it holds constant
-    # 2015 local currency, as does the agricultural share.
+    # `grp_pc_usd` keeps its name across sources; for DOSE it holds the chosen
+    # definition (default: constant 2015 local prices at the 2015 exchange
+    # rate), and the agricultural share uses the matching sector column.
     read_dose(raw_file) %>%
       transmute(
         year,
         GID_0,
         GID_1,
-        grp_pc_usd = grp_pc_lcu_2015,
+        grp_pc_usd = .data[[econ_variable]],
         pop,
-        share_ag_gdp = ag_grp_pc_lcu_2015 / grp_pc_lcu_2015,
+        share_ag_gdp = .data[[paste0("ag_", econ_variable)]] / .data[[econ_variable]],
         econ_source = "DOSE_V2_14",
         gadm_level = "gadm1"
       ) %>%
@@ -135,8 +181,8 @@ read_econ_source <- function(stored_source) {
 # NA rather than a growth rate silently spanning the gap. prepare_econ_data.R
 # used a positional lag here, which is the one substantive difference between
 # this builder and that script.
-build_econ_panel <- function(stored_source) {
-  read_econ_source(stored_source) %>%
+build_econ_panel <- function(stored_source, econ_variable = NULL) {
+  read_econ_source(stored_source, econ_variable) %>%
     filter(!is.na(grp_pc_usd), grp_pc_usd > 0) %>%
     group_by(GID_1, gadm_level, econ_source) %>%
     arrange(year, .by_group = TRUE) %>%
@@ -152,14 +198,23 @@ build_econ_panel <- function(stored_source) {
     mutate(GID_0 = dplyr::coalesce(GID_0, substr(GID_1, 1, 3)))
 }
 
-load_econ_panel <- function(stored_source) {
+# Non-default DOSE definitions are cached under their own tag.
+load_econ_panel <- function(stored_source, econ_variable = NULL) {
+  variable <- resolve_econ_variable(stored_source, econ_variable)
+  is_default <- identical(variable, resolve_econ_variable(stored_source))
   cached_panel(
-    paste0("econ_", tolower(stored_source)),
+    paste0(
+      "econ_", tolower(stored_source),
+      if (is_default) "" else paste0("_", tolower(variable))
+    ),
     list(
       econ_source = stored_source,
       raw_file = unname(ECON_RAW_FILES[[stored_source]]),
-      code = code_fingerprint(read_econ_source, build_econ_panel)
+      variable = if (is.null(variable)) "default" else variable,
+      code = code_fingerprint(
+        read_econ_source, build_econ_panel, resolve_econ_variable
+      )
     ),
-    function() build_econ_panel(stored_source)
+    function() build_econ_panel(stored_source, variable)
   )
 }

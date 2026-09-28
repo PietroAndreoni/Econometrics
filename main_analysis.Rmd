@@ -66,7 +66,7 @@ precipitation terms. All tests add alternative weather-response terms to this
 base while retaining the same fixed effects.
 
 ```{r shared-specification}
-fixed_effects <- "year + GID_1[year]"
+fixed_effects <- "year + GID_1[year] + GID_1[year^2]"
 pan_id <- c("GID_1", "year")
 outcome <- "dlgrp_pc_usd"
 
@@ -212,16 +212,14 @@ IDEAS:
 
 ```{r test-absolute}
 
-model_bhm <- "TM + TM:mean_TM_lag_30 + RR + RR:mean_RR_lag_30"
-
-f_bhm <- make_formula(model_bhm)
+f_bhm <- make_formula(base_climate)
 m_bhm <- fit_climate_model(
-  model_bhm
+  base_climate
 )
 
 model_base <- paste(
-  "TM + TM:mean_TM_lag_30 + RR + RR:mean_RR_lag_30",
-  "+ abs_zTMp + abs_zTMm + abs_zRRp + abs_zRRm + mean_TM_lag_30 + mean_RR_lag_30"
+  base_climate,
+  "+ zTM^2 + zRR^2"
 )
 
 f_base <- make_formula(model_base)
@@ -433,41 +431,17 @@ from wet years, with deviations between -0.5 and 0.5 standard deviations as the
 reference category.
 
 ```{r test-signed-bins, fig.width=8, fig.height=5}
-model_bins_TM_signed <- paste(
-  base_climate,
-  "+ i(TM_bin_signed, ref = 0)"
-)
-f_bins_TM_signed <- make_formula(model_bins_TM_signed)
-m_bins_TM_signed <- fit_climate_model(model_bins_TM_signed)
-
-model_bins_RR_signed <- paste(
-  base_climate,
-  "+ i(RR_bin_signed, ref = 0)"
-)
-f_bins_RR_signed <- make_formula(model_bins_RR_signed)
-m_bins_RR_signed <- fit_climate_model(model_bins_RR_signed)
 
 model_bins_signed <- paste(
-    base_climate,
   "+ i(TM_bin_signed, ref = 0)",
   "+ i(RR_bin_signed, ref = 0)"
 )
 f_bins_signed <- make_formula(model_bins_signed)
 m_bins_signed <- fit_climate_model(model_bins_signed)
 
-iplot(m_bins_TM_signed, main = "Signed temperature anomaly bins")
-iplot(m_bins_RR_signed, main = "Signed precipitation anomaly bins")
-
 iplot(m_bins_signed, main = "Signed temperature anomaly bins")
 iplot(m_bins_signed, i.select=2,main = "Signed precipitation anomaly bins")
 
-etable(
-  m_bins_TM_signed,
-  m_bins_RR_signed,
-  m_bins_signed,
-  headers = c("Temperature", "Precipitation", "Joint"),
-  fitstat = ~n + r2 + wr2
-)
 ```
 
 ## Temperature and precipitation level bins with signed deviations
@@ -482,8 +456,8 @@ conditional on the common BHM climate controls and on the other three bin sets.
 
 ```{r test-level-and-signed-bins, fig.width=8, fig.height=5, fig.show='hold', out.width='50%'}
 model_bins_level_signed <- paste(
-  "+ i(TM_bin_level, ref = \"10-15\")",
-  "+ i(RR_bin_level, ref = \"0.5-1\")",
+  "+ i(TM_bin_level)",
+  "+ i(RR_bin_level)",
   "+ i(TM_bin_signed, ref = 0)",
   "+ i(RR_bin_signed, ref = 0)"
 )

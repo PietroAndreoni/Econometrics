@@ -74,14 +74,17 @@ build_dat <- function(
                   "PWT", "PWT110", "WB"),
     climate_series = NULL,
     config = panel_config(),
-    baseline_window = 30L
+    baseline_window = 30L,
+    econ_variable = NULL
 ) {
   econ_data <- match.arg(econ_data)
 
   stored_econ_source <- resolve_econ_source(econ_data)
   target_gadm_level <- unname(GADM_LEVEL_BY_SOURCE[[stored_econ_source]])
 
-  econ <- load_econ_panel(stored_econ_source) %>%
+  # `econ_variable` picks a DOSE GDP definition (see DOSE_GDP_VARIABLES);
+  # NULL uses the default.
+  econ <- load_econ_panel(stored_econ_source, econ_variable) %>%
     select(
       year, GID_0, GID_1, grp_pc_usd, lgrp_pc_usd, dlgrp_pc_usd,
       econ_source, gadm_level

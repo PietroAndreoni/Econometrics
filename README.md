@@ -39,7 +39,13 @@ GDP-per-capita growth.
   - `climate_runs.R`: warming/cooling runs and climate velocity
   - `projection.R`: growth effects along climate trajectories
   - `correlation_tests.R`: pairwise and trend correlation tests
+  - `specification_grid.R`: one specification over a grid of data choices:
+    samples, coefficient and dispersion tables, and the comparison figures
 - `test_functions.Rmd`: tests of alternative climate-response functions
+- `compare_signed_bins_across_datasets.R`: signed-bin specification across
+  DOSE, KUMMU, PWT and WB x ERA5, CRU, UDel x population and area weighting
+- `compare_dose_gdp_definitions.R`: signed-bin specification across the five
+  DOSE GDP-per-capita definitions x ERA5, CRU, UDel (population weighting)
 - `harmonize_dose_pwt.R`: DOSE-PWT harmonization
 
 National-vs-subnational growth comparison, ranked subnational outliers and the
@@ -59,13 +65,15 @@ GitHub's 100 MB file limit.
 
 | Source | Level | Variable | Prices |
 |---|---|---|---|
-| DOSE v2.14 | GADM1 | `grp_pc_lcu_2015` | constant 2015 local currency |
+| DOSE v2.14 | GADM1 | `grp_pc_lcu2015_usd` | constant 2015 local prices, at the 2015 exchange rate (2015 US$) |
 | KUMMU 2025 | GADM1 | total GDP / population | PPP, constant 2021 int. $ |
 | PWT 11.0 | GADM0 | `rgdpna / pop` | constant national prices, 2021 PPP US$ |
-| WB WDI | GADM0 | `NY.GDP.PCAP.KD` | constant 2015 US$, market rates |
+| WB WDI | GADM0 | `NY.GDP.PCAP.KD` | constant 2015 local prices, at the 2015 official exchange rate (2015 US$) |
 
-All four growth rates are real growth, so they are comparable. Levels are not
-comparable across sources, nor across countries for DOSE (local currencies).
+All four growth rates are real growth, so they are comparable. In levels, DOSE
+and WB are in exchange-rate dollars and KUMMU and PWT in PPP dollars; levels are
+comparable within each pair but not across them (exchange rates understate
+poorer countries' incomes relative to PPP).
 No dataset is interpolated or extrapolated.
 DOSE's own `grp_pc_usd_2015` is not used: its growth includes exchange-rate
 movements against the dollar (see `functions/econ_panel.R`).

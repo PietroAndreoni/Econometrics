@@ -1,6 +1,6 @@
-# Attach the packages the functions/ scripts use unqualified, then source every
-# script in functions/ into the global environment. Analysis scripts and
-# notebooks start with:
+# Attach the packages the functions/ scripts use unqualified (patchwork for its
+# plot operators), then source every script in functions/ into the global
+# environment. Analysis scripts and notebooks start with:
 #   source("load_functions.R")
 #
 # Other packages are called with `pkg::` and only need to be installed:
@@ -10,6 +10,7 @@ suppressPackageStartupMessages({
   library(dplyr)
   library(fixest)
   library(ggplot2)
+  library(patchwork)
 })
 
 local({

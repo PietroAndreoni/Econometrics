@@ -19,8 +19,9 @@ read_gdp_levels <- function(source) {
         region_name = as.character(region),
         country = as.character(country),
         year = as.integer(year),
-        # Constant 2015 local currency; see econ_panel.R.
-        gdp_pc = as.numeric(grp_pc_lcu_2015),
+        # Constant 2015 local prices at the 2015 exchange rate; see
+        # econ_panel.R.
+        gdp_pc = as.numeric(grp_pc_lcu2015_usd),
         population = as.numeric(pop),
         gdp = gdp_pc * population
       ),
