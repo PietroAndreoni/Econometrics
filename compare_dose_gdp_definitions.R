@@ -241,6 +241,10 @@ plot_data <- grid_plot_data(
   coefficients,
   list(definition = unname(DEFINITIONS), climate = names(CLIMATE_SOURCES))
 )
+base_plot_data <- grid_base_plot_data(
+  base_terms,
+  list(definition = unname(DEFINITIONS), climate = names(CLIMATE_SOURCES))
+)
 
 # Figure 1: every specification, one figure per sample.
 for (s in names(SAMPLE_LABELS)) {
@@ -275,7 +279,42 @@ ggsave(
   width = 11, height = 5.5, dpi = 300
 )
 
-# Figure 3: agreement of the outcome across definitions (common sample).
+# Figure 3: non-deviation terms for every specification, one figure per sample.
+for (s in names(SAMPLE_LABELS)) {
+  p <- plot_base_term_grid(
+    base_plot_data %>% filter(sample == s),
+    facet = "definition",
+    colour = "climate",
+    colour_name = "Climate data (concurrent-population weights)",
+    title = paste("Non-deviation climate terms across DOSE GDP definitions:",
+                  tolower(SAMPLE_LABELS[[s]])),
+    subtitle = paste("Points are coefficient estimates; vertical lines are 95% CIs",
+                     "clustered by region"),
+    caption = paste(
+      "Const. LCU, 2015 FX and Const. LCU have identical growth, as do",
+      "US$ / US deflator and Nominal US$ once year fixed effects are included."
+    )
+  )
+  ggsave(
+    file.path(OUTPUT_DIR, paste0("non_deviation_terms_", s, "_sample.png")),
+    p, width = 13, height = 9, dpi = 300
+  )
+}
+
+# Figure 4: range of each non-deviation term across all 15 specifications.
+ggsave(
+  file.path(OUTPUT_DIR, "non_deviation_terms_cross_specification_range.png"),
+  plot_base_term_range(
+    base_plot_data,
+    SAMPLE_LABELS,
+    title = "Robustness of non-deviation terms across DOSE GDP definitions",
+    subtitle = paste("Mean, interquartile range and min-max over the 15",
+                     "GDP-definition x climate specifications")
+  ),
+  width = 11, height = 7, dpi = 300
+)
+
+# Figure 5: agreement of the outcome across definitions (common sample).
 agreement_data <- growth_agreement %>%
   mutate(
     variant_1 = factor(DEFINITIONS[variant_1], levels = DEFINITIONS),

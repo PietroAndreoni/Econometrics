@@ -223,6 +223,11 @@ plot_data <- grid_plot_data(
   list(econ = names(ECON_DATASETS), climate = names(CLIMATE_SOURCES),
        weight = names(CLIMATE_WEIGHTS))
 )
+base_plot_data <- grid_base_plot_data(
+  base_terms,
+  list(econ = names(ECON_DATASETS), climate = names(CLIMATE_SOURCES),
+       weight = names(CLIMATE_WEIGHTS))
+)
 
 # Figure 1: every specification, one figure per sample.
 for (s in names(SAMPLE_LABELS)) {
@@ -259,7 +264,44 @@ ggsave(
   width = 11, height = 5.5, dpi = 300
 )
 
-# Figure 3: agreement of the climate data themselves on the common sample.
+# Figure 3: non-deviation terms for every specification, one figure per sample.
+for (s in names(SAMPLE_LABELS)) {
+  p <- plot_base_term_grid(
+    base_plot_data %>% filter(sample == s),
+    facet = "econ",
+    colour = "climate",
+    colour_name = "Climate data",
+    shape = "weight",
+    shape_values = c(pop_concurrent = 16, area = 17),
+    shape_labels = c(pop_concurrent = "Concurrent population", area = "Area"),
+    shape_name = "Weighting",
+    title = paste("Non-deviation climate terms across data choices:",
+                  tolower(SAMPLE_LABELS[[s]])),
+    subtitle = paste("Points are coefficient estimates; vertical lines are 95% CIs",
+                     "clustered by unit"),
+    caption = paste("DOSE and KUMMU: GADM1 regions; PWT and WB: countries.",
+                    "Fixed effects: year + unit-specific linear trends.")
+  )
+  ggsave(
+    file.path(OUTPUT_DIR, paste0("non_deviation_terms_", s, "_sample.png")),
+    p, width = 12, height = 9, dpi = 300
+  )
+}
+
+# Figure 4: range of each non-deviation term across all 24 specifications.
+ggsave(
+  file.path(OUTPUT_DIR, "non_deviation_terms_cross_specification_range.png"),
+  plot_base_term_range(
+    base_plot_data,
+    SAMPLE_LABELS,
+    title = "Robustness of non-deviation climate terms across data choices",
+    subtitle = paste("Mean, interquartile range and min-max over the 24",
+                     "economic dataset x climate x weighting specifications")
+  ),
+  width = 11, height = 7, dpi = 300
+)
+
+# Figure 5: agreement of the climate data themselves on the common sample.
 variant_levels <- as.vector(outer(names(CLIMATE_SOURCES), names(CLIMATE_WEIGHTS),
                                   paste, sep = "_"))
 variant_label <- function(x) {
