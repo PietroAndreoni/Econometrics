@@ -17,10 +17,32 @@
 #           both cut to the country-years present at both levels, so every
 #           model covers the same countries and years.
 #
-# Output: results/signed_bins_across_datasets/. Part 1 estimates and writes
-# the analysis tables; part 2 plots.
+# Signed bins (first command-line argument):
+#   width      (default) equal-width half-SD bins, TM_bin_signed / RR_bin_signed;
+#   frequency  equal-frequency bins symmetric around zero, TM_bin_signed_q /
+#              RR_bin_signed_q (signed_quantile_bin(), method "symmetric"),
+#              coded -5..5. Their quantiles are taken over each model's own
+#              sample: build_dat() uses each panel's estimation rows, and the
+#              common sample recomputes them on the common rows. The breaks
+#              (in SD) are written to bin_breaks.csv.
+#   Rscript compare_signed_bins_across_datasets.R frequency
+#
+# Output: results/signed_bins_across_datasets/ (width) or
+# results/signed_bins_across_datasets_equal_frequency/ (frequency). Part 1
+# estimates and writes the analysis tables; part 2 plots.
 
 source("load_functions.R")
+
+BIN_TYPE <- match.arg(
+  if (length(commandArgs(trailingOnly = TRUE))) commandArgs(trailingOnly = TRUE)[[1]] else "width",
+  c("width", "frequency")
+)
+EQUAL_FREQUENCY <- BIN_TYPE == "frequency"
+BIN_VARS <- if (EQUAL_FREQUENCY) {
+  c("TM_bin_signed_q", "RR_bin_signed_q")
+} else {
+  SIGNED_BIN_VARS
+}
 
 # Configuration ----------------------------------------------------------------
 
@@ -37,14 +59,17 @@ CLIMATE_VELOCITY_YEARS <- 5L
 BASE_CLIMATE <- "TM + TM:mean_TM_all + RR + RR:mean_RR_all"
 MODEL_TERMS <- paste(
   BASE_CLIMATE,
-  "+ i(TM_bin_signed, ref = 0)",
-  "+ i(RR_bin_signed, ref = 0)"
+  sprintf("+ i(%s, ref = 0)", BIN_VARS[[1]]),
+  sprintf("+ i(%s, ref = 0)", BIN_VARS[[2]])
 )
-MODEL_VARS <- c(OUTCOME, "TM", "RR", "mean_TM_all", "mean_RR_all",
-                "TM_bin_signed", "RR_bin_signed")
+MODEL_VARS <- c(OUTCOME, "TM", "RR", "mean_TM_all", "mean_RR_all", BIN_VARS)
 KEEP_VARS <- c("GID_0", "GID_1", "year", MODEL_VARS, "zTM", "zRR")
 
-OUTPUT_DIR <- file.path("results", "signed_bins_across_datasets")
+OUTPUT_DIR <- file.path(
+  "results",
+  if (EQUAL_FREQUENCY) "signed_bins_across_datasets_equal_frequency" else
+    "signed_bins_across_datasets"
+)
 dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 write_out <- function(x, name) {
@@ -76,6 +101,7 @@ specs <- expand.grid(
   )
 
 panels <- list()
+bin_breaks <- list()
 for (i in seq_len(nrow(specs))) {
   s <- specs[i, ]
   message("Building ", s$id)
@@ -85,8 +111,19 @@ for (i in seq_len(nrow(specs))) {
     climate_weight = CLIMATE_WEIGHTS[[s$weight]],
     clim_history_years = max(6L, CLIMATE_VELOCITY_YEARS - 1L)
   )
-  panels[[s$id]] <- build_dat(econ_data = s$econ, config = cfg) %>%
-    select(all_of(KEEP_VARS))
+  panel <- build_dat(econ_data = s$econ, config = cfg)
+  bins <- attr(panel, "weather_bins")
+  bin_breaks[[length(bin_breaks) + 1L]] <- tibble::tibble(
+    sample = "max", id = s$id,
+    variable = c("Temperature", "Precipitation"),
+    breaks_sd = c(
+      paste(round(if (EQUAL_FREQUENCY) bins$TM$signed_q_breaks else
+                    bins$TM$signed_breaks, 3), collapse = " "),
+      paste(round(if (EQUAL_FREQUENCY) bins$RR$signed_q_breaks else
+                    bins$RR$signed_breaks, 3), collapse = " ")
+    )
+  )
+  panels[[s$id]] <- select(panel, all_of(KEEP_VARS))
 }
 
 # Maximum samples ----------------------------------------------------------------
@@ -121,6 +158,26 @@ common_data <- lapply(specs$id, function(id) {
   semi_join(panels[[id]], common_keys[[level]], by = c("GID_0", "GID_1", "year"))
 })
 names(common_data) <- specs$id
+
+# Equal-frequency bins: recompute the quantiles on the common rows, so the bins
+# have equal counts in the sample the common models use.
+if (EQUAL_FREQUENCY) {
+  for (id in specs$id) {
+    d <- common_data[[id]]
+    tm <- signed_quantile_bin(d$zTM, n_side = 5L, method = "symmetric")
+    rr <- signed_quantile_bin(d$zRR, n_side = 5L, method = "symmetric")
+    d$TM_bin_signed_q <- as.vector(tm)
+    d$RR_bin_signed_q <- as.vector(rr)
+    common_data[[id]] <- d
+    bin_breaks[[length(bin_breaks) + 1L]] <- tibble::tibble(
+      sample = "common", id = id,
+      variable = c("Temperature", "Precipitation"),
+      breaks_sd = c(paste(round(attr(tm, "breaks"), 3), collapse = " "),
+                    paste(round(attr(rr, "breaks"), 3), collapse = " "))
+    )
+  }
+}
+bin_breaks <- bind_rows(bin_breaks) %>% left_join(specs, by = "id")
 fits_common <- lapply(common_data, fit_signed_bins)
 
 # Part 1: analysis tables ----------------------------------------------------------
@@ -133,14 +190,15 @@ all_data <- list(max = panels, common = common_data)
 
 sample_summary <- grid_sample_summary(all_fits, all_data, specs)
 write_out(sample_summary, "sample_summary")
+write_out(bin_breaks, "bin_breaks")
 
-coefficients <- grid_bin_coefficients(all_fits, specs)
+coefficients <- grid_bin_coefficients(all_fits, specs, BIN_VARS)
 write_out(coefficients, "bin_coefficients")
 
 base_terms <- grid_base_terms(all_fits, specs)
 write_out(base_terms, "base_coefficients")
 
-joint_tests <- grid_joint_tests(all_fits, specs)
+joint_tests <- grid_joint_tests(all_fits, specs, BIN_VARS)
 write_out(joint_tests, "joint_tests")
 
 # How much of the spread in each bin comes from the economic data, the climate
@@ -157,7 +215,8 @@ write_out(factor_means, "mean_estimate_by_factor")
 climate_agreement <- bind_rows(lapply(names(ECON_DATASETS), function(econ) {
   ids <- specs$id[specs$econ == econ]
   common <- lapply(common_data[ids], function(d) {
-    select(d, GID_1, year, zTM, zRR, TM_bin_signed, RR_bin_signed)
+    select(d, GID_1, year, zTM, zRR, TM_bin = all_of(BIN_VARS[[1]]),
+           RR_bin = all_of(BIN_VARS[[2]]))
   })
   pairs <- utils::combn(ids, 2, simplify = FALSE)
   bind_rows(lapply(pairs, function(p) {
@@ -178,7 +237,7 @@ write_out(climate_agreement, "climate_data_agreement")
 
 # Confirm that no exact-zero precipitation values survive into estimation rows;
 # known ERA5 concurrent-population zero sentinels are normalized upstream.
-data_quality <- grid_data_quality(all_fits, all_data, specs)
+data_quality <- grid_data_quality(all_fits, all_data, specs, BIN_VARS)
 write_out(data_quality, "data_quality")
 
 saveRDS(
@@ -228,6 +287,17 @@ base_plot_data <- grid_base_plot_data(
        weight = names(CLIMATE_WEIGHTS))
 )
 
+BIN_DESCRIPTION <- if (EQUAL_FREQUENCY) {
+  "signed equal-frequency anomaly bins (symmetric), reference bin centred on zero"
+} else {
+  "signed half-SD anomaly bins; reference bin -0.5 to 0.5 SD"
+}
+X_LABEL <- if (EQUAL_FREQUENCY) {
+  "Signed equal-frequency bin (-5 to 5; breaks in bin_breaks.csv)"
+} else {
+  "Signed anomaly bin (SD of the lagged 30-year climate)"
+}
+
 # Figure 1: every specification, one figure per sample.
 for (s in names(SAMPLE_LABELS)) {
   p <- plot_bin_grid(
@@ -241,8 +311,9 @@ for (s in names(SAMPLE_LABELS)) {
     linetype_name = "Weighting",
     title = paste("Signed-bin response by economic and climate data:",
                   tolower(SAMPLE_LABELS[[s]])),
-    subtitle = paste("BHM base terms + signed half-SD anomaly bins;",
-                     "reference bin -0.5 to 0.5 SD; 95% CI clustered by unit"),
+    subtitle = paste0("BHM base terms + ", BIN_DESCRIPTION,
+                      "; 95% CI clustered by unit"),
+    x_label = X_LABEL,
     caption = paste("DOSE and KUMMU: GADM1 regions; PWT and WB: countries.",
                     "Fixed effects: year + unit-specific linear trends.")
   )
@@ -258,7 +329,8 @@ ggsave(
     SAMPLE_LABELS,
     title = "How much the signed-bin response depends on the data",
     subtitle = paste("Point: mean over the 24 dataset x climate x weighting",
-                     "specifications; thick bar: interquartile range; thin line: min-max")
+                     "specifications; thick bar: interquartile range; thin line: min-max"),
+    x_label = if (EQUAL_FREQUENCY) "Signed equal-frequency bin" else "Signed anomaly bin (SD)"
   ),
   width = 11, height = 5.5, dpi = 300
 )
@@ -329,7 +401,8 @@ ggsave(
     fill_name = "Same signed bin",
     title = "Climate datasets often put the same year in different anomaly bins",
     subtitle = paste("Share of common-sample observations assigned to the same",
-                     "signed half-SD bin by two climate variants"),
+                     if (EQUAL_FREQUENCY) "signed equal-frequency bin by two climate variants" else
+                       "signed half-SD bin by two climate variants"),
     limits = c(0.3, 1)
   ),
   width = 10, height = 8, dpi = 300
