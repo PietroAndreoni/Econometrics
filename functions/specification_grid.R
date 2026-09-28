@@ -46,11 +46,15 @@ grid_sample_summary <- function(fits, data, specs) {
   })
 }
 
-# Signed-bin coefficients with the omitted central bin at zero.
-grid_bin_coefficients <- function(fits, specs) {
-  .map_grid(fits, specs, function(fit, sample, id) bin_coefs(fit)) %>%
+# Signed-bin coefficients with the omitted central bin at zero. `bin_vars` are
+# the temperature and precipitation bin variables, in that order (e.g. the
+# equal-frequency TM_bin_signed_q, RR_bin_signed_q).
+SIGNED_BIN_VARS <- c("TM_bin_signed", "RR_bin_signed")
+
+grid_bin_coefficients <- function(fits, specs, bin_vars = SIGNED_BIN_VARS) {
+  .map_grid(fits, specs, function(fit, sample, id) bin_coefs(fit, bin_vars)) %>%
     mutate(
-      variable = if_else(bin_var == "TM_bin_signed", "Temperature", "Precipitation"),
+      variable = if_else(bin_var == bin_vars[[1]], "Temperature", "Precipitation"),
       bin = as.numeric(bin_label),
       significant = !is.na(p_value) & p_value < 0.05
     )
@@ -59,16 +63,16 @@ grid_bin_coefficients <- function(fits, specs) {
 # Every coefficient that is not a signed bin (the BHM base terms).
 grid_base_terms <- function(fits, specs) {
   .map_grid(fits, specs, function(fit, sample, id) {
-    tidy_fixest(fit, label = id) %>% filter(!grepl("_bin_signed::", term))
+    tidy_fixest(fit, label = id) %>% filter(!grepl("_bin_signed(_q)?::", term))
   })
 }
 
 # Joint Wald tests that each set of signed bins is zero.
-grid_joint_tests <- function(fits, specs) {
+grid_joint_tests <- function(fits, specs, bin_vars = SIGNED_BIN_VARS) {
   .map_grid(fits, specs, function(fit, sample, id) {
     bind_rows(
-      wald_row(fit, "^TM_bin_signed::", label = "Temperature bins = 0"),
-      wald_row(fit, "^RR_bin_signed::", label = "Precipitation bins = 0")
+      wald_row(fit, paste0("^", bin_vars[[1]], "::"), label = "Temperature bins = 0"),
+      wald_row(fit, paste0("^", bin_vars[[2]], "::"), label = "Precipitation bins = 0")
     )
   })
 }
@@ -115,7 +119,7 @@ grid_factor_means <- function(coefficients, factors) {
 # Counts of values in the estimation rows that deserve a look. Source-specific
 # missing-value normalization, including ERA5 concurrent-population zeros, is
 # applied upstream in load_climate_series().
-grid_data_quality <- function(fits, data, specs) {
+grid_data_quality <- function(fits, data, specs, bin_vars = SIGNED_BIN_VARS) {
   .map_grid(fits, specs, function(fit, sample, id) {
     used <- grid_used_rows(fits, data, sample, id)
     tibble::tibble(
@@ -125,8 +129,11 @@ grid_data_quality <- function(fits, data, specs) {
       TM_max = max(used$TM),
       RR_min_m = min(used$RR),
       RR_max_m = max(used$RR),
-      share_extreme_TM_bins = mean(abs(used$TM_bin_signed) == 2.75),
-      share_extreme_RR_bins = mean(abs(used$RR_bin_signed) == 2.75)
+      # Share of rows in the two outermost (open-ended) bins.
+      share_extreme_TM_bins = mean(abs(used[[bin_vars[[1]]]]) ==
+                                     max(abs(used[[bin_vars[[1]]]]))),
+      share_extreme_RR_bins = mean(abs(used[[bin_vars[[2]]]]) ==
+                                     max(abs(used[[bin_vars[[2]]]])))
     )
   })
 }
@@ -309,7 +316,8 @@ plot_base_term_range <- function(plot_data, sample_labels, title, subtitle) {
 # shape) per `colour`, optionally one line type per `linetype`.
 .bin_panel <- function(d, var, facet, colour, colour_values, colour_name,
                        linetype, linetype_values, linetype_labels,
-                       linetype_name, show_x, y_limits) {
+                       linetype_name, show_x, y_limits,
+                       x_label = "Signed anomaly bin (SD of the lagged 30-year climate)") {
   limits <- y_limits[[var]]
   d <- d %>%
     filter(variable == var) %>%
@@ -353,7 +361,7 @@ plot_base_term_range <- function(plot_data, sample_labels, title, subtitle) {
     scale_shape_manual(values = grid_shapes(names(colour_values)),
                        name = colour_name) +
     labs(
-      x = if (show_x) "Signed anomaly bin (SD of the lagged 30-year climate)" else NULL,
+      x = if (show_x) x_label else NULL,
       y = "Effect on growth (pp)"
     ) +
     theme_results() +
@@ -370,12 +378,13 @@ plot_bin_grid <- function(plot_data, facet, colour, colour_name,
                           linetype = NULL, linetype_values = NULL,
                           linetype_labels = waiver(), linetype_name = NULL,
                           title = NULL, subtitle = NULL, caption = NULL,
-                          y_limits = SIGNED_BIN_Y_LIMITS) {
+                          y_limits = SIGNED_BIN_Y_LIMITS,
+                          x_label = "Signed anomaly bin (SD of the lagged 30-year climate)") {
   colour_values <- grid_colours(levels(plot_data[[colour]]))
   panel <- function(var, show_x) {
     .bin_panel(plot_data, var, facet, colour, colour_values, colour_name,
                linetype, linetype_values, linetype_labels, linetype_name,
-               show_x, y_limits)
+               show_x, y_limits, x_label)
   }
   (panel("Temperature", FALSE) / panel("Precipitation", TRUE)) +
     patchwork::plot_layout(guides = "collect") +
@@ -395,7 +404,8 @@ plot_bin_grid <- function(plot_data, facet, colour, colour_name,
 # Mean, interquartile range and min-max of each bin across specifications,
 # one colour per sample.
 plot_bin_range <- function(plot_data, sample_labels, title, subtitle,
-                           y_limits = SIGNED_BIN_Y_LIMITS) {
+                           y_limits = SIGNED_BIN_Y_LIMITS,
+                           x_label = "Signed anomaly bin (SD)") {
   range_data <- plot_data %>%
     group_by(sample, variable, bin) %>%
     summarise(
@@ -427,7 +437,7 @@ plot_bin_range <- function(plot_data, sample_labels, title, subtitle,
                           name = NULL) +
       scale_shape_manual(values = grid_shapes(names(sample_labels)),
                          labels = sample_labels, name = NULL) +
-      labs(title = var, x = "Signed anomaly bin (SD)",
+      labs(title = var, x = x_label,
            y = if (var == "Temperature") "Effect on growth (pp)" else NULL) +
       theme_results()
   }
