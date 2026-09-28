@@ -7,10 +7,17 @@
 # cross-lag covariances of the model's VCOV. Terms and lag ranges are discovered
 # from the coefficient names, and specifications written as term + l(term, 1:k)
 # are supported (fixest prints lag 0 without the l(., 0) wrapper).
-distributed_lag_effects <- function(model, conf_level = 0.95) {
-  z_critical <- stats::qnorm(1 - (1 - conf_level) / 2)
+#
+# Interacted lags, e.g. l(dTM, 0:10) + l(dTM, 0:10):mean_TM_all: the effect of
+# lag k is b_k + g_k * m, so it is evaluated at chosen values m of the
+# interaction variable. `interactions` maps each lagged expression to its
+# interaction variable (c(dTM = "mean_TM_all")) and `at` gives the values, as a
+# named list of named vectors (list(mean_TM_all = c(p10 = 5, p50 = 12))); see
+# region_quantiles(). Expressions without an interaction are evaluated once,
+# with `at` = NA.
+distributed_lag_effects <- function(model, conf_level = 0.95,
+                                    interactions = NULL, at = NULL) {
   coefficients <- stats::coef(model)
-  V <- stats::vcov(model)
   coefficient_names <- names(coefficients)
   names_normalized <- gsub("[[:space:]]", "", coefficient_names)
 
@@ -25,6 +32,14 @@ distributed_lag_effects <- function(model, conf_level = 0.95) {
     lag = as.integer(sub(lag_name_pattern, "\\2", names_normalized[lagged_positions])),
     term = coefficient_names[lagged_positions]
   )
+
+  # Name of the coefficient on term x interaction, in either order.
+  interaction_term <- function(term, variable) {
+    candidates <- c(paste0(term, ":", variable), paste0(variable, ":", term))
+    hit <- candidates[candidates %in% coefficient_names]
+    if (!length(hit)) stop("No interaction coefficient for ", term, " x ", variable)
+    hit[[1]]
+  }
 
   purrr::map_dfr(unique(lag_term_index$expression), function(lag_expression) {
     lag_terms <- lag_term_index %>%
@@ -50,23 +65,58 @@ distributed_lag_effects <- function(model, conf_level = 0.95) {
       stop("Duplicate coefficients found for ", lag_expression, ".")
     }
 
-    purrr::map_dfr(lag_terms$lag, function(current_lag) {
-      current_term <- lag_terms$term[lag_terms$lag == current_lag]
-      cumulative_terms <- lag_terms$term[lag_terms$lag <= current_lag]
+    variable <- if (lag_expression %in% names(interactions)) {
+      interactions[[lag_expression]]
+    } else {
+      NA_character_
+    }
+    values <- if (is.na(variable)) c(`NA` = NA_real_) else at[[variable]]
+    if (is.null(values)) stop("No `at` values given for ", variable)
 
-      tibble::tibble(
-        expression = lag_expression,
-        lag = current_lag,
-        horizon = c("Effect at lag", "Cumulative through lag"),
-        effect = c(
-          unname(coefficients[current_term]),
-          sum(coefficients[cumulative_terms])
-        ),
-        standard_error = c(
-          sqrt(max(as.numeric(V[current_term, current_term]), 0)),
-          sqrt(max(sum(V[cumulative_terms, cumulative_terms, drop = FALSE]), 0))
+    purrr::map_dfr(seq_along(values), function(j) {
+      value <- values[[j]]
+      # One weight vector per lag: 1 on the lag coefficient and, if interacted,
+      # `value` on its interaction coefficient.
+      lag_weights <- lapply(lag_terms$term, function(term) {
+        if (is.na(variable)) {
+          stats::setNames(1, term)
+        } else {
+          stats::setNames(c(1, value), c(term, interaction_term(term, variable)))
+        }
+      })
+      all_terms <- unique(unlist(lapply(lag_weights, names)))
+      G_lag <- t(vapply(lag_weights, function(w) {
+        out <- stats::setNames(numeric(length(all_terms)), all_terms)
+        out[names(w)] <- w
+        out
+      }, numeric(length(all_terms))))
+      if (length(all_terms) == 1L) {
+        G_lag <- matrix(G_lag, ncol = 1, dimnames = list(NULL, all_terms))
+      }
+      G_cumulative <- apply(G_lag, 2, cumsum)
+      if (is.null(dim(G_cumulative))) {
+        G_cumulative <- matrix(G_cumulative, nrow = 1,
+                               dimnames = list(NULL, all_terms))
+      }
+
+      bind_rows(
+        tibble::tibble(lag = lag_terms$lag, horizon = "Effect at lag") %>%
+          bind_cols(linear_combination(model, G_lag, conf_level)),
+        tibble::tibble(lag = lag_terms$lag, horizon = "Cumulative through lag") %>%
+          bind_cols(linear_combination(model, G_cumulative, conf_level))
+      ) %>%
+        transmute(
+          expression = lag_expression,
+          lag,
+          horizon,
+          at = names(values)[[j]],
+          interaction = variable,
+          at_value = value,
+          effect = estimate,
+          standard_error = std_error,
+          lower = conf_low,
+          upper = conf_high
         )
-      )
     })
   }) %>%
     mutate(
@@ -74,31 +124,73 @@ distributed_lag_effects <- function(model, conf_level = 0.95) {
       horizon = factor(
         horizon,
         levels = c("Effect at lag", "Cumulative through lag")
-      ),
-      lower = effect - z_critical * standard_error,
-      upper = effect + z_critical * standard_error
-    )
+      )
+    ) %>%
+    arrange(expression, at, lag, horizon)
 }
 
+# Quantiles of a unit-level variable across units (one value per `id`), named
+# p<100 * prob>, e.g. to evaluate interacted lag effects at typical climates.
+region_quantiles <- function(data, variable, probs = c(0.1, 0.5, 0.9),
+                             id = "GID_1") {
+  values <- data %>%
+    filter(is.finite(.data[[variable]])) %>%
+    distinct(.data[[id]], .keep_all = TRUE) %>%
+    pull(all_of(variable))
+  stats::setNames(
+    unname(stats::quantile(values, probs)),
+    paste0("p", round(100 * probs))
+  )
+}
+
+# Lag paths as in the notebook: one panel per expression (rows) and horizon
+# (columns), a ribbon for the interval. `colour` optionally splits the paths by
+# a column (e.g. the climate source or the `at` percentile), with one colour
+# and marker per level; `horizons` keeps only some horizons.
 plot_distributed_lags <- function(effects, conf_level = 0.95,
-                                  y_label = "Effect on log GDP per-capita growth") {
-  ggplot(effects, aes(x = lag, y = effect)) +
-    geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.4) +
-    geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.18) +
-    geom_line(linewidth = 0.8) +
-    geom_point(size = 1.6) +
-    facet_grid(expression ~ horizon, scales = "free_y") +
+                                  y_label = "Effect on log GDP per-capita growth",
+                                  colour = NULL, colour_name = NULL,
+                                  horizons = NULL,
+                                  facets = expression ~ horizon,
+                                  title = "Distributed-lag coefficient paths",
+                                  subtitle = NULL) {
+  if (!is.null(horizons)) effects <- filter(effects, horizon %in% horizons)
+  caption <- paste0(
+    "Ribbons = ", round(100 * conf_level),
+    "% clustered CI; cumulative intervals include cross-lag covariance"
+  )
+
+  if (is.null(colour)) {
+    return(
+      ggplot(effects, aes(x = lag, y = effect)) +
+        geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.4) +
+        geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.18) +
+        geom_line(linewidth = 0.8) +
+        geom_point(size = 1.6) +
+        facet_grid(facets, scales = "free_y") +
+        scale_x_continuous(breaks = sort(unique(effects$lag))) +
+        labs(x = "Lag (years)", y = y_label, title = title, subtitle = subtitle,
+             caption = caption) +
+        theme_classic()
+    )
+  }
+
+  levels_colour <- levels(factor(effects[[colour]]))
+  ggplot(effects, aes(x = lag, y = effect, colour = .data[[colour]],
+                      fill = .data[[colour]], shape = .data[[colour]],
+                      group = .data[[colour]])) +
+    geom_hline(yintercept = 0, colour = GRID_MUTED, linewidth = 0.3) +
+    geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.12, colour = NA) +
+    geom_line(linewidth = 0.7) +
+    geom_point(size = 1.5) +
+    facet_grid(facets, scales = "free_y") +
     scale_x_continuous(breaks = sort(unique(effects$lag))) +
-    labs(
-      x = "Lag (years)",
-      y = y_label,
-      title = "Distributed-lag coefficient paths",
-      caption = paste0(
-        "Ribbons = ", round(100 * conf_level),
-        "% clustered CI; cumulative intervals include cross-lag covariance"
-      )
-    ) +
-    theme_classic()
+    scale_colour_manual(values = grid_colours(levels_colour), name = colour_name) +
+    scale_fill_manual(values = grid_colours(levels_colour), name = colour_name) +
+    scale_shape_manual(values = grid_shapes(levels_colour), name = colour_name) +
+    labs(x = "Lag (years)", y = y_label, title = title, subtitle = subtitle,
+         caption = caption) +
+    theme_results()
 }
 
 # ---- Bin coefficients -------------------------------------------------------
