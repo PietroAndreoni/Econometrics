@@ -10,6 +10,12 @@
 load_climate_series <- function(geo_resolution, config = panel_config()) {
   is_national <- identical(geo_resolution, "gadm0")
   id_col <- if (is_national) "GID_0" else "GID_1"
+  zero_precipitation_is_missing <-
+    identical(config$climate_source_code, "era") &&
+    identical(
+      .wcd_match(config$climate_weight, .WCD_WEIGHTS, "weight"),
+      "concurrent"
+    )
   # The dashboard names gadm1 units "AFG_1_1" while GADM and the economic
   # panels use "AFG.1_1", so the first underscore becomes a dot. gadm0 ids are
   # plain ISO3 codes and need no change. Units that do not match the expected
@@ -57,7 +63,11 @@ load_climate_series <- function(geo_resolution, config = panel_config()) {
       GID_1,
       year,
       TM,
-      RR = RR / 1000
+      RR = if_else(
+        zero_precipitation_is_missing & RR == 0,
+        NA_real_,
+        RR / 1000
+      )
     ) %>%
     filter(!is.na(TM) | !is.na(RR))
 }

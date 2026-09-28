@@ -176,9 +176,8 @@ climate_agreement <- bind_rows(lapply(names(ECON_DATASETS), function(econ) {
 }))
 write_out(climate_agreement, "climate_data_agreement")
 
-# WCD's ERA5 concurrent-population files store precipitation as 0 (not
-# missing) for units without data; those have no temperature and never enter a
-# model, but a zero next to a valid temperature would (Fiji 1993-2022).
+# Confirm that no exact-zero precipitation values survive into estimation rows;
+# known ERA5 concurrent-population zero sentinels are normalized upstream.
 data_quality <- grid_data_quality(all_fits, all_data, specs)
 write_out(data_quality, "data_quality")
 

@@ -112,9 +112,9 @@ grid_factor_means <- function(coefficients, factors) {
   }))
 }
 
-# Counts of values in the estimation rows that deserve a look. Nothing is
-# recoded: e.g. WCD's ERA5 concurrent-population files store precipitation as
-# 0 for units or years without data.
+# Counts of values in the estimation rows that deserve a look. Source-specific
+# missing-value normalization, including ERA5 concurrent-population zeros, is
+# applied upstream in load_climate_series().
 grid_data_quality <- function(fits, data, specs) {
   .map_grid(fits, specs, function(fit, sample, id) {
     used <- grid_used_rows(fits, data, sample, id)
