@@ -66,14 +66,14 @@ precipitation terms. All tests add alternative weather-response terms to this
 base while retaining the same fixed effects.
 
 ```{r shared-specification}
-fixed_effects <- "year + GID_1[year]"
+fixed_effects <- "year + GID_1"
 pan_id <- c("GID_1", "year")
 outcome <- "dlgrp_pc_usd"
 
 base_climate <- "TM + TM:mean_TM_all + RR + RR:mean_RR_all"
 model <- paste(base_climate, "+ zRR^2 + zTM^2")
 
-ECON_YEAR_MIN <- 1950
+ECON_YEAR_MIN <- 1990
 
 # Climate selection, passed straight to the Weighted Climate Dataset downloader
 # (Gortan, Testa, Fagiolo and Lamperti 2024). CRU TS starts in 1901, so the
@@ -546,8 +546,6 @@ build_dat <- function(
     mean_RR_sample_c = mean_RR_sample - mean(
       mean_RR_sample[!is.na(dlgrp_pc_usd)], na.rm = TRUE
     ),
-    mean_TM = mean_TM_lag_30,
-    mean_RR = mean_RR_lag_30,
     zTM = (TM - mean_TM_lag_30) / sd_TM_lag_30,
     zRR = (RR - mean_RR_lag_30) / sd_RR_lag_30,
     abs_zTM = abs(zTM),
@@ -740,7 +738,7 @@ IDEAS:
 
 ```{r test-absolute}
 
-model_bhm <- "TM + TM:mean_TM_lag_30 + RR + RR:mean_RR_lag_30"
+model_bhm <- "TM + TM:mean_TM_all + RR + RR:mean_RR_all"
 
 f_bhm <- make_formula(model_bhm)
 m_bhm <- fit_climate_model(
@@ -748,8 +746,8 @@ m_bhm <- fit_climate_model(
 )
 
 model_base <- paste(
-  "TM + TM:mean_TM_lag_30 + RR + RR:mean_RR_lag_30",
-  "+ abs_zTMp + abs_zTMm + abs_zRRp + abs_zRRm + mean_TM_lag_30 + mean_RR_lag_30"
+  base_climate,
+  "+ zRR^2 + zTM^2"
 )
 
 f_base <- make_formula(model_base)
@@ -769,14 +767,13 @@ deviation_information_test <- fixest::wald(
 )
 
 etable(
-  m_base_iso3,
   m_bhm,
+  m_base_iso3,
   m_base,
-  headers = c("Iso3", "Naive", "Full"),
+  headers = c("Naive","Iso3", "Sub-national"),
   fitstat = ~n + r2 + wr2 + aic + bic
 )
 
-iplot(m_base)
 ```
 
 
@@ -791,6 +788,7 @@ m_abs <- fit_climate_model(model_abs)
 etable(m_base,m_abs, fitstat = ~n + r2 + wr2)
 
 ```
+
 
 
 # Test 1: lags
@@ -1129,35 +1127,23 @@ conditional on the common BHM climate controls and on the other three bin sets.
 
 ```{r test-level-and-signed-bins, fig.width=8, fig.height=5, fig.show='hold', out.width='50%'}
 model_bins_level_signed <- paste(
-  "+ i(TM_bin_level, ref = \"10-15\")",
-  "+ i(RR_bin_level, ref = \"0.5-1\")",
+  base_climate,
   "+ i(TM_bin_signed, ref = 0)",
   "+ i(RR_bin_signed, ref = 0)"
 )
 f_bins_level_signed <- make_formula(model_bins_level_signed)
 m_bins_level_signed <- fit_climate_model(model_bins_level_signed)
 
+
 iplot(
   m_bins_level_signed,
   i.select = 1,
-  main = "Annual temperature bins",
-  xlab = "Annual mean temperature (degrees Celsius)"
-)
-iplot(
-  m_bins_level_signed,
-  i.select = 2,
-  main = "Annual precipitation bins",
-  xlab = "Annual precipitation (metres)"
-)
-iplot(
-  m_bins_level_signed,
-  i.select = 3,
   main = "Signed temperature-deviation bins",
   xlab = "Temperature deviation (standard deviations)"
 )
 iplot(
   m_bins_level_signed,
-  i.select = 4,
+  i.select = 2,
   main = "Signed precipitation-deviation bins",
   xlab = "Precipitation deviation (standard deviations)"
 )
@@ -1170,227 +1156,6 @@ etable(
 )
 ```
 
-### Carleton-style heterogeneity by income and long-run climate
-
-Following the heterogeneous-response construction used by Carleton and
-coauthors, each annual temperature-bin indicator is interacted linearly with
-the region's sample-average log income and sample-average temperature. Each
-precipitation-bin indicator is analogously interacted with sample-average log
-income and sample-average precipitation. The modifiers are centered over the
-estimation sample, so the uninteracted bin coefficients apply at the sample
-means. Region fixed effects absorb the modifiers' main effects.
-
-The figures divide regions into terciles of income and long-run climate, then
-evaluate the estimated response at the mean income and climate within each of
-the nine cells. All interactions are estimated jointly; the signed anomaly bins
-remain in the model as additive deviation controls.
-
-```{r test-carleton-bin-heterogeneity, fig.width=12, fig.height=8}
-model_bins_level_signed_heterogeneous <- paste(
-  model_bins_level_signed,
-  "+ i(TM_bin_level, log_gdp_av_c, ref = \"10-15\")",
-  "+ i(TM_bin_level, mean_TM_sample_c, ref = \"10-15\")",
-  "+ i(RR_bin_level, log_gdp_av_c, ref = \"0.5-1\")",
-  "+ i(RR_bin_level, mean_RR_sample_c, ref = \"0.5-1\")"
-)
-f_bins_level_signed_heterogeneous <- make_formula(
-  model_bins_level_signed_heterogeneous
-)
-m_bins_level_signed_heterogeneous <- fit_climate_model(
-  model_bins_level_signed_heterogeneous
-)
-
-make_carleton_scenarios <- function(
-    model_data,
-    climate_var,
-    climate_centered_var,
-    climate_group_labels
-) {
-  income_group_labels <- c("Low income", "Middle income", "High income")
-
-  model_data %>%
-    ungroup() %>%
-    filter(!is.na(dlgrp_pc_usd)) %>%
-    distinct(
-      GID_1,
-      log_gdp_av,
-      log_gdp_av_c,
-      .data[[climate_var]],
-      .data[[climate_centered_var]]
-    ) %>%
-    mutate(
-      income_group = factor(
-        income_group_labels[dplyr::ntile(log_gdp_av, 3L)],
-        levels = income_group_labels
-      ),
-      climate_group = factor(
-        climate_group_labels[dplyr::ntile(.data[[climate_var]], 3L)],
-        levels = climate_group_labels
-      )
-    ) %>%
-    group_by(income_group, climate_group) %>%
-    summarise(
-      income_value = mean(log_gdp_av_c),
-      climate_value = mean(.data[[climate_centered_var]]),
-      regions = n(),
-      .groups = "drop"
-    )
-}
-
-carleton_bin_response <- function(
-    fitted_model,
-    model_data,
-    bin_var,
-    reference_bin,
-    income_var,
-    climate_var,
-    scenarios
-) {
-  model_coef <- stats::coef(fitted_model)
-  model_vcov <- stats::vcov(fitted_model)
-  coefficient_names <- names(model_coef)
-  bin_levels <- levels(droplevels(model_data[[bin_var]]))
-
-  purrr::map_dfr(seq_len(nrow(scenarios)), function(scenario_id) {
-    scenario <- scenarios[scenario_id, ]
-
-    purrr::map_dfr(bin_levels, function(bin_level) {
-      if (identical(bin_level, reference_bin)) {
-        return(tibble::tibble(
-          bin = bin_level,
-          estimate = 0,
-          std_error = 0
-        ))
-      }
-
-      main_coefficient <- paste0(bin_var, "::", bin_level)
-      income_coefficient <- paste0(
-        main_coefficient, ":", income_var
-      )
-      climate_coefficient <- paste0(
-        main_coefficient, ":", climate_var
-      )
-      required_coefficients <- c(
-        main_coefficient,
-        income_coefficient,
-        climate_coefficient
-      )
-      missing_coefficients <- setdiff(
-        required_coefficients,
-        coefficient_names
-      )
-
-      if (length(missing_coefficients)) {
-        stop(
-          "Heterogeneous bin coefficients missing from the model: ",
-          paste(missing_coefficients, collapse = ", ")
-        )
-      }
-
-      contrast <- setNames(numeric(length(model_coef)), coefficient_names)
-      contrast[[main_coefficient]] <- 1
-      contrast[[income_coefficient]] <- scenario$income_value[[1]]
-      contrast[[climate_coefficient]] <- scenario$climate_value[[1]]
-
-      estimate <- sum(contrast * model_coef)
-      variance <- drop(t(contrast) %*% model_vcov %*% contrast)
-
-      tibble::tibble(
-        bin = bin_level,
-        estimate = estimate,
-        std_error = sqrt(max(variance, 0))
-      )
-    }) %>%
-      mutate(
-        income_group = scenario$income_group[[1]],
-        climate_group = scenario$climate_group[[1]],
-        regions = scenario$regions[[1]]
-      )
-  }) %>%
-    mutate(
-      bin = factor(bin, levels = bin_levels),
-      conf_low = estimate - stats::qnorm(0.975) * std_error,
-      conf_high = estimate + stats::qnorm(0.975) * std_error
-    )
-}
-
-plot_carleton_response <- function(plot_data, title, x_label) {
-  ggplot(plot_data, aes(x = bin, y = estimate, group = 1)) +
-    geom_hline(yintercept = 0, color = "grey55", linewidth = 0.4) +
-    geom_line(linewidth = 0.55, color = "#0072B2") +
-    geom_errorbar(
-      aes(ymin = conf_low, ymax = conf_high),
-      width = 0.18,
-      linewidth = 0.45,
-      color = "#0072B2"
-    ) +
-    geom_point(size = 1.8, color = "#0072B2") +
-    facet_grid(income_group ~ climate_group) +
-    labs(
-      title = title,
-      subtitle = paste(
-        "Columns: long-run climate tercile; rows: sample-average income tercile"
-      ),
-      x = x_label,
-      y = "Estimated effect relative to reference bin"
-    ) +
-    theme_classic() +
-    theme(
-      axis.text.x = element_text(angle = 45, hjust = 1),
-      strip.background = element_rect(fill = "grey92", color = "grey70")
-    )
-}
-
-temperature_scenarios <- make_carleton_scenarios(
-  data,
-  climate_var = "mean_TM_sample",
-  climate_centered_var = "mean_TM_sample_c",
-  climate_group_labels = c("Cold", "Temperate", "Hot")
-)
-precipitation_scenarios <- make_carleton_scenarios(
-  data,
-  climate_var = "mean_RR_sample",
-  climate_centered_var = "mean_RR_sample_c",
-  climate_group_labels = c("Dry", "Moderate", "Wet")
-)
-
-temperature_carleton_response <- carleton_bin_response(
-  m_bins_level_signed_heterogeneous,
-  model_data = data,
-  bin_var = "TM_bin_level",
-  reference_bin = "10-15",
-  income_var = "log_gdp_av_c",
-  climate_var = "mean_TM_sample_c",
-  scenarios = temperature_scenarios
-)
-precipitation_carleton_response <- carleton_bin_response(
-  m_bins_level_signed_heterogeneous,
-  model_data = data,
-  bin_var = "RR_bin_level",
-  reference_bin = "0.5-1",
-  income_var = "log_gdp_av_c",
-  climate_var = "mean_RR_sample_c",
-  scenarios = precipitation_scenarios
-)
-
-plot_carleton_response(
-  temperature_carleton_response,
-  "Temperature-bin response by average income and temperature",
-  "Annual mean temperature (degrees Celsius)"
-)
-plot_carleton_response(
-  precipitation_carleton_response,
-  "Precipitation-bin response by average income and precipitation",
-  "Annual precipitation (metres)"
-)
-
-etable(
-  m_bins_level_signed,
-  m_bins_level_signed_heterogeneous,
-  headers = c("Additive bins", "Income-climate interactions"),
-  fitstat = ~n + r2 + wr2
-)
-```
 
 # PREFERRED SPECIFICATION:
 

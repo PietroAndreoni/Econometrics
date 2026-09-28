@@ -2,6 +2,19 @@ suppressPackageStartupMessages(library(tidyverse))
 suppressPackageStartupMessages(library(arrow))
 suppressPackageStartupMessages(library(zoo))
 
+# `hamilton_trend()` is shared with prepare_global_climate_data.R so the global
+# temperature series is filtered by exactly the same operator as the regional
+# panels. This script runs from the parent of the repository, the global one from
+# the repository root, so both candidate paths are tried.
+local({
+  candidates <- c("climate_transforms.R", "econometrics/climate_transforms.R")
+  existing <- candidates[file.exists(candidates)]
+  if (!length(existing)) {
+    stop("climate_transforms.R not found in: ", paste(candidates, collapse = ", "))
+  }
+  source(existing[[1]], local = globalenv())
+})
+
 # Climate preprocessing selectors
 SELECT_GADM_LEVEL <- c("gadm0")      # gadm0, gadm1
 SELECT_CLIMATE_SOURCE <- c("era5") # cru, dela, era5
@@ -136,47 +149,8 @@ add_power_columns <- function(data, vars, power) {
   )
 }
 
-# Hamilton (2018) regression filter. For a single series y ordered by year, the
-# trend is the fitted value of
-#   y_t = b0 + b1*y_{t-h} + b2*y_{t-h-1} + ... + bp*y_{t-h-p+1} + v_t
-# estimated by OLS; the residual v_t is the cyclical part. The horizon h is set
-# to the same window used for the rolling means.
-#
-# `train` is an optional logical vector (same length as y) selecting the rows on
-# which the OLS coefficients are estimated; the lagged predictors are always
-# built from the full series, so training rows can reach back before the training
-# window for their lags. When `train` is NULL the whole series is used and the
-# trend is returned for every row with available predictors; otherwise the trend
-# is returned only for the training rows (the trend "over" that period). Returns
-# a same-length vector, NA where predictors are unavailable or too few rows are
-# available to estimate the regression.
-hamilton_trend <- function(y, h, p = 4L, train = NULL) {
-  h <- as.integer(h)
-  p <- as.integer(p)
-  n <- length(y)
-  trend <- rep(NA_real_, n)
-  if (is.null(train)) {
-    train <- rep(TRUE, n)
-  }
-  train <- train & !is.na(train)
-  if (n <= h + p) {
-    return(trend)
-  }
-  lag_cols <- lapply(seq.int(0L, p - 1L), function(j) dplyr::lag(y, h + j))
-  X <- as.data.frame(stats::setNames(lag_cols, paste0("lag", seq.int(h, h + p - 1L))))
-  df <- cbind(data.frame(y = y), X)
-  has_predictors <- stats::complete.cases(X)
-  fit_rows <- train & stats::complete.cases(df)
-  if (sum(fit_rows) <= p + 1L) {
-    return(trend)
-  }
-  fit <- stats::lm(y ~ ., data = df[fit_rows, , drop = FALSE])
-  out_rows <- train & has_predictors
-  trend[out_rows] <- as.numeric(
-    stats::predict(fit, newdata = df[out_rows, , drop = FALSE])
-  )
-  trend
-}
+# `hamilton_trend()` now lives in climate_transforms.R, sourced at the top of this
+# script.
 
 climate_parquet_files <- list.files(
   "econometrics/data",

@@ -1,0 +1,1222 @@
+---
+title: "Climate, Weather, and Stochastic Production Frontiers"
+author: ""
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    code_folding: show
+params:
+  climate_window_main: 20
+  climate_window_tol: 30
+  run_heavy_models: true
+  run_year_fe_sfa: false
+  cache_models: true
+  results_dir: "results_sfa"
+  project_setup_script: null
+---
+
+# Purpose
+
+This notebook estimates a common family of models in which long-run climate affects the production frontier and weather anomalies affect realized output. It is designed around a national Penn World Table panel joined to annual temperature and precipitation data.
+
+The main structural stochastic-frontier equation is
+
+$$\ln y_{it} = \alpha_i + q_t + \beta \ln k_{it} + f(C^T_{it}, C^P_{it}) + v_{it} - u_{it},$$
+
+where climate enters the frontier through $f(\cdot)$, while weather anomalies determine the one-sided component $u_{it}$.
+
+The notebook estimates:
+
+1.  OLS/fixed-effect diagnostics using `fixest`.
+2.  A deterministic conditional-mean benchmark analogous to the climate-adaptation decomposition in Merel and Gammans.
+3.  A Tol-core stochastic frontier benchmark: Greene-type country fixed effects, linear trend, exponential inefficiency, 30-year preceding climate, and absolute standardized weather anomalies.
+4.  The same fixed-effect stochastic frontier with squared anomalies.
+5.  The same fixed-effect stochastic frontier with asymmetric hot/cold/wet/dry anomalies.
+6.  Greene (2005) `TFE` using the panel estimator in the current `sfa` package.
+7.  Chen, Schmidt and Wang (2014) `TFE_WMLE`.
+8.  `TRE_Z` with Mundlak/correlated-random-effects controls and weather determinants of inefficiency.
+9.  Wang-Ho first-difference `FD`, which eliminates country effects while retaining a weather-dependent inefficiency scaling function.
+10. Optional year-fixed-effect SFA variants.
+
+The Tol comparison follows the core homogeneous specification in Tol (2021, arXiv:2102.13110): climate is the 30 years preceding year $t$; the baseline frontier contains temperature, temperature squared, precipitation, precipitation squared, and their interaction; the time control is a linear trend; inefficiency is exponential and depends on absolute standardized temperature and precipitation anomalies. Tol estimated a one-step True Fixed-Effect model following Greene (2005). He reports that a full set of year dummies caused convergence problems in the baseline stochastic-frontier likelihood. Tol also reports richer hot/poor heterogeneity specifications; these are not labeled as exact replications here because the present project does not currently supply the same World Bank income-classification variable.
+
+Important: coefficients in the inefficiency equation are not directly comparable across all `sfa` model families because their link functions differ. The comparison section therefore reports both raw coefficients and model-specific scale ratios.
+
+# 1. Setup
+
+```{r setup, message=FALSE, warning=FALSE}
+required_packages <- c(
+  "dplyr", "tidyr", "purrr", "tibble", "ggplot2",
+  "fixest", "e1071", "sfa", "digest"
+)
+
+missing_packages <- required_packages[!vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)]
+if (length(missing_packages)) {
+  stop(
+    "Install missing packages before running this notebook: ",
+    paste(missing_packages, collapse = ", ")
+  )
+}
+
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(tibble)
+library(ggplot2)
+library(fixest)
+library(e1071)
+library(sfa)
+
+if (packageVersion("sfa") < package_version("1.1.3")) {
+  stop(
+    "This notebook expects sfa >= 1.1.3. In that version and later, ",
+    "model_name='TFE' denotes Greene (2005) TFE and 'TFE_WMLE' denotes ",
+    "Chen-Schmidt-Wang (2014) within MLE."
+  )
+}
+
+MAIN_WINDOW <- params$climate_window_main
+TOL_WINDOW  <- params$climate_window_tol
+RUN_HEAVY   <- isTRUE(params$run_heavy_models)
+RUN_YEAR_FE <- isTRUE(params$run_year_fe_sfa)
+CACHE       <- isTRUE(params$cache_models)
+RESULT_DIR  <- params$results_dir
+ECON_YEAR_MIN <- 1940
+CLIM_HISTORY_YEARS <- 30
+  
+# Optional project bootstrap. Set this parameter when knitting in a fresh R session,
+# e.g. project_setup_script: "R/load_project_data.R".
+if (!is.null(params$project_setup_script) &&
+    length(params$project_setup_script) == 1L &&
+    !is.na(params$project_setup_script) &&
+    nzchar(params$project_setup_script)) {
+  source(params$project_setup_script, local = globalenv())
+}
+
+required_project_objects <- c(
+  "econ_data", "data_rr", "data_tm",
+  "ECON_YEAR_MIN", "CLIM_HISTORY_YEARS", "lag_by_year"
+)
+missing_project_objects <- required_project_objects[
+  !vapply(required_project_objects, exists, logical(1), inherits = TRUE)
+]
+if (length(missing_project_objects)) {
+  stop(
+    "Project objects are not loaded: ",
+    paste(missing_project_objects, collapse = ", "),
+    ". Source the project setup before knitting or set params$project_setup_script."
+  )
+}
+
+if (CLIM_HISTORY_YEARS < TOL_WINDOW) {
+  stop("CLIM_HISTORY_YEARS must be at least ", TOL_WINDOW,
+       " to construct Tol-style preceding climate normals.")
+}
+
+dir.create(RESULT_DIR, showWarnings = FALSE, recursive = TRUE)
+
+options(scipen = 5)
+set.seed(12345)
+```
+
+# 2. Input data
+
+This notebook uses the following objects from the existing project. They can already be loaded in the R session, or `project_setup_script` can point to a project bootstrap script that creates them:
+
+- `econ_data`
+- `data_rr`
+- `data_tm`
+- `ECON_YEAR_MIN`
+- `CLIM_HISTORY_YEARS`
+- `lag_by_year()`
+
+The function below reproduces the current data construction. The economic sample begins at `ECON_YEAR_MIN`, while climate observations before that date are retained long enough to construct preceding climate moments.
+
+```{r build-data}
+build_dat <- function(w_rr, w_tm) {
+
+  econ <- econ_data %>%
+    filter(
+      econ_source == "PWT110",
+      year >= ECON_YEAR_MIN
+    )
+
+  data_rr %>%
+    filter(
+      window_rr == w_rr,
+      weight == "area",
+      climate_source == "era5",
+      (weight_year == "2015" | weight_year == "un"),
+      !is.na(RR)
+    ) %>%
+    select(-window_rr, -weight, -weight_year) %>%
+    inner_join(
+      data_tm %>%
+        filter(
+          window_tm == w_tm,
+          weight == "area",
+          climate_source == "era5",
+          (weight_year == "2015" | weight_year == "un"),
+          !is.na(TM)
+        ) %>%
+        select(-window_tm, -weight, -weight_year)
+    ) %>%
+    filter(year >= ECON_YEAR_MIN - CLIM_HISTORY_YEARS) %>%
+    left_join(econ) %>%
+    mutate(
+      .has_level_outcome = !is.na(lgrp_pc_usd) |
+        (!is.na(grp_pc_usd) & grp_pc_usd > 0)
+    ) %>%
+    group_by(GID_0) %>%
+    # Keep countries with an estimable GDP-per-worker level and do not carry
+    # climate observations past their final usable economic observation.
+    filter(any(.has_level_outcome)) %>%
+    filter(year <= max(year[.has_level_outcome])) %>%
+    mutate(log_gdp_av = log(mean(grp_pc_usd, na.rm = TRUE))) %>%
+    arrange(year, .by_group = TRUE) %>%
+    mutate(
+      mean_TM_lag = lag_by_year(mean_TM, year),
+      mean_RR_lag = lag_by_year(mean_RR, year)
+    ) %>%
+    ungroup() %>%
+    select(-.has_level_outcome)
+}
+
+# MAIN_WINDOW is used for the preferred specification.
+df_raw <- build_dat(MAIN_WINDOW, MAIN_WINDOW)
+```
+
+## 2.1 Validate the panel
+
+```{r validate-panel}
+stopifnot(all(c("GID_0", "year", "TM", "RR") %in% names(df_raw)))
+
+panel_gaps <- df_raw %>%
+  arrange(GID_0, year) %>%
+  group_by(GID_0) %>%
+  summarise(
+    n = n(),
+    has_gap = any(diff(year) != 1),
+    .groups = "drop"
+  )
+
+if (any(panel_gaps$has_gap)) {
+  warning(
+    sum(panel_gaps$has_gap),
+    " countries have gaps in the climate panel. The rolling helper below requires ",
+    "consecutive annual observations and returns NA where a full consecutive window is unavailable."
+  )
+}
+```
+
+# 3. Construct climate and weather variables
+
+## 3.1 Helper for preceding rolling moments
+
+Tol's climate at year $t$ is based on the 30 years preceding $t$, so the current weather realization must not enter its own climate normal. The helper below explicitly checks that the window contains consecutive years.
+
+```{r rolling-helper}
+previous_window_moment <- function(x, year, window, fun) {
+  n <- length(x)
+  out <- rep(NA_real_, n)
+
+  for (i in seq_len(n)) {
+    target_years <- seq.int(year[i] - window, year[i] - 1L)
+    idx <- match(target_years, year)
+
+    if (!anyNA(idx)) {
+      vals <- x[idx]
+      if (all(is.finite(vals))) {
+        out[i] <- fun(vals)
+      }
+    }
+  }
+
+  out
+}
+
+make_preceding_moments <- function(data, window, prefix) {
+  data %>%
+    arrange(GID_0, year) %>%
+    group_by(GID_0) %>%
+    mutate(
+      "{prefix}_TM_mean" := previous_window_moment(TM, year, window, mean),
+      "{prefix}_TM_sd"   := previous_window_moment(TM, year, window, stats::sd),
+      "{prefix}_RR_mean" := previous_window_moment(RR, year, window, mean),
+      "{prefix}_RR_sd"   := previous_window_moment(RR, year, window, stats::sd)
+    ) %>%
+    ungroup()
+}
+```
+
+## 3.2 Main and Tol climate moments
+
+For the main specification, the existing lagged rolling means are retained where available. Standard deviations use the project's `sd_TM_all` and `sd_RR_all`, matching the current specification. A separate set of preceding 30-year mean and SD variables is computed for the Tol comparison.
+
+```{r construct-moments}
+df <- df_raw %>%
+  make_preceding_moments(window = TOL_WINDOW, prefix = "tol")
+
+if (!all(c("mean_TM_lag", "mean_RR_lag", "sd_TM_all", "sd_RR_all") %in% names(df))) {
+  stop(
+    "The preferred specification expects mean_TM_lag, mean_RR_lag, sd_TM_all and sd_RR_all. ",
+    "Adjust this section if the project uses different names."
+  )
+}
+
+df <- df %>%
+  mutate(
+    # Correct conversion from per-capita variables to per-worker variables.
+    # If lgrp_pc_usd = log(GDP/pop), then log(GDP/worker) = lgrp_pc_usd - log(worker/pop).
+    y = lgrp_pc_usd - log(share_emp_pop),
+    k = log(k_pc_usd) - log(share_emp_pop),
+
+    # Preferred climate frontier.
+    clim_T = mean_TM_lag,
+    clim_P = mean_RR_lag,
+    clim_T2 = clim_T^2,
+    clim_P2 = clim_P^2,
+    clim_TP = clim_T * clim_P,
+
+    # Preferred weather standardization.
+    zT = (TM - clim_T) / sd_TM_all,
+    zP = (RR - clim_P) / sd_RR_all,
+    zT2 = zT^2,
+    zP2 = zP^2,
+    abs_zT = abs(zT),
+    abs_zP = abs(zP),
+    hot = pmax(zT, 0),
+    cold = pmax(-zT, 0),
+    wet = pmax(zP, 0),
+    dry = pmax(-zP, 0),
+
+    # Tol-exact climate/weather construction: preceding 30-year mean and SD.
+    tol_clim_T = tol_TM_mean,
+    tol_clim_P = tol_RR_mean,
+    tol_clim_T2 = tol_clim_T^2,
+    tol_clim_P2 = tol_clim_P^2,
+    tol_clim_TP = tol_clim_T * tol_clim_P,
+    tol_zT = (TM - tol_clim_T) / tol_TM_sd,
+    tol_zP = (RR - tol_clim_P) / tol_RR_sd,
+    tol_abs_zT = abs(tol_zT),
+    tol_abs_zP = abs(tol_zP),
+    tol_zT2 = tol_zT^2,
+    tol_zP2 = tol_zP^2,
+
+    trend = year - min(year, na.rm = TRUE)
+  )
+```
+
+Check that the two ways of constructing GDP per worker agree when the level variable is available:
+
+```{r check-output-transform}
+if ("grp_pc_usd" %in% names(df)) {
+  transform_check <- df %>%
+    filter(
+      is.finite(y),
+      is.finite(grp_pc_usd),
+      is.finite(share_emp_pop),
+      grp_pc_usd > 0,
+      share_emp_pop > 0
+    ) %>%
+    summarise(
+      max_abs_difference = max(
+        abs(y - log(grp_pc_usd / share_emp_pop)),
+        na.rm = TRUE
+      )
+    )
+
+  print(transform_check)
+}
+```
+
+# 4. Common estimation sample
+
+Using a common sample is essential for meaningful likelihood and coefficient comparisons. The common sample below contains all variables needed by the core models.
+
+```{r common-sample}
+common_vars <- c(
+  "GID_0", "year", "y", "k", "TM", "RR", "trend",
+  "clim_T", "clim_T2", "clim_P", "clim_P2", "clim_TP",
+  "zT", "zP", "zT2", "zP2", "abs_zT", "abs_zP",
+  "hot", "cold", "wet", "dry",
+  "tol_clim_T", "tol_clim_T2", "tol_clim_P", "tol_clim_P2", "tol_clim_TP",
+  "tol_zT", "tol_zP", "tol_abs_zT", "tol_abs_zP", "tol_zT2", "tol_zP2"
+)
+
+missing_common <- setdiff(common_vars, names(df))
+if (length(missing_common)) {
+  stop("Missing variables: ", paste(missing_common, collapse = ", "))
+}
+
+df_sfa <- df %>%
+  filter(if_all(all_of(common_vars), ~ !is.na(.x))) %>%
+  filter(
+    if_all(
+      all_of(setdiff(common_vars, "GID_0")),
+      ~ is.finite(as.numeric(.x))
+    )
+  ) %>%
+  group_by(GID_0) %>%
+  filter(n() >= 3) %>%
+  ungroup() %>%
+  arrange(GID_0, year) %>%
+  mutate(
+    country_fe = droplevels(factor(GID_0)),
+    year_fe = droplevels(factor(year))
+  )
+
+sample_summary <- df_sfa %>%
+  summarise(
+    observations = n(),
+    countries = n_distinct(GID_0),
+    first_year = min(year),
+    last_year = max(year),
+    min_T_per_country = min(table(GID_0)),
+    max_T_per_country = max(table(GID_0))
+  )
+
+print(sample_summary)
+```
+
+# 5. OLS and fixed-effect diagnostics
+
+These regressions do not estimate a stochastic frontier. They are diagnostics for residual asymmetry and benchmarks for the frontier coefficients.
+
+```{r ols-diagnostics}
+ols_pooled <- feols(
+  y ~ k + clim_T + clim_T2 + clim_P + clim_P2 + clim_TP,
+  data = df_sfa
+)
+
+ols_country_fe <- feols(
+  y ~ k + clim_T + clim_T2 + clim_P + clim_P2 + clim_TP | GID_0,
+  data = df_sfa
+)
+
+ols_country_year_fe <- feols(
+  y ~ k + clim_T + clim_T2 + clim_P + clim_P2 + clim_TP | GID_0 + year,
+  cluster = ~GID_0,
+  data = df_sfa
+)
+
+residual_diagnostics <- tibble(
+  model = c("Pooled OLS", "Country FE", "Country + year FE"),
+  skewness = c(
+    e1071::skewness(resid(ols_pooled), type = 2),
+    e1071::skewness(resid(ols_country_fe), type = 2),
+    e1071::skewness(resid(ols_country_year_fe), type = 2)
+  ),
+  sd_residual = c(
+    sd(resid(ols_pooled)),
+    sd(resid(ols_country_fe)),
+    sd(resid(ols_country_year_fe))
+  )
+)
+
+print(residual_diagnostics)
+```
+
+Negative residual skewness is consistent with a production frontier whose composite residual is $v-u$, but it is not sufficient to identify weather as the source of the one-sided component.
+
+# 6. Deterministic conditional-mean benchmarks
+
+## 6.1 Climate frontier plus squared weather anomaly in the conditional mean
+
+This model asks whether unusual weather predicts average output directly, rather than the distribution of a latent one-sided output gap.
+
+```{r deterministic-benchmark}
+mean_quad_fe <- feols(
+  y ~
+    k + clim_T + clim_T2 + clim_P + clim_P2 + clim_TP +
+    zT2 + zP2 |
+    GID_0 + year,
+  cluster = ~GID_0,
+  data = df_sfa
+)
+
+summary(mean_quad_fe)
+```
+
+## 6.2 Merel-Gammans-style adaptation benchmark
+
+This is a conceptual analogue rather than a literal replication of their application. Actual weather enters the conditional mean, while squared deviations from the climate normal capture an additional unfamiliar-weather penalty.
+
+```{r merel-benchmark}
+merel_like <- feols(
+  y ~
+    k +
+    TM + I(TM^2) +
+    RR + I(RR^2) +
+    zT2 + zP2 |
+    GID_0 + year,
+  cluster = ~GID_0,
+  data = df_sfa
+)
+
+summary(merel_like)
+```
+
+# 7. Helpers for stochastic-frontier estimation
+
+The models can be slow. Each successful fit is cached as an `.rds` file so that knitting the notebook again does not re-estimate unchanged models.
+
+```{r sfa-helpers}
+is_sfa_fit <- function(x) inherits(x, "sfareg")
+`%||%` <- function(x, y) if (is.null(x)) y else x
+
+MODEL_CACHE_TAG <- substr(
+  digest::digest(
+    list(
+      data = df_sfa[, common_vars, drop = FALSE],
+      main_window = MAIN_WINDOW,
+      tol_window = TOL_WINDOW,
+      sfa_version = as.character(packageVersion("sfa"))
+    ),
+    algo = "xxhash64"
+  ),
+  1, 12
+)
+
+fit_cached <- function(name, fit_fun, overwrite = FALSE) {
+  path <- file.path(RESULT_DIR, paste0(name, "_", MODEL_CACHE_TAG, ".rds"))
+
+  if (CACHE && file.exists(path) && !overwrite) {
+    message("Loading cached model: ", name)
+    return(readRDS(path))
+  }
+
+  message("Estimating model: ", name)
+  t0 <- Sys.time()
+
+  fit <- tryCatch(
+    fit_fun(),
+    error = function(e) {
+      structure(
+        list(
+          model_name = name,
+          error = conditionMessage(e),
+          elapsed_seconds = as.numeric(difftime(Sys.time(), t0, units = "secs"))
+        ),
+        class = "sfa_fit_error"
+      )
+    }
+  )
+
+  # Cache successful model objects only. A failed optimization should be retried
+  # after code/data changes rather than silently reloaded forever.
+  if (CACHE && is_sfa_fit(fit)) saveRDS(fit, path)
+  fit
+}
+
+safe_logLik <- function(fit) {
+  if (!is_sfa_fit(fit)) return(NA_real_)
+  tryCatch(as.numeric(logLik(fit)), error = function(e) NA_real_)
+}
+
+safe_AIC <- function(fit) {
+  if (!is_sfa_fit(fit)) return(NA_real_)
+  tryCatch(AIC(fit), error = function(e) NA_real_)
+}
+
+safe_BIC <- function(fit) {
+  if (!is_sfa_fit(fit)) return(NA_real_)
+  tryCatch(BIC(fit), error = function(e) NA_real_)
+}
+
+safe_nobs <- function(fit) {
+  if (!is_sfa_fit(fit)) return(NA_integer_)
+  tryCatch(nobs(fit), error = function(e) nrow(fit$data))
+}
+
+tidy_sfa <- function(fit, label) {
+  if (!is_sfa_fit(fit)) {
+    return(tibble(
+      model = label,
+      term = NA_character_,
+      estimate = NA_real_,
+      std_error = NA_real_,
+      t_value = NA_real_,
+      error = fit$error %||% "unknown error"
+    ))
+  }
+
+  raw <- as.matrix(fit$out)
+
+  # sfa versions have exposed fit$out in either p x 3 or 3 x p orientation.
+  # Normalize to p x 3 without relying on undocumented orientation.
+  if (
+    nrow(raw) == 3L &&
+    !is.null(rownames(raw)) &&
+    all(c("par", "st_err", "t-val") %in% rownames(raw))
+  ) {
+    raw <- t(raw)
+  }
+
+  if (ncol(raw) < 3L) {
+    stop("Unexpected fit$out structure for model ", label)
+  }
+
+  terms <- rownames(raw)
+  if (is.null(terms)) terms <- paste0("par_", seq_len(nrow(raw)))
+
+  tibble(
+    model = label,
+    term = terms,
+    estimate = as.numeric(raw[, 1]),
+    std_error = as.numeric(raw[, 2]),
+    t_value = as.numeric(raw[, 3]),
+    error = NA_character_
+  )
+}
+```
+
+# 8. Tol-core direct methodological comparison
+
+Tol's equation is
+
+$$\ln y_{it} = \beta \ln k_{it} + f(\bar T_{it}, \bar R_{it}) + \mu_i + t + v_{it} - u_{it},$$
+
+where $\bar T$ and $\bar R$ are averages over the 30 years preceding $t$, and
+
+$$u_{it}\sim \mathrm{Exponential}(\lambda_{it}),$$
+
+with the inefficiency scale depending on absolute standardized weather anomalies. The model below uses `sfm(..., model_name = "NE_Z")` and explicit country dummies. This is the closest current `sfa` implementation to Tol's core one-step Greene TFE with exponential, heteroskedastic inefficiency.
+
+It is a methodological comparison, not a numerical or exact preferred-column replication: the present data use PWT 11.0, ERA5, the project's spatial weights, and a different sample. Tol's richer preferred specifications also interact climate/weather terms with hot/poor-country indicators.
+
+```{r tol-model}
+models <- list()
+
+models$tol_abs_fe <- fit_cached(
+  "tol_abs_fe",
+  function() {
+    sfa::sfm(
+      y ~
+        k +
+        tol_clim_T + tol_clim_T2 +
+        tol_clim_P + tol_clim_P2 +
+        tol_clim_TP +
+        trend +
+        country_fe |
+        tol_abs_zT + tol_abs_zP,
+      model_name = "NE_Z",
+      data = df_sfa
+    )
+  }
+)
+
+if (is_sfa_fit(models$tol_abs_fe)) summary(models$tol_abs_fe)
+```
+
+# 9. Preferred squared-anomaly fixed-effect SFA
+
+This changes the weather metric while holding the country-FE treatment, exponential inefficiency distribution, frontier, and trend fixed.
+
+```{r quad-fe-model}
+models$quad_fe <- fit_cached(
+  "quad_fe",
+  function() {
+    sfa::sfm(
+      y ~
+        k +
+        clim_T + clim_T2 +
+        clim_P + clim_P2 +
+        clim_TP +
+        trend +
+        country_fe |
+        zT2 + zP2,
+      model_name = "NE_Z",
+      data = df_sfa
+    )
+  }
+)
+
+if (is_sfa_fit(models$quad_fe)) summary(models$quad_fe)
+```
+
+# 10. Asymmetric weather fixed-effect SFA
+
+```{r asym-fe-model}
+models$asym_fe <- fit_cached(
+  "asym_fe",
+  function() {
+    sfa::sfm(
+      y ~
+        k +
+        clim_T + clim_T2 +
+        clim_P + clim_P2 +
+        clim_TP +
+        trend +
+        country_fe |
+        hot + cold + wet + dry,
+      model_name = "NE_Z",
+      data = df_sfa
+    )
+  }
+)
+
+if (is_sfa_fit(models$asym_fe)) summary(models$asym_fe)
+```
+
+# 11. Greene TFE and within-MLE fixed effects
+
+These models are useful for assessing the treatment of persistent country heterogeneity. In the current `sfa` package, `TFE` and `TFE_WMLE` do not provide the same weather-dependent `_Z` inefficiency equation used above. They therefore test the frontier and fixed-effect estimator, not the complete weather mechanism.
+
+## 11.1 Greene (2005) TFE
+
+```{r greene-tfe}
+if (RUN_HEAVY) {
+  models$tfe_greene <- fit_cached(
+    "tfe_greene",
+    function() {
+      sfa::psfm(
+        y ~
+          k +
+          clim_T + clim_T2 +
+          clim_P + clim_P2 +
+          clim_TP +
+          trend,
+        model_name = "TFE",
+        data = df_sfa,
+        individual = "GID_0",
+        time = "year"
+      )
+    }
+  )
+
+  if (is_sfa_fit(models$tfe_greene)) summary(models$tfe_greene)
+}
+```
+
+A warning that `lambda` reaches its upper bound should be treated as a boundary/degeneracy warning, not as evidence of precisely estimated near-zero symmetric noise. The current package explicitly recommends `TFE_WMLE` when Greene TFE runs to this boundary.
+
+## 11.2 Chen-Schmidt-Wang within MLE
+
+```{r tfe-wmle}
+if (RUN_HEAVY) {
+  models$tfe_wmle <- fit_cached(
+    "tfe_wmle",
+    function() {
+      sfa::psfm(
+        y ~
+          k +
+          clim_T + clim_T2 +
+          clim_P + clim_P2 +
+          clim_TP +
+          trend,
+        model_name = "TFE_WMLE",
+        data = df_sfa,
+        individual = "GID_0",
+        time = "year"
+      )
+    }
+  )
+
+  if (is_sfa_fit(models$tfe_wmle)) summary(models$tfe_wmle)
+}
+```
+
+# 12. Mundlak correlated random effects for `TRE_Z`
+
+`TRE_Z` allows weather determinants of the time-varying one-sided component, but country heterogeneity is random rather than fixed. Mundlak controls are added to allow the persistent country effect to correlate with the observed time-varying frontier regressors.
+
+The country means are constructed on the final common estimation sample.
+
+```{r mundlak-data}
+df_sfa <- df_sfa %>%
+  group_by(GID_0) %>%
+  mutate(
+    k_bar = mean(k),
+    clim_T_bar = mean(clim_T),
+    clim_T2_bar = mean(clim_T2),
+    clim_P_bar = mean(clim_P),
+    clim_P2_bar = mean(clim_P2),
+    clim_TP_bar = mean(clim_TP),
+
+    tol_clim_T_bar = mean(tol_clim_T),
+    tol_clim_T2_bar = mean(tol_clim_T2),
+    tol_clim_P_bar = mean(tol_clim_P),
+    tol_clim_P2_bar = mean(tol_clim_P2),
+    tol_clim_TP_bar = mean(tol_clim_TP)
+  ) %>%
+  ungroup()
+```
+
+## 12.1 Preferred squared anomalies
+
+```{r tre-mundlak-quad}
+if (RUN_HEAVY) {
+  models$tre_mundlak_quad <- fit_cached(
+    "tre_mundlak_quad",
+    function() {
+      sfa::psfm(
+        y ~
+          k +
+          clim_T + clim_T2 +
+          clim_P + clim_P2 +
+          clim_TP +
+          trend +
+          k_bar +
+          clim_T_bar + clim_T2_bar +
+          clim_P_bar + clim_P2_bar +
+          clim_TP_bar |
+          zT2 + zP2,
+        model_name = "TRE_Z",
+        data = df_sfa,
+        individual = "GID_0",
+        time = "year",
+        collinear_action = "start_only"
+      )
+    }
+  )
+
+  if (is_sfa_fit(models$tre_mundlak_quad)) summary(models$tre_mundlak_quad)
+}
+```
+
+## 12.2 Tol-type absolute anomalies
+
+```{r tre-mundlak-abs}
+if (RUN_HEAVY) {
+  models$tre_mundlak_abs <- fit_cached(
+    "tre_mundlak_abs",
+    function() {
+      sfa::psfm(
+        y ~
+          k +
+          tol_clim_T + tol_clim_T2 +
+          tol_clim_P + tol_clim_P2 +
+          tol_clim_TP +
+          trend +
+          k_bar +
+          tol_clim_T_bar + tol_clim_T2_bar +
+          tol_clim_P_bar + tol_clim_P2_bar +
+          tol_clim_TP_bar |
+          tol_abs_zT + tol_abs_zP,
+        model_name = "TRE_Z",
+        data = df_sfa,
+        individual = "GID_0",
+        time = "year",
+        collinear_action = "start_only"
+      )
+    }
+  )
+
+  if (is_sfa_fit(models$tre_mundlak_abs)) summary(models$tre_mundlak_abs)
+}
+```
+
+For `TRE_Z`, the package parameterizes the inefficiency variance as
+
+$$\sigma_{u,it}^2 = \exp(z_{it}'\delta),$$
+
+so the standard deviation is $\sigma_{u,it}=\exp(z_{it}'\delta/2)$.
+
+# 13. Wang-Ho first-difference estimator
+
+The `FD` estimator removes time-invariant country effects by first differencing the frontier while modeling time-varying inefficiency as a scaling function. It therefore provides a useful fixed-effect robustness check without manually demeaning the composite SFA error.
+
+In the current `sfa` implementation, the scaling function is
+
+$$h_{it}=\exp(z_{it}'\delta).$$
+
+## 13.1 Squared anomalies
+
+```{r fd-quad}
+if (RUN_HEAVY) {
+  models$fd_quad <- fit_cached(
+    "fd_quad",
+    function() {
+      sfa::psfm(
+        y ~
+          k +
+          clim_T + clim_T2 +
+          clim_P + clim_P2 +
+          clim_TP +
+          trend |
+          zT2 + zP2,
+        model_name = "FD",
+        data = df_sfa,
+        individual = "GID_0",
+        time = "year"
+      )
+    }
+  )
+
+  if (is_sfa_fit(models$fd_quad)) summary(models$fd_quad)
+}
+```
+
+## 13.2 Absolute anomalies
+
+```{r fd-abs}
+if (RUN_HEAVY) {
+  models$fd_abs <- fit_cached(
+    "fd_abs",
+    function() {
+      sfa::psfm(
+        y ~
+          k +
+          tol_clim_T + tol_clim_T2 +
+          tol_clim_P + tol_clim_P2 +
+          tol_clim_TP +
+          trend |
+          tol_abs_zT + tol_abs_zP,
+        model_name = "FD",
+        data = df_sfa,
+        individual = "GID_0",
+        time = "year"
+      )
+    }
+  )
+
+  if (is_sfa_fit(models$fd_abs)) summary(models$fd_abs)
+}
+```
+
+Do not interpret the FD model as literally the same stochastic process as the levels model. Tol also notes that differencing changes the distributional structure of the one-sided error. Here FD is a robustness estimator for persistent country heterogeneity.
+
+# 14. Optional non-parametric year effects in SFA
+
+Tol used a linear trend because year dummies made the baseline maximum-likelihood problem computationally cumbersome. The following models are therefore off by default. Enable them using `params$run_year_fe_sfa: true`.
+
+```{r optional-year-fe}
+if (RUN_YEAR_FE) {
+  models$quad_fe_year <- fit_cached(
+    "quad_fe_year",
+    function() {
+      sfa::sfm(
+        y ~
+          k +
+          clim_T + clim_T2 +
+          clim_P + clim_P2 +
+          clim_TP +
+          country_fe + year_fe |
+          zT2 + zP2,
+        model_name = "NE_Z",
+        data = df_sfa
+      )
+    }
+  )
+
+  models$tre_mundlak_quad_year <- fit_cached(
+    "tre_mundlak_quad_year",
+    function() {
+      sfa::psfm(
+        y ~
+          k +
+          clim_T + clim_T2 +
+          clim_P + clim_P2 +
+          clim_TP +
+          year_fe +
+          k_bar +
+          clim_T_bar + clim_T2_bar +
+          clim_P_bar + clim_P2_bar +
+          clim_TP_bar |
+          zT2 + zP2,
+        model_name = "TRE_Z",
+        data = df_sfa,
+        individual = "GID_0",
+        time = "year",
+        collinear_action = "start_only"
+      )
+    }
+  )
+}
+```
+
+# 15. Model-status table
+
+```{r model-status}
+model_metadata <- tribble(
+  ~model, ~country_effect, ~time_control, ~u_structure, ~weather_metric, ~role,
+  "tol_abs_fe", "Explicit country FE", "Linear trend", "Exponential, heteroskedastic", "Absolute z, 30y preceding", "Closest Tol comparison",
+  "quad_fe", "Explicit country FE", "Linear trend", "Exponential, heteroskedastic", "Squared z", "Preferred metric, same FE likelihood",
+  "asym_fe", "Explicit country FE", "Linear trend", "Exponential, heteroskedastic", "Hot/cold/wet/dry", "Asymmetry robustness",
+  "tfe_greene", "Greene TFE", "Linear trend", "Half-normal TFE", "No weather Z equation", "Country-FE frontier robustness",
+  "tfe_wmle", "Within MLE", "Linear trend", "Within SFA", "No weather Z equation", "Demeaning-consistent SFA robustness",
+  "tre_mundlak_quad", "TRE + Mundlak", "Linear trend", "TRE_Z", "Squared z", "Practical main alternative",
+  "tre_mundlak_abs", "TRE + Mundlak", "Linear trend", "TRE_Z", "Absolute z, 30y preceding", "Tol metric under correlated RE",
+  "fd_quad", "First difference", "Differenced trend", "Wang-Ho scaling", "Squared z", "Fixed-effect robustness",
+  "fd_abs", "First difference", "Differenced trend", "Wang-Ho scaling", "Absolute z, 30y preceding", "Tol metric under FD"
+)
+
+model_status <- model_metadata %>%
+  mutate(
+    object = map(model, ~ models[[.x]]),
+    estimated = map_lgl(object, is_sfa_fit),
+    error = map_chr(object, ~ {
+      if (is.null(.x)) return("not run")
+      if (inherits(.x, "sfa_fit_error")) return(.x$error)
+      ""
+    }),
+    nobs = map_int(object, ~ {
+      ans <- safe_nobs(.x)
+      ifelse(is.na(ans), NA_integer_, as.integer(ans))
+    }),
+    logLik = map_dbl(object, safe_logLik),
+    AIC = map_dbl(object, safe_AIC),
+    BIC = map_dbl(object, safe_BIC)
+  ) %>%
+  select(-object)
+
+print(model_status)
+```
+
+# 16. Coefficient comparison
+
+```{r coefficient-comparison}
+coef_long <- imap_dfr(
+  models,
+  ~ tidy_sfa(.x, .y)
+)
+
+frontier_terms <- c(
+  "k",
+  "clim_T", "clim_T2", "clim_P", "clim_P2", "clim_TP",
+  "tol_clim_T", "tol_clim_T2", "tol_clim_P", "tol_clim_P2", "tol_clim_TP",
+  "trend"
+)
+
+frontier_comparison <- coef_long %>%
+  filter(term %in% frontier_terms) %>%
+  select(model, term, estimate, std_error, t_value) %>%
+  arrange(term, model)
+
+print(frontier_comparison)
+
+weather_terms <- c(
+  "zT2", "zP2", "abs_zT", "abs_zP",
+  "tol_zT2", "tol_zP2", "tol_abs_zT", "tol_abs_zP",
+  "hot", "cold", "wet", "dry"
+)
+
+weather_comparison_raw <- coef_long %>%
+  filter(term %in% weather_terms) %>%
+  select(model, term, estimate, std_error, t_value) %>%
+  arrange(term, model)
+
+print(weather_comparison_raw)
+```
+
+# 17. Convert weather coefficients to comparable scale ratios
+
+A raw coefficient on a weather determinant has a different meaning across model families.
+
+For `sfm(..., model_name="NE_Z")`:
+
+$$\sigma_u(z)=\exp(z'\delta),$$
+
+so a one-unit increase in a weather determinant multiplies the inefficiency scale by $\exp(\delta)$.
+
+For `psfm(..., model_name="TRE_Z")`:
+
+$$\sigma_u^2(z)=\exp(z'\delta),$$
+
+so the standard deviation multiplies by $\exp(\delta/2)$.
+
+For `FD`:
+
+$$h(z)=\exp(z'\delta),$$
+
+so a one-unit increase multiplies the inefficiency scaling factor by $\exp(\delta)$.
+
+```{r weather-scale-ratios}
+model_family <- c(
+  tol_abs_fe = "NE_Z",
+  quad_fe = "NE_Z",
+  asym_fe = "NE_Z",
+  tre_mundlak_quad = "TRE_Z",
+  tre_mundlak_abs = "TRE_Z",
+  fd_quad = "FD",
+  fd_abs = "FD",
+  quad_fe_year = "NE_Z",
+  tre_mundlak_quad_year = "TRE_Z"
+)
+
+weather_scale_ratios <- weather_comparison_raw %>%
+  mutate(
+    family = unname(model_family[model]),
+    scale_ratio_1unit = case_when(
+      family == "NE_Z" ~ exp(estimate),
+      family == "TRE_Z" ~ exp(estimate / 2),
+      family == "FD" ~ exp(estimate),
+      TRUE ~ NA_real_
+    )
+  )
+
+print(weather_scale_ratios)
+```
+
+For `zT2`, moving from normal weather $z=0$ to a one-standard-deviation anomaly $|z|=1$ changes `zT2` by one unit. Thus `scale_ratio_1unit` has a direct interpretation as the multiplicative change in the relevant inefficiency scale for a one-SD temperature anomaly, holding other determinants fixed. The same logic applies to precipitation.
+
+For absolute anomalies, a change from $|z|=0$ to $|z|=1$ is also a one-unit change.
+
+# 18. Compare model-implied inefficiency/efficiency where available
+
+Different estimators return different efficiency objects. The helper below extracts a common observation-level quantity where possible.
+
+```{r efficiency-extraction}
+extract_efficiency <- function(fit, model_name) {
+  if (!is_sfa_fit(fit)) return(NULL)
+
+  n <- nrow(fit$data)
+
+  if (!is.null(fit$exp_u_hat) && length(fit$exp_u_hat) == n) {
+    return(tibble(model = model_name, efficiency = as.numeric(fit$exp_u_hat)))
+  }
+
+  if (!is.null(fit$U) && length(fit$U) == n) {
+    return(tibble(model = model_name, efficiency = as.numeric(fit$U)))
+  }
+
+  NULL
+}
+
+efficiency_long <- imap_dfr(models, extract_efficiency)
+
+if (nrow(efficiency_long)) {
+  efficiency_summary <- efficiency_long %>%
+    group_by(model) %>%
+    summarise(
+      mean_efficiency = mean(efficiency, na.rm = TRUE),
+      median_efficiency = median(efficiency, na.rm = TRUE),
+      p05 = quantile(efficiency, 0.05, na.rm = TRUE),
+      p95 = quantile(efficiency, 0.95, na.rm = TRUE),
+      .groups = "drop"
+    )
+
+  print(efficiency_summary)
+}
+```
+
+Do not compare mean efficiency mechanically across models with different distributions and decompositions. The more informative comparison is whether weather coefficients have stable signs and whether predicted weather-related scale changes are similar.
+
+# 19. Frontier-response comparison
+
+This section compares the fitted climate response holding precipitation or temperature at a reference value. Only models containing the main quadratic climate frontier are used.
+
+```{r frontier-response-functions}
+get_estimate <- function(fit, term) {
+  if (!is_sfa_fit(fit)) return(NA_real_)
+  tab <- tidy_sfa(fit, "tmp")
+  hit <- tab$estimate[tab$term == term]
+  if (length(hit) != 1) return(NA_real_)
+  hit
+}
+
+main_frontier_models <- intersect(
+  c("quad_fe", "asym_fe", "tfe_greene", "tfe_wmle", "tre_mundlak_quad", "fd_quad"),
+  names(models)
+)
+
+reference_P <- median(df_sfa$clim_P, na.rm = TRUE)
+T_grid <- seq(
+  quantile(df_sfa$clim_T, 0.02, na.rm = TRUE),
+  quantile(df_sfa$clim_T, 0.98, na.rm = TRUE),
+  length.out = 100
+)
+
+frontier_T_curves <- map_dfr(main_frontier_models, function(mn) {
+  fit <- models[[mn]]
+  if (!is_sfa_fit(fit)) return(NULL)
+
+  bT  <- get_estimate(fit, "clim_T")
+  bT2 <- get_estimate(fit, "clim_T2")
+  bTP <- get_estimate(fit, "clim_TP")
+
+  if (anyNA(c(bT, bT2, bTP))) return(NULL)
+
+  value <- bT * T_grid + bT2 * T_grid^2 + bTP * T_grid * reference_P
+  value <- value - value[which.min(abs(T_grid - median(df_sfa$clim_T, na.rm = TRUE)))]
+
+  tibble(model = mn, climate_T = T_grid, relative_log_frontier = value)
+})
+
+if (nrow(frontier_T_curves)) {
+  ggplot(frontier_T_curves, aes(climate_T, relative_log_frontier, linetype = model)) +
+    geom_line(linewidth = 0.8) +
+    labs(
+      x = "Long-run temperature",
+      y = "Relative log production frontier",
+      title = "Climate-frontier response across SFA estimators",
+      subtitle = paste0("Precipitation fixed at sample median = ", round(reference_P, 3))
+    ) +
+    theme_minimal()
+}
+```
+
+# 20. Final comparison table
+
+The table below is the main output for methodological comparison.
+
+```{r final-comparison}
+final_comparison <- model_status %>%
+  mutate(
+    interpretation = case_when(
+      model == "tol_abs_fe" ~ "Direct Tol-method benchmark: climate frontier + absolute standardized weather in exponential inefficiency.",
+      model == "quad_fe" ~ "Same likelihood and FE treatment as Tol benchmark, replacing |z| with z^2.",
+      model == "asym_fe" ~ "Allows hot/cold and wet/dry shocks to affect inefficiency differently.",
+      model == "tfe_greene" ~ "Greene TFE estimated by panel routine; tests frontier under direct FE, but no weather-Z inefficiency equation.",
+      model == "tfe_wmle" ~ "Within-MLE fixed-effects SFA; principled alternative to manual demeaning, but no weather-Z equation.",
+      model == "tre_mundlak_quad" ~ "Weather-dependent inefficiency with correlated-random-effects approximation to country FE.",
+      model == "tre_mundlak_abs" ~ "Tol weather metric under TRE_Z + Mundlak rather than fixed effects.",
+      model == "fd_quad" ~ "Country effects removed by Wang-Ho transformation; weather scales inefficiency through z^2.",
+      model == "fd_abs" ~ "Country effects removed by Wang-Ho transformation; Tol-type |z| weather scaling.",
+      TRUE ~ ""
+    )
+  )
+
+print(final_comparison)
+```
+
+# 21. Decision rules for the empirical paper
+
+Use the following hierarchy when interpreting the estimates.
+
+1.  **Tol comparability.** `tol_abs_fe` is the closest methodological benchmark. Differences from Tol should first be attributed to data, sample, climate source/weighting, and then to coefficient heterogeneity not included in the homogeneous benchmark.
+2.  **Shock metric.** Compare `tol_abs_fe` with `quad_fe`. This isolates absolute versus squared standardized anomalies while holding the stochastic distribution and fixed-effect treatment constant.
+3.  **Shock asymmetry.** Compare `quad_fe` with `asym_fe`. A large likelihood improvement or materially different hot/cold and wet/dry effects argues against the symmetric quadratic restriction.
+4.  **Country heterogeneity.** Compare frontier coefficients from explicit-FE, `TFE`, `TFE_WMLE`, `TRE_Z + Mundlak`, and `FD`. Stable climate coefficients are more informative than raw likelihood rankings because these estimators impose different error structures.
+5.  **Weather robustness.** Compare model-specific one-SD weather scale ratios from explicit-FE `NE_Z`, `TRE_Z + Mundlak`, and `FD`. Focus on sign, magnitude, and stability rather than raw delta coefficients.
+6.  **Time controls.** Only after the baseline models converge reliably, enable the optional year-FE SFA variants. Tol's own baseline used a linear trend because year dummies caused convergence problems.
+7.  **Do not manually demean and then call an ordinary SFA likelihood.** Demeaning transforms $u_{it}$ into $u_{it}-\bar u_i$, which is no longer one-sided. Use `TFE_WMLE` or `FD` when the purpose is to remove fixed effects by transformation.
+
+# 22. Save outputs
+
+```{r save-results}
+write.csv(residual_diagnostics, file.path(RESULT_DIR, "residual_diagnostics.csv"), row.names = FALSE)
+write.csv(model_status, file.path(RESULT_DIR, "model_status.csv"), row.names = FALSE)
+write.csv(frontier_comparison, file.path(RESULT_DIR, "frontier_coefficients.csv"), row.names = FALSE)
+write.csv(weather_comparison_raw, file.path(RESULT_DIR, "weather_coefficients_raw.csv"), row.names = FALSE)
+write.csv(weather_scale_ratios, file.path(RESULT_DIR, "weather_scale_ratios.csv"), row.names = FALSE)
+write.csv(final_comparison, file.path(RESULT_DIR, "final_model_comparison.csv"), row.names = FALSE)
+
+saveRDS(
+  list(
+    models = models,
+    sample_summary = sample_summary,
+    residual_diagnostics = residual_diagnostics,
+    final_comparison = final_comparison
+  ),
+  file.path(RESULT_DIR, "all_sfa_results.rds")
+)
+```
+
+# 23. Session information
+
+```{r session-info}
+sessionInfo()
+```
+
+# References and implementation notes
+
+- Tol, R. S. J. (2021), *The economic impact of weather and climate*, arXiv:2102.13110. The baseline uses the 30 years preceding year $t$, country fixed effects, a linear trend, an exponential inefficiency distribution, and absolute standardized weather anomalies. Squared anomalies are a robustness specification.
+- Greene, W. (2005), *Fixed and random effects in stochastic frontier models*, Journal of Productivity Analysis 23:7-32.
+- Chen, Y.-Y., Schmidt, P., and Wang, H.-J. (2014), within-MLE fixed-effects stochastic-frontier estimator.
+- Wang-Ho first-difference SFA provides a transformation-based treatment of individual effects with a time-varying inefficiency scaling function.
+- Current `sfa` package interface checked against the 2026 package documentation/source. `TFE` denotes Greene TFE in versions \>= 1.1.3; `TFE_WMLE` denotes Chen-Schmidt-Wang. `TRE_Z` models the variance of the one-sided component; `FD` supports a `| z` scaling equation.

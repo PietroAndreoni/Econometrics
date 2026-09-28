@@ -31,6 +31,13 @@ FLAG_PERCENTILE <- 0.99
 TOP_N_TO_WRITE <- 50L
 TOP_N_ATTRIBUTION_DETAIL <- 20L
 ATTRIBUTION_TOLERANCE_PP <- 1e-8
+ANALYSIS_START_YEAR <- suppressWarnings(as.integer(
+  Sys.getenv("ANALYSIS_START_YEAR", unset = "1990")
+))
+
+if (length(ANALYSIS_START_YEAR) != 1L || is.na(ANALYSIS_START_YEAR)) {
+  stop("ANALYSIS_START_YEAR must be a single integer year.")
+}
 
 if (file.exists("Econometrics.Rproj")) {
   project_root <- "."
@@ -254,7 +261,10 @@ growth_comparison <- dose_national %>%
     population_growth_pct_pwt = 100 * expm1(population_growth_log_pwt),
     population_growth_discrepancy_pp =
       population_growth_pct_dose - population_growth_pct_pwt
-  )
+  ) %>%
+  # Annual growth and stability flags were constructed above with the full
+  # history. Filter only afterward so the first retained year can use t - 1.
+  filter(year >= ANALYSIS_START_YEAR)
 
 eligible_discrepancies <- growth_comparison$abs_gdp_growth_discrepancy_pp[
   growth_comparison$eligible_for_comparison
@@ -530,8 +540,14 @@ country_summary <- growth_comparison %>%
   arrange(desc(rmse_discrepancy_pp))
 
 source_coverage <- full_join(
-  dose_national %>% distinct(iso3) %>% mutate(in_dose = TRUE),
-  pwt_national %>% distinct(iso3) %>% mutate(in_pwt = TRUE),
+  dose_national %>%
+    filter(year >= ANALYSIS_START_YEAR) %>%
+    distinct(iso3) %>%
+    mutate(in_dose = TRUE),
+  pwt_national %>%
+    filter(year >= ANALYSIS_START_YEAR) %>%
+    distinct(iso3) %>%
+    mutate(in_pwt = TRUE),
   by = "iso3"
 ) %>%
   mutate(
@@ -603,7 +619,7 @@ cat(
   "Compared ", sum(growth_comparison$eligible_for_comparison),
   " eligible country-year growth pairs across ",
   n_distinct(growth_comparison$iso3[growth_comparison$eligible_for_comparison]),
-  " countries.\n",
+  " countries from ", ANALYSIS_START_YEAR, " onward.\n",
   sep = ""
 )
 cat(
@@ -670,7 +686,7 @@ cat("\nResults written to: ", normalizePath(output_dir), "\n", sep = "")
 # `fit_climate_model()` from `test_functions.Rmd`, so sample construction, fixed
 # effects, and clustered standard errors match the notebook exactly.
 
-OUTLIER_REMOVAL_COUNTS <- seq(1000L, 5000L, by = 1000L)
+OUTLIER_REMOVAL_COUNTS <- seq(0, 5000L, by = 1000L)
 
 # Region-year outlier ranking. "abs_additive_contribution_pp" is the magnitude of
 # the region's exact shift-share contribution to its country's growth gap;
@@ -678,9 +694,13 @@ OUTLIER_REMOVAL_COUNTS <- seq(1000L, 5000L, by = 1000L)
 # the region shrinks that gap.
 OUTLIER_RANK_METRIC <- "abs_additive_contribution_pp"
 
-# Joint signed-deviation-bin response from the notebook. The central -0.5 to 0.5
-# standard-deviation interval is the omitted category for both weather variables.
-SENSITIVITY_MODEL_TERMS <- paste(
+# Test the original quadratic response and the signed-bin response separately on
+# the same sequence of regional-outlier removals.
+BASE_SENSITIVITY_MODEL_TERMS <- paste(
+  "TM + TM:mean_TM_all + RR + RR:mean_RR_all",
+  "+ zTM^2 + zRR^2"
+)
+SIGNED_BIN_SENSITIVITY_MODEL_TERMS <- paste(
   "TM + TM:mean_TM_all + RR + RR:mean_RR_all",
   "+ i(TM_bin_signed, ref = 0)",
   "+ i(RR_bin_signed, ref = 0)"
@@ -742,18 +762,28 @@ estimation_sample <- notebook$build_dat(
   )
 ) %>%
   filter(!is.na(dlgrp_pc_usd)) %>%
-  mutate(year = as.integer(year))
+  mutate(year = as.integer(year)) %>%
+  # build_dat() has already loaded the pre-period climate history and computed
+  # all trailing means/SDs. Do not push this cutoff into the climate loader.
+  filter(year >= ANALYSIS_START_YEAR)
 
-# Restrict once to the exact complete-case/fixed-effect sample used by the
-# untrimmed signed-bin model. Outlier counts below therefore count observations
-# that would otherwise enter that model.
-baseline_sensitivity_fit <- notebook$fit_climate_model(
-  SENSITIVITY_MODEL_TERMS,
+# Restrict once to the observations shared by both untrimmed models. Outlier
+# counts below therefore refer to the same starting sample in both analyses.
+base_candidate_fit <- notebook$fit_climate_model(
+  BASE_SENSITIVITY_MODEL_TERMS,
   model_data = estimation_sample
+)
+signed_bin_candidate_fit <- notebook$fit_climate_model(
+  SIGNED_BIN_SENSITIVITY_MODEL_TERMS,
+  model_data = estimation_sample
+)
+common_sensitivity_observations <- intersect(
+  fixest::obs(base_candidate_fit),
+  fixest::obs(signed_bin_candidate_fit)
 )
 estimation_sample <- estimation_sample %>%
   ungroup() %>%
-  slice(fixest::obs(baseline_sensitivity_fit))
+  slice(common_sensitivity_observations)
 
 # Region-year outlier ranking ---------------------------------------------------
 
@@ -775,6 +805,8 @@ ranked_region_year_outliers <- subregion_attribution %>%
     region_name,
     outlier_metric = .data[[OUTLIER_RANK_METRIC]],
     additive_contribution_pp,
+    regional_gdp,
+    regional_gdp_previous,
     regional_growth_pct,
     gdp_growth_discrepancy_pp
   ) %>%
@@ -806,11 +838,112 @@ if (length(removal_counts) < length(OUTLIER_REMOVAL_COUNTS)) {
     "counts were skipped."
   )
 }
-removal_counts <- c(0L, removal_counts)
+removal_counts <- sort(unique(c(0L, removal_counts)))
+
+# DOSE-PWT residual MSE after regional removals -------------------------------
+
+calculate_growth_discrepancy_residuals <- function(n_removed) {
+  removed_totals <- ranked_estimation_region_year_outliers %>%
+    slice_head(n = n_removed) %>%
+    group_by(GID_0, year) %>%
+    summarise(
+      removed_gdp = sum(regional_gdp),
+      removed_gdp_previous = sum(regional_gdp_previous),
+      .groups = "drop"
+    )
+
+  attribution_targets %>%
+    left_join(
+      removed_totals,
+      by = c("iso3" = "GID_0", "year")
+    ) %>%
+    mutate(
+      removed_gdp = coalesce(removed_gdp, 0),
+      removed_gdp_previous = coalesce(removed_gdp_previous, 0),
+      retained_gdp = gdp_dose - removed_gdp,
+      retained_gdp_previous = gdp_dose_previous - removed_gdp_previous,
+      valid_recalculated_growth = retained_gdp > 0 &
+        retained_gdp_previous > 0,
+      recalculated_dose_growth_pct = if_else(
+        valid_recalculated_growth,
+        100 * (retained_gdp / retained_gdp_previous - 1),
+        NA_real_
+      ),
+      residual_discrepancy_pp =
+        recalculated_dose_growth_pct - gdp_growth_pct_pwt
+    ) %>%
+    mutate(n_outliers_removed = as.integer(n_removed))
+}
+
+dose_pwt_residuals_by_outlier_removal <- bind_rows(
+  lapply(removal_counts, calculate_growth_discrepancy_residuals)
+)
+
+residual_comparison_availability <- dose_pwt_residuals_by_outlier_removal %>%
+  group_by(n_outliers_removed) %>%
+  summarise(
+    available_comparison_pairs = sum(valid_recalculated_growth),
+    invalid_comparison_pairs = sum(!valid_recalculated_growth),
+    .groups = "drop"
+  )
+
+dose_pwt_mse_by_outlier_removal <-
+  dose_pwt_residuals_by_outlier_removal %>%
+  filter(valid_recalculated_growth) %>%
+  group_by(n_outliers_removed) %>%
+  summarise(
+    sum_squared_error = sum(residual_discrepancy_pp^2),
+    comparison_pairs = n(),
+    mean_squared_error = sum_squared_error / comparison_pairs,
+    root_mean_squared_error = sqrt(mean_squared_error),
+    mean_absolute_error = mean(abs(residual_discrepancy_pp)),
+    .groups = "drop"
+  ) %>%
+  left_join(
+    residual_comparison_availability,
+    by = "n_outliers_removed"
+  )
+
+dose_pwt_mse_plot <- ggplot2::ggplot(
+  dose_pwt_mse_by_outlier_removal,
+  ggplot2::aes(x = n_outliers_removed, y = mean_squared_error)
+) +
+  ggplot2::geom_line(colour = "#2a78d6", linewidth = 0.8) +
+  ggplot2::geom_point(colour = "#2a78d6", size = 2) +
+  ggplot2::scale_x_continuous(breaks = removal_counts) +
+  ggplot2::labs(
+    title = "DOSE-PWT growth discrepancy after removing regional outliers",
+    subtitle = paste0(
+      "DOSE growth is recomputed after removing each selected region from ",
+      "current and lagged GDP.\n",
+      "At each threshold, squared errors are averaged over the valid comparisons remaining."
+    ),
+    x = "Regional outliers removed",
+    y = expression("Mean squared growth discrepancy (percentage points"^2*")"),
+    caption = paste0(
+      "Analysis years >= ", ANALYSIS_START_YEAR,
+      "; regional outliers ranked by ", OUTLIER_RANK_METRIC, "."
+    )
+  ) +
+  ggplot2::theme_classic(base_size = 11) +
+  ggplot2::theme(
+    plot.title = ggplot2::element_text(face = "bold", colour = "#0b0b0b"),
+    plot.subtitle = ggplot2::element_text(colour = "#52514e"),
+    plot.caption = ggplot2::element_text(colour = "#52514e", hjust = 0),
+    panel.grid.major.y = ggplot2::element_line(
+      colour = "grey92",
+      linewidth = 0.3
+    ),
+    axis.title = ggplot2::element_text(colour = "#52514e")
+  )
 
 # Re-estimation across the reduced samples --------------------------------------
 
-estimate_with_outliers_removed <- function(n_removed) {
+estimate_with_outliers_removed <- function(
+    n_removed,
+    model_terms,
+    model_label
+) {
   removed <- ranked_estimation_region_year_outliers[seq_len(n_removed), ]
   model_data <- anti_join(
     estimation_sample,
@@ -819,7 +952,7 @@ estimate_with_outliers_removed <- function(n_removed) {
   )
 
   fit <- notebook$fit_climate_model(
-    SENSITIVITY_MODEL_TERMS,
+    model_terms,
     model_data = model_data
   )
 
@@ -830,6 +963,7 @@ estimate_with_outliers_removed <- function(n_removed) {
   )[rownames(coefficients), , drop = FALSE]
 
   tibble::tibble(
+    model = model_label,
     n_outliers_removed = as.integer(n_removed),
     outliers_in_estimation_sample = nrow(removed),
     rows_dropped = nrow(estimation_sample) - nrow(model_data),
@@ -851,13 +985,34 @@ estimate_with_outliers_removed <- function(n_removed) {
   )
 }
 
-outlier_removal_coefficients <- bind_rows(
-  lapply(removal_counts, estimate_with_outliers_removed)
+base_outlier_removal_coefficients <- bind_rows(
+  lapply(
+    removal_counts,
+    estimate_with_outliers_removed,
+    model_terms = BASE_SENSITIVITY_MODEL_TERMS,
+    model_label = "Quadratic base model"
+  )
 ) %>%
   mutate(term = factor(term, levels = unique(term)))
 
+signed_bin_outlier_removal_coefficients <- bind_rows(
+  lapply(
+    removal_counts,
+    estimate_with_outliers_removed,
+    model_terms = SIGNED_BIN_SENSITIVITY_MODEL_TERMS,
+    model_label = "Signed-bin model"
+  )
+) %>%
+  mutate(term = factor(term, levels = unique(term)))
+
+outlier_removal_coefficients <- bind_rows(
+  base_outlier_removal_coefficients,
+  signed_bin_outlier_removal_coefficients
+)
+
 outlier_removal_samples <- outlier_removal_coefficients %>%
   distinct(
+    model,
     n_outliers_removed,
     outliers_in_estimation_sample,
     rows_dropped,
@@ -867,9 +1022,73 @@ outlier_removal_samples <- outlier_removal_coefficients %>%
     countries
   )
 
+base_outlier_removal_samples <- outlier_removal_samples %>%
+  filter(model == "Quadratic base model")
+signed_bin_outlier_removal_samples <- outlier_removal_samples %>%
+  filter(model == "Signed-bin model")
+
+# Quadratic base-model coefficient paths ---------------------------------------
+
+base_outlier_removal_plot <- ggplot2::ggplot(
+  base_outlier_removal_coefficients,
+  ggplot2::aes(x = n_outliers_removed, y = estimate)
+) +
+  ggplot2::geom_hline(
+    yintercept = 0,
+    colour = "#52514e",
+    linewidth = 0.3,
+    linetype = "dashed"
+  ) +
+  ggplot2::geom_ribbon(
+    ggplot2::aes(ymin = conf_low, ymax = conf_high),
+    fill = "#2a78d6",
+    alpha = 0.18
+  ) +
+  ggplot2::geom_line(colour = "#2a78d6", linewidth = 0.7) +
+  ggplot2::geom_point(colour = "#2a78d6", size = 1.6) +
+  ggplot2::facet_wrap(~term, scales = "free_y") +
+  ggplot2::scale_x_continuous(breaks = removal_counts) +
+  ggplot2::labs(
+    title = paste(
+      "Base climate coefficients after removing DOSE-PWT regional outliers"
+    ),
+    subtitle = paste0(
+      BASE_SENSITIVITY_MODEL_TERMS, "   |   ",
+      100 * SENSITIVITY_CONFIDENCE_LEVEL,
+      "% confidence intervals, standard errors clustered by GID_1"
+    ),
+    x = paste(
+      "Region-year outliers removed",
+      "(largest regional contribution to the national growth gap first)"
+    ),
+    y = "Coefficient on subnational GDP-per-capita growth",
+    caption = paste0(
+      "Analysis years >= ", ANALYSIS_START_YEAR, ". Outliers ranked by ",
+      OUTLIER_RANK_METRIC,
+      " from the regional attribution--not by country. Observations fall from ",
+      format(max(base_outlier_removal_samples$observations), big.mark = ","),
+      " to ",
+      format(min(base_outlier_removal_samples$observations), big.mark = ","),
+      "."
+    )
+  ) +
+  ggplot2::theme_classic(base_size = 11) +
+  ggplot2::theme(
+    plot.title = ggplot2::element_text(face = "bold", colour = "#0b0b0b"),
+    plot.subtitle = ggplot2::element_text(colour = "#52514e"),
+    plot.caption = ggplot2::element_text(colour = "#52514e", hjust = 0),
+    strip.background = ggplot2::element_blank(),
+    strip.text = ggplot2::element_text(face = "bold", colour = "#0b0b0b"),
+    panel.grid.major.y = ggplot2::element_line(
+      colour = "grey92",
+      linewidth = 0.3
+    ),
+    axis.title = ggplot2::element_text(colour = "#52514e")
+  )
+
 # Signed-bin response paths -----------------------------------------------------
 
-signed_bin_outlier_coefficients <- outlier_removal_coefficients %>%
+signed_bin_outlier_coefficients <- signed_bin_outlier_removal_coefficients %>%
   filter(grepl("^(TM|RR)_bin_signed::", as.character(term))) %>%
   mutate(
     weather = if_else(
@@ -891,7 +1110,7 @@ if (!nrow(signed_bin_outlier_coefficients) ||
 
 # Add the omitted central bin so every curve is displayed relative to zero.
 signed_bin_reference_rows <- bind_rows(
-  outlier_removal_samples %>%
+  signed_bin_outlier_removal_samples %>%
     transmute(
       n_outliers_removed,
       weather = "Temperature",
@@ -901,7 +1120,7 @@ signed_bin_reference_rows <- bind_rows(
       conf_low = 0,
       conf_high = 0
     ),
-  outlier_removal_samples %>%
+  signed_bin_outlier_removal_samples %>%
     transmute(
       n_outliers_removed,
       weather = "Precipitation",
@@ -975,12 +1194,14 @@ outlier_removal_plot <- ggplot2::ggplot(
     y = "Estimated effect relative to the central bin",
     colour = "Regional outliers removed",
     caption = paste0(
-      "Sample: DOSE V2.11 subnational panel from build_dat(); outliers ranked by ",
+      "Sample: DOSE V2.11 subnational panel, years >= ",
+      ANALYSIS_START_YEAR,
+      ", from build_dat(); outliers ranked by ",
       OUTLIER_RANK_METRIC, " from the regional attribution--not by country. ",
       "Observations fall from ",
-      format(max(outlier_removal_samples$observations), big.mark = ","),
+      format(max(signed_bin_outlier_removal_samples$observations), big.mark = ","),
       " to ",
-      format(min(outlier_removal_samples$observations), big.mark = ","),
+      format(min(signed_bin_outlier_removal_samples$observations), big.mark = ","),
       "."
     )
   ) +
@@ -1001,6 +1222,16 @@ outlier_removal_plot <- ggplot2::ggplot(
 # Outputs -----------------------------------------------------------------------
 
 write.csv(
+  dose_pwt_mse_by_outlier_removal,
+  file.path(output_dir, "dose_pwt_mse_by_outlier_removal.csv"),
+  row.names = FALSE
+)
+write.csv(
+  base_outlier_removal_coefficients,
+  file.path(output_dir, "outlier_removal_coefficient_path.csv"),
+  row.names = FALSE
+)
+write.csv(
   signed_bin_outlier_plot_data,
   file.path(output_dir, "signed_bin_outlier_removal_coefficients.csv"),
   row.names = FALSE
@@ -1017,6 +1248,22 @@ write.csv(
   row.names = FALSE
 )
 ggplot2::ggsave(
+  file.path(output_dir, "dose_pwt_mse_by_outlier_removal.png"),
+  dose_pwt_mse_plot,
+  width = 8,
+  height = 5.5,
+  dpi = 300,
+  bg = "#fcfcfb"
+)
+ggplot2::ggsave(
+  file.path(output_dir, "outlier_removal_coefficient_path.png"),
+  base_outlier_removal_plot,
+  width = 11,
+  height = 6.5,
+  dpi = 300,
+  bg = "#fcfcfb"
+)
+ggplot2::ggsave(
   file.path(output_dir, "signed_bin_outlier_removal_paths.png"),
   outlier_removal_plot,
   width = 11,
@@ -1025,8 +1272,27 @@ ggplot2::ggsave(
   bg = "#fcfcfb"
 )
 
-cat("\nOutlier-removal sensitivity (", SENSITIVITY_MODEL_TERMS, "):\n", sep = "")
+cat("\nDOSE-PWT residual error after regional outlier removal:\n")
+print(
+  dose_pwt_mse_by_outlier_removal,
+  n = nrow(dose_pwt_mse_by_outlier_removal)
+)
+cat("\nOutlier-removal sensitivity samples by model:\n")
 print(outlier_removal_samples, n = nrow(outlier_removal_samples))
+cat("\nQuadratic base-model coefficient paths:\n")
+print(
+  base_outlier_removal_coefficients %>%
+    select(
+      n_outliers_removed,
+      term,
+      estimate,
+      std_error,
+      conf_low,
+      conf_high,
+      p_value
+    ),
+  n = nrow(base_outlier_removal_coefficients)
+)
 cat("\nSigned-bin coefficient paths:\n")
 print(
   signed_bin_outlier_plot_data %>%
@@ -1040,5 +1306,5 @@ print(
       conf_high,
       p_value
     ),
-  n = nrow(outlier_removal_coefficients)
+  n = nrow(signed_bin_outlier_plot_data)
 )
