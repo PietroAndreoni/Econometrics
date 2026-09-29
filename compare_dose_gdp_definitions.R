@@ -3,8 +3,8 @@
 #
 # Specification and defaults as in compare_signed_bins_across_datasets.R (and
 # `model_bins_signed` in test_functions.Rmd): BHM base terms + signed half-SD
-# anomaly bins, fixed effects year + GID_1[year], errors clustered by GID_1,
-# econ_year_min = 1950.
+# anomaly bins, fixed effects year + GID_1 + GID_1[year] + GID_0^year, errors
+# clustered by GID_1, econ_year_min = 1950.
 #
 # Grid: the five DOSE definitions (DOSE_GDP_VARIABLES in functions/econ_panel.R)
 # x climate source ERA5, CRU TS, UDelaware, all with concurrent-population
@@ -39,7 +39,7 @@ CLIMATE_WEIGHT <- "concurrent population"
 
 # Notebook defaults (test_functions.Rmd, shared-specification chunk).
 OUTCOME <- "dlgrp_pc_usd"
-FIXED_EFFECTS <- "year + GID_1[year]"
+FIXED_EFFECTS <- "year + GID_1 + GID_1[year] + GID_0^year"
 PANEL_ID <- c("GID_1", "year")
 ECON_YEAR_MIN <- 1950L
 CLIMATE_VELOCITY_YEARS <- 5L

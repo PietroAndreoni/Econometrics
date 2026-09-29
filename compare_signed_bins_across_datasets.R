@@ -2,9 +2,11 @@
 #
 # Specification: the BHM base terms plus signed half-SD temperature and
 # precipitation anomaly bins (`model_bins_signed` in test_functions.Rmd), with
-# the notebook's defaults: outcome dlgrp_pc_usd, fixed effects year +
-# GID_1[year], errors clustered by GID_1, panel_config() defaults with
-# econ_year_min = 1950 and six years of climate lag carriers.
+# the notebook's defaults: outcome dlgrp_pc_usd, fixed effects year + GID_1 +
+# GID_1[year] + GID_0^year for GADM1 panels and year + GID_1 + GID_1[year] for
+# GADM0 panels (where GID_1 = GID_0), errors clustered by GID_1,
+# panel_config() defaults with econ_year_min = 1950 and six years of climate
+# lag carriers.
 #
 # Grid: economic data DOSE, KUMMU (GADM1) and PWT, WB (GADM0) x climate source
 # ERA5, CRU TS, UDelaware x weighting concurrent population, area (WCD
@@ -52,7 +54,12 @@ CLIMATE_WEIGHTS <- c(pop_concurrent = "concurrent population", area = "unweighte
 
 # Notebook defaults (test_functions.Rmd, shared-specification chunk).
 OUTCOME <- "dlgrp_pc_usd"
-FIXED_EFFECTS <- "year + GID_1[year]"
+# Country-year effects only for subnational panels: in national panels they
+# would absorb every observation.
+FIXED_EFFECTS <- c(
+  gadm1 = "year + GID_1 + GID_1[year] + GID_0^year",
+  gadm0 = "year + GID_1 + GID_1[year]"
+)
 PANEL_ID <- c("GID_1", "year")
 ECON_YEAR_MIN <- 1950L
 CLIMATE_VELOCITY_YEARS <- 5L
@@ -76,12 +83,12 @@ write_out <- function(x, name) {
   utils::write.csv(x, file.path(OUTPUT_DIR, paste0(name, ".csv")), row.names = FALSE)
 }
 
-fit_signed_bins <- function(model_data) {
+fit_signed_bins <- function(model_data, id) {
   fit_panel_model(
     MODEL_TERMS,
     model_data,
     outcome = OUTCOME,
-    fixed_effects = FIXED_EFFECTS,
+    fixed_effects = FIXED_EFFECTS[[specs$level[specs$id == id]]],
     panel_id = PANEL_ID,
     cluster = ~GID_1
   )
@@ -292,6 +299,10 @@ BIN_DESCRIPTION <- if (EQUAL_FREQUENCY) {
 } else {
   "signed half-SD anomaly bins; reference bin -0.5 to 0.5 SD"
 }
+FE_CAPTION <- paste(
+  "DOSE and KUMMU: GADM1 regions, fixed effects year + region + region trends",
+  "+ country-year; PWT and WB: countries, year + country + country trends."
+)
 X_LABEL <- if (EQUAL_FREQUENCY) {
   "Signed equal-frequency bin (-5 to 5; breaks in bin_breaks.csv)"
 } else {
@@ -314,8 +325,7 @@ for (s in names(SAMPLE_LABELS)) {
     subtitle = paste0("BHM base terms + ", BIN_DESCRIPTION,
                       "; 95% CI clustered by unit"),
     x_label = X_LABEL,
-    caption = paste("DOSE and KUMMU: GADM1 regions; PWT and WB: countries.",
-                    "Fixed effects: year + unit-specific linear trends.")
+    caption = FE_CAPTION
   )
   ggsave(file.path(OUTPUT_DIR, paste0("signed_bins_", s, "_sample.png")), p,
          width = 12, height = 8, dpi = 300)
@@ -350,8 +360,7 @@ for (s in names(SAMPLE_LABELS)) {
                   tolower(SAMPLE_LABELS[[s]])),
     subtitle = paste("Points are coefficient estimates; vertical lines are 95% CIs",
                      "clustered by unit"),
-    caption = paste("DOSE and KUMMU: GADM1 regions; PWT and WB: countries.",
-                    "Fixed effects: year + unit-specific linear trends.")
+    caption = FE_CAPTION
   )
   ggsave(
     file.path(OUTPUT_DIR, paste0("non_deviation_terms_", s, "_sample.png")),

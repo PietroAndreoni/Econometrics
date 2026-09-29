@@ -9,8 +9,9 @@
 # long-run climate across regions (distributed_lag_effects()); the cumulative
 # path sums the lags and keeps their covariances.
 #
-# Settings as in compare_dose_gdp_definitions.R: fixed effects year +
-# GID_1[year], errors clustered by GID_1, econ_year_min = 1950. Eleven years of
+# Settings as in compare_dose_gdp_definitions.R: fixed effects year + GID_1 +
+# GID_1[year] + GID_0^year, errors clustered by GID_1, econ_year_min = 1950.
+# Eleven years of
 # climate are kept before 1950, so the ten lags of a change are available from
 # the first estimation year.
 #
@@ -38,7 +39,7 @@ CLIMATE_SOURCES <- c(ERA5 = "ERA5", CRU = "CRU TS", UDEL = "UDelaware")
 CLIMATE_WEIGHT <- "concurrent population"
 
 OUTCOME <- "dlgrp_pc_usd"
-FIXED_EFFECTS <- "year + GID_1[year]"
+FIXED_EFFECTS <- "year + GID_1 + GID_1[year] + GID_0^year"
 PANEL_ID <- c("GID_1", "year")
 ECON_YEAR_MIN <- 1950L
 MAX_LAG <- 10L

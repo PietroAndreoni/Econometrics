@@ -66,11 +66,24 @@ precipitation terms. All tests add alternative weather-response terms to this
 base while retaining the same fixed effects.
 
 ```{r shared-specification}
-fixed_effects <- "year + GID_1[year]"
+fixed_effects <- "year + GID_1 + GID_1[year] + GID_0^year"
+# National (GADM0) panels have GID_1 = GID_0, so country-year effects would
+# absorb every observation.
+fixed_effects_iso3 <- "year + GID_1 + GID_1[year]"
+
+# Fixed effects matching the GADM level of the estimation data.
+fixed_effects_for <- function(model_data) {
+  if (all(model_data$gadm_level == "gadm0")) {
+    fixed_effects_iso3
+  } else {
+    fixed_effects
+  }
+}
+
 pan_id <- c("GID_1", "year")
 outcome <- "dlgrp_pc_usd"
 
-base_climate <- "TM + TM:mean_TM_all + RR + RR:mean_RR_all"
+base_climate <- "TM + TM^2 + RR + RR^2"
 model <- paste(base_climate, "+ zRR^2 + zTM^2")
 
 ECON_YEAR_MIN <- 1900
@@ -88,14 +101,19 @@ if (length(CLIMATE_VELOCITY_YEARS) != 1L ||
 # Enough pre-estimation climate years are retained to calculate the first
 # trailing climate-velocity window, as well as the six-year model lags.
 panel_cfg <- panel_config(
+  climate_weight = "area",
   econ_year_min = ECON_YEAR_MIN,
   clim_history_years = max(6L, CLIMATE_VELOCITY_YEARS - 1L)
 )
 
 # The notebook's specification bound to the shared estimator in
 # functions/model_spec.R.
-make_formula <- function(terms) {
-  make_panel_formula(terms, outcome = outcome, fixed_effects = fixed_effects)
+make_formula <- function(terms, model_data = data) {
+  make_panel_formula(
+    terms,
+    outcome = outcome,
+    fixed_effects = fixed_effects_for(model_data)
+  )
 }
 
 fit_climate_model <- function(terms, model_data = data) {
@@ -103,14 +121,11 @@ fit_climate_model <- function(terms, model_data = data) {
     terms,
     model_data,
     outcome = outcome,
-    fixed_effects = fixed_effects,
+    fixed_effects = fixed_effects_for(model_data),
     panel_id = pan_id,
     cluster = ~GID_1
   )
 }
-
-# Retained as `f` for the split-sample tests and interactive use.
-f <- make_formula(model)
 ```
 
 # Data preparation
@@ -123,9 +138,12 @@ the estimation period.
 # build_dat() joins the economic panel to the derived climate moments and adds
 # the weather-response variables; both halves are built from raw sources and
 # cached under data/cache (see functions/build_dat.R).
-data <- build_dat(econ_data = params$econ_data, config = panel_cfg)
+data <- build_dat(econ_data = params$econ_data, config = panel_cfg, )
 
 data_iso3 <- build_dat(econ_data = "PWT", config = panel_cfg)
+
+# Retained as `f` for the split-sample tests and interactive use.
+f <- make_formula(model)
 ```
 
 ## Weather-response variables
@@ -649,16 +667,13 @@ m_signed_ymhi <- fixest::feols(
 )
 
 make_common_base_group_formula <- function(group_var) {
-  as.formula(
+  make_formula(
     paste(
-      outcome,
-      "~",
       base_climate,
       paste0("+ i(TM_bin_signed, ", group_var, ", ref = 0)"),
-      paste0("+ i(RR_bin_signed, ", group_var, ", ref = 0)"),
-      "|",
-      fixed_effects
-    )
+      paste0("+ i(RR_bin_signed, ", group_var, ", ref = 0)")
+    ),
+    model_data = data_signed_groups
   )
 }
 
@@ -850,6 +865,7 @@ standard errors as the pooled signed-bin model.
 
 ```{r test-signed-bins-by-climate-zone, fig.width=10, fig.height=6}
 f_bins_signed_zone <- make_formula(paste(
+  base_climate,
   "+ i(TM_bin_signed, ref = 0)",
   "+ i(RR_bin_signed, ref = 0)"
 ))
@@ -863,12 +879,13 @@ m_bins_signed_by_climate <- fixest::feols(
 )
 
 m_bins_signed_by_climate_with_i <- feols(
-  dlgrp_pc_usd ~
-    i(TM_bin_signed, climate_zone, ref = 0) +
-    i(RR_bin_signed, climate_zone, ref = 0)
-  | year +
-    GID_1 +
-    GID_1[year],
+  make_formula(
+    paste(
+      "i(TM_bin_signed, climate_zone, ref = 0)",
+      "+ i(RR_bin_signed, climate_zone, ref = 0)"
+    ),
+    model_data = data_kg
+  ),
   data = data_kg %>% filter(!is.na(climate_zone)),
   panel.id = pan_id,
   vcov = ~GID_1
