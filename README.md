@@ -61,6 +61,9 @@ GDP-per-capita growth.
   cold/hot symmetry, stability of the base coefficients
 - `compare_dose_conley_se.R`: country, region and Conley standard errors for
   the preferred and quadratic DOSE specifications
+- `compare_dose_climate_levels.R`: DOSE growth on the world, national-minus-
+  world and regional-minus-national components of zTM and zRR (CRU TS,
+  area-weighted), under year, no-year and country-year fixed effects
 - `harmonize_dose_pwt.R`: DOSE-PWT harmonization
 
 National-vs-subnational growth comparison, ranked subnational outliers and the
