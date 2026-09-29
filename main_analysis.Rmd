@@ -546,7 +546,7 @@ etable(
 data <- data |> 
     mutate(zzTM = pmax(1.5,abs((TM - mean_TM_lag_30) / (sd_TM_lag_30)))-1.5 ) 
 
-m_pref <- fit_climate_model(paste(base_climate,"+ zzTM^2 + abs_zRRp"))
+m_pref <- fit_climate_model(paste(base_climate,"+ zzTM^2 + abs_zRRm"))
 
 etable(m_base, m_pref, fitstat = ~n + r2 + wr2)
 
@@ -1703,22 +1703,17 @@ m_dem <- fit_climate_model(
 etable(m_dem)
 
 
-```
-
-
-```{r test-absolute}
-
 model_demeaned <- paste(
     "(TM - mean_TM_all) + (TM - mean_TM_all):mean_TM_all",
      "+ (RR - mean_RR_all) + (RR - mean_RR_all):mean_RR_all",
     "+ abs_zTMp + abs_zTMm + abs_zTMp:mean_TM_all + abs_zTMm:mean_TM_all + + abs_zRRp + abs_zRRm + abs_zRRp:mean_RR_all + abs_zTMm:mean_RR_all"
 )
 
-m_dem <- fit_climate_model(
+m_dem2 <- fit_climate_model(
   model_demeaned
 )
 
-etable(m_dem)
+etable(m_dem,m_dem2)
 
 
 ```
@@ -1770,4 +1765,5 @@ iplot(
 )
 legend("bottomleft", col = 1:2, pch = c(20, 17),
        legend = c("Lagged 30-year mean", "Hamilton trend"), bty = "n")
+
 ```
