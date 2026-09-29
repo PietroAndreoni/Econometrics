@@ -85,7 +85,7 @@ build_dat <- function(
     deviation = c("standardized", "absolute"),
     bin_width = NULL,
     signed_quantile = c("symmetric", "per_side"),
-    drop_break_years = FALSE
+    drop_break_years = TRUE
 ) {
   econ_data <- match.arg(econ_data)
 
