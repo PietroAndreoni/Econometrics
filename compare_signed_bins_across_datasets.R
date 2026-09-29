@@ -128,7 +128,7 @@ for (i in seq_len(nrow(specs))) {
 
 # Maximum samples ----------------------------------------------------------------
 
-fits_max <- lapply(panels, fit_signed_bins)
+fits_max <- Map(fit_signed_bins, panels, names(panels))
 
 # Rows actually used by each maximum-sample model.
 used_keys <- lapply(names(fits_max), function(id) {
@@ -178,7 +178,7 @@ if (EQUAL_FREQUENCY) {
   }
 }
 bin_breaks <- bind_rows(bin_breaks) %>% left_join(specs, by = "id")
-fits_common <- lapply(common_data, fit_signed_bins)
+fits_common <- Map(fit_signed_bins, common_data, names(common_data))
 
 # Part 1: analysis tables ----------------------------------------------------------
 #
@@ -228,8 +228,8 @@ climate_agreement <- bind_rows(lapply(names(ECON_DATASETS), function(econ) {
       observations = nrow(j),
       cor_zTM = stats::cor(j$zTM.x, j$zTM.y, use = "complete.obs"),
       cor_zRR = stats::cor(j$zRR.x, j$zRR.y, use = "complete.obs"),
-      same_TM_bin = mean(j$TM_bin_signed.x == j$TM_bin_signed.y, na.rm = TRUE),
-      same_RR_bin = mean(j$RR_bin_signed.x == j$RR_bin_signed.y, na.rm = TRUE)
+      same_TM_bin = mean(j$TM_bin.x == j$TM_bin.y, na.rm = TRUE),
+      same_RR_bin = mean(j$RR_bin.x == j$RR_bin.y, na.rm = TRUE)
     )
   }))
 }))
