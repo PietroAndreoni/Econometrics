@@ -1,0 +1,118 @@
+# Frozen design for the fast-versus-slow warming analysis
+# (FAST_VS_SLOW_WARMING_EMPIRICAL_STRATEGY.md, section 8.2). Every model output
+# carries the SHA-256 of this file. Change it only through a dated entry in
+# config/fast_slow_amendments.yml.
+design_version: "1.0.0"
+freeze_date: "2026-09-30"
+# Required true/false and never inferred: to be filled by the study owner.
+# Until it is, the analysis is a frozen analysis plan, not a preregistration.
+prior_related_results_seen: null
+current_pipeline_outcomes_examined_before_freeze: false
+# Stage 0 gate: the SESOI has not been affirmed by the study owner, so effects
+# are estimated but practical-equivalence claims are disabled.
+allow_estimation_without_equivalence_claim: true
+
+dose:
+  release: "2.14"
+  raw_file: "DOSE_V2.14.csv"
+  outcome_pc: "grp_pc_lcu_2015"
+  outcome_pc_fixed_usd: "grp_pc_lcu2015_usd"
+  outcome_scale: 100            # g = 100 * (log y_t - log y_{t-1})
+  econ_year_min: 1953
+  min_adjacent_growth_obs: 15
+  exclude_structural_break_pairs: true
+  struct_change_codes_excluded: [1, 2, 3]
+  fixed_usd_growth_tolerance: 1.0e-6   # log points, assertion 5
+
+climate:
+  primary_product: "ERA5"
+  primary_weight: "area"        # WCD "unweighted" = grid-cell-area weighted
+  rate_window: 5
+  acute_rate: "delta1"
+  annual_completeness: 0.95   # share of months required for an annual mean
+  alternative_slope_windows: [3, 10]
+  anomaly_normal_years: 20
+  alternative_anomaly_normal_years: [15, 30]
+  baseline_period: [1991, 2010]
+  predetermined_climate_period: [1951, 1980]
+
+geography:
+  min_target_coverage: 0.95
+  min_weight_mass: 0.95
+  weight_sum_tolerance: 1.0e-8
+
+support:
+  min_tail_region_years: 100
+  min_tail_countries: 10
+  min_tail_decades: 2
+  assess_after_fe_projection: true
+  joint_method: "standardized_nearest_neighbor"
+  joint_space: ["TM", "rate", "RR"]
+  max_distance_quantile: 0.99
+  neighbor_k: 50
+  min_neighbor_regions: 10
+  min_neighbor_countries: 3
+  min_scenario_weight_supported: 0.95
+  rate_quantiles: [0.01, 0.99]
+  strict_rate_quantiles: [0.05, 0.95]
+  local_temperature_support: "region_min_max"
+  fallback_total_warming_c: [0.25, 0.50, 0.75, 1.00]
+  fallback_fast_years: [3, 5, 7, 10]
+  fallback_slow_years: [10, 15, 20, 30]
+  fallback_targets_positive_rate_quantiles: [0.90, 0.50]
+
+model:
+  temp_form: "centered_quadratic"
+  rate_form: "signed_quadratic_hinge"
+  precipitation_form: "centered_scaled_quadratic"
+  primary_fe: "region + year + country_linear_trend"
+  primary_cluster: ["country", "year"]
+  weights: "none"
+  spline_temp_knots_quantiles: [0.10, 0.25, 0.50, 0.75, 0.90]
+  spline_temp_boundary_quantiles: [0.01, 0.99]
+  distributed_lag_max: 10
+  distributed_lag_almon_degree: 3
+  restriction_lag_max: 4
+  local_projection_horizons: 10
+  local_projection_horizon_sensitivity: 15
+  local_projection_lags: 2
+  long_difference_windows: [10, 20]
+  meaningful_country_rate_sd_share: 0.25
+  min_meaningful_countries: 30
+  baseline_population_year: 2000
+
+inference:
+  bootstrap: "multiway_wild_cluster"
+  bootstrap_clusters: ["country", "year"]
+  bootstrap_weights: "rademacher"
+  bootstrap_reps: 9999
+  conley_distance_km: [500, 1000, 2000]
+  conley_time_lags_years: [5, 10]
+  robust_estimator: "FWL_Huber_k_1.345"
+  robust_bootstrap_reps: 499
+  permutation_reps: 999
+  power_simulations: 1000
+
+scenario:
+  total_warming_c: 1.0
+  fast_years: 5
+  slow_years: 20
+  common_horizon: 20
+  alternative_horizons: [10, 30]
+  sesoi_log_points: 1.0
+  sesoi_alternatives: [0.5, 2.0]
+  sesoi_confirmed: false
+
+power:
+  planted_speed_gaps: [0, -0.5, -1, -2, -5]
+  misspecified_lag_weights: [1, 0.75, 0.50, 0.25, 0]
+  idiosyncratic_sd: [2, 5, 10]
+  country_sd: [1, 3]
+  year_sd: [0.5, 1.5]
+  country_ar1: [0, 0.4, 0.7]
+
+decision:
+  directional_ci: 0.95
+  equivalence_ci: 0.90
+  support_quantiles: [0.01, 0.99]
+  min_power_at_sesoi: 0.80
