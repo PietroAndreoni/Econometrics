@@ -80,13 +80,39 @@ read_wdi_csv <- function(path) {
 #   usd_2015     current US\ by the US GDP deflator
 #   lcu          current local currency (nominal: includes inflation)
 #   usd          current US\197121nominal: inflation and exchange rates)
+#   lcu2015_ppp  constant 2015 local prices at the 2015 PPP factor (2015
+#                international $; same growth as lcu_2015); see add_dose_ppp()
 DOSE_GDP_VARIABLES <- c(
   lcu2015_usd = "grp_pc_lcu2015_usd",
   lcu_2015 = "grp_pc_lcu_2015",
   usd_2015 = "grp_pc_usd_2015",
   lcu = "grp_pc_lcu",
-  usd = "grp_pc_usd"
+  usd = "grp_pc_usd",
+  lcu2015_ppp = "grp_pc_lcu2015_ppp"
 )
+
+# DOSE's `PPP` column is the conversion factor of each year (local currency
+# per international $). grp_pc_lcu2015_ppp divides constant 2015 local prices
+# by the country's 2015 factor, the PPP counterpart of grp_pc_lcu2015_usd: one
+# constant per country, so growth is exactly constant-local-price growth.
+# Countries without a 2015 factor in DOSE (V2.14: ANT, ARE, ETH, GTM, HND, LAO,
+# LVA, NPL, PAK, TUR, URY) are NA in every year; no factor is taken from other
+# years or sources. The median only absorbs float noise (IND lists two 2015
+# values that agree to rounding).
+add_dose_ppp <- function(dose) {
+  ppp_2015 <- dose %>%
+    filter(year == 2015, !is.na(PPP)) %>%
+    group_by(GID_0) %>%
+    summarise(ppp_2015 = stats::median(PPP), .groups = "drop")
+
+  dose %>%
+    left_join(ppp_2015, by = "GID_0") %>%
+    mutate(
+      grp_pc_lcu2015_ppp = grp_pc_lcu_2015 / ppp_2015,
+      ag_grp_pc_lcu2015_ppp = ag_grp_pc_lcu_2015 / ppp_2015
+    ) %>%
+    select(-ppp_2015)
+}
 
 # Only DOSE has alternative definitions; NULL selects each source's default.
 resolve_econ_variable <- function(stored_source, econ_variable = NULL) {
@@ -115,6 +141,7 @@ read_econ_source <- function(stored_source, econ_variable = NULL) {
     # definition (default: constant 2015 local prices at the 2015 exchange
     # rate), and the agricultural share uses the matching sector column.
     read_dose(raw_file) %>%
+      add_dose_ppp() %>%
       transmute(
         year,
         GID_0,
@@ -216,7 +243,8 @@ load_econ_panel <- function(stored_source, econ_variable = NULL) {
       raw_file = unname(ECON_RAW_FILES[[stored_source]]),
       variable = if (is.null(variable)) "default" else variable,
       code = code_fingerprint(
-        read_econ_source, build_econ_panel, resolve_econ_variable
+        read_econ_source, build_econ_panel, resolve_econ_variable,
+        add_dose_ppp
       )
     ),
     function() build_econ_panel(stored_source, variable)

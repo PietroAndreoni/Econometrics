@@ -12,7 +12,7 @@ main_spec <- function(
     base_climate = "TM + TM:mean_TM_all + RR + RR:mean_RR_all",
     econ_year_min = 1950L,
     clim_history_years = 6L,
-    dose_variable = "usd_2015"
+    dose_variable = "lcu2015_usd"
 ) {
   list(
     outcome = outcome,
