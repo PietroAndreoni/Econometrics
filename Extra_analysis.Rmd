@@ -256,3 +256,17 @@ ggplot(
     legend.position = "none"
   )
 ```
+
+# PREFERRED SPECIFICATION:
+
+```{r test-double deviation}
+
+data <- data |> 
+    mutate(zzTM = pmax(1.5,abs((TM - mean_TM_lag_30) / (sd_TM_lag_30)))-1.5 ) 
+
+m_pref <- fit_climate_model(paste(base_climate,"+ zzTM^2 + abs_zRRm"))
+
+etable(m_base, m_pref, fitstat = ~n + r2 + wr2)
+
+```
+
