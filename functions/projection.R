@@ -25,6 +25,45 @@ linear_traj <- function(x0, trend, n) x0 + trend * (seq_len(n) - 1)
 step_delta <- function(n, total) rep(total, n)
 ramp_delta <- function(n, total, ramp) total * pmin(seq_len(n) / ramp, 1)
 
+# G for a model with run-position-specific distributed lags,
+#   l(<shock>^2, 0:max_lag) : i(<state>),
+# under an episode where the shock equals `size` (in SD) for `duration` years
+# and zero afterwards. Episode year j sits at run position
+# min(j + first_position - 1, cap); every year after the episode is at position
+# 1 (the run has ended). The default first_position = 2 follows
+# add_climate_runs(): position 1 is the year before the first warmer year.
+# Growth in year t is sum_k b[k, s_t] * shock_{t-k}, with s_t the position in t.
+run_episode_G <- function(model, duration, horizon = duration + max_lag,
+                          shock = "zTMp_f", state = "warming_run_length_capped",
+                          max_lag = 5, cap = 6, first_position = 2,
+                          size = 1) {
+  x <- c(rep(size^2, duration), rep(0, max(horizon - duration, 0)))
+  s <- c(pmin(seq_len(duration) + first_position - 1, cap),
+         rep(1, max(horizon - duration, 0)))
+  x <- x[seq_len(horizon)]
+  s <- s[seq_len(horizon)]
+  # fixest names lag 0 "l(v^2, 0):state::s" and later lags "state::s:l(v^2, k)".
+  term <- function(k, pos) {
+    if (k == 0) {
+      sprintf("l(%s^2, 0):%s::%d", shock, state, pos)
+    } else {
+      sprintf("%s::%d:l(%s^2, %d)", state, pos, shock, k)
+    }
+  }
+  terms <- unlist(lapply(0:max_lag, function(k) {
+    vapply(seq_len(cap), function(pos) term(k, pos), character(1))
+  }))
+  G <- matrix(0, horizon, length(terms), dimnames = list(NULL, terms))
+  for (t in seq_len(horizon)) {
+    for (k in 0:min(max_lag, t - 1)) {
+      if (x[t - k] != 0) {
+        G[t, term(k, s[t])] <- G[t, term(k, s[t])] + x[t - k]
+      }
+    }
+  }
+  G
+}
+
 # Annual growth effect G %*% b and its running sum (the log GDP level
 # deviation), with delta-method intervals. The cumulative intervals carry the
 # covariance between years rather than treating them as independent.
