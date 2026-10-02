@@ -13,13 +13,15 @@
 # `climate_weight_year` is ignored.
 # `clim_history_years` climate years are kept before `econ_year_min` as lag
 # carriers: they have no outcome but let lags and trailing windows resolve.
+# The fixed-period moments are *_all over each unit's entire climate series,
+# *_pre over `period_pre` and *_post over `period_post`.
 panel_config <- function(
     econ_year_min = 1950L,
     climate_source = "CRU TS",
     climate_weight = "concurrent population",
     climate_weight_year = NULL,
     climate_windows = c(5L, 10L, 20L, 30L),
-    period_all = c(1990L, 2019L),
+    period_post = c(1990L, 2019L),
     period_pre = c(1960L, 1989L),
     hamilton_lags = 4L,
     hamilton_h = 2L,
@@ -32,7 +34,7 @@ panel_config <- function(
     climate_weight = climate_weight,
     climate_weight_year = climate_weight_year,
     climate_windows = as.integer(climate_windows),
-    period_all = as.integer(period_all),
+    period_post = as.integer(period_post),
     period_pre = as.integer(period_pre),
     hamilton_lags = as.integer(hamilton_lags),
     hamilton_h = as.integer(hamilton_h),
@@ -69,8 +71,9 @@ resolve_econ_source <- function(econ_data) {
   unname(ECON_SOURCE_ALIASES[[econ_data]])
 }
 
-# `baseline`, `deviation`, `bin_width` and `signed_quantile` choose how the
-# anomalies and bins are defined; see add_weather_variables() below. The
+# `baseline`, `sd_baseline`, `deviation`, `bin_width` and `signed_quantile`
+# choose how the anomalies and bins are defined; see add_weather_variables()
+# below. The
 # defaults (standardized anomalies against the lagged 30-year moments)
 # reproduce the original panel. `drop_break_years = TRUE` sets DOSE growth to
 # missing in the years DOSE flags as series breaks (see below); the number set
@@ -82,6 +85,7 @@ build_dat <- function(
     config = panel_config(),
     econ_variable = NULL,
     baseline = "lag_30",
+    sd_baseline = NULL,
     deviation = c("standardized", "absolute"),
     bin_width = NULL,
     signed_quantile = c("symmetric", "per_side"),
@@ -249,6 +253,7 @@ build_dat <- function(
     ) %>%
     add_weather_variables(
       baseline = baseline,
+      sd_baseline = sd_baseline,
       deviation = deviation,
       bin_width = bin_width,
       signed_quantile = signed_quantile
@@ -268,19 +273,28 @@ build_dat <- function(
 # `baseline` is the reference climate the anomaly is measured against:
 #   "lag_30", "lag_20", "lag_10", "lag_5"  trailing window ending the year
 #                                          before (mean_TM_lag_30, ...)
-#   "all"                                  fixed period_all (mean_TM_all)
+#   "all"                                  the unit's entire climate series
+#                                          (mean_TM_all)
 #   "pre"                                  fixed period_pre (mean_TM_pre)
+#   "post"                                 fixed period_post (mean_TM_post)
 #   "trend"                                Hamilton-filter trend (trend_TM,
 #                                          panel_config() hamilton_h and
 #                                          hamilton_lags); standardized by
 #                                          the SD of TM - trend_TM over the
 #                                          unit's entire climate series
 #                                          (sd_TM_trend)
+# `sd_baseline` is the period whose SD standardizes the anomaly: NULL (the
+# default) uses the SD of `baseline` itself, while "all", "pre" or "post" use
+# sd_TM_all, sd_TM_pre or sd_TM_post whatever the baseline mean, e.g.
+# zTM = (TM - mean_TM_lag_30) / sd_TM_all. It has no effect on absolute
+# deviations.
 # `deviation`:
 #   "standardized"  zTM = (TM - mean) / sd, in standard deviations of the
-#                   baseline (the default and previous behaviour);
+#                   `sd_baseline` period (the default and previous behaviour);
 #   "absolute"      zTM = TM - mean, in the variable's units (degrees Celsius,
 #                   metres of precipitation), with no SD scaling.
+# A single value applies to both variables; a named vector sets them
+# separately, e.g. c(TM = "absolute", RR = "standardized").
 # The names zTM, zRR, abs_zTM, ..., *_bin* are the same in both cases, so a
 # model formula works unchanged.
 #
@@ -305,15 +319,31 @@ build_dat <- function(
 #   TM_bin_level_q           7 (TM) and 6 (RR) quantile bins of the level.
 # All breaks, widths and options are returned in attr(panel, "weather_bins").
 add_weather_variables <- function(panel, baseline = "lag_30",
+                                  sd_baseline = NULL,
                                   deviation = c("standardized", "absolute"),
                                   bin_width = NULL,
                                   signed_quantile = c("symmetric", "per_side"),
                                   outcome = "dlgrp_pc_usd") {
-  deviation <- match.arg(deviation)
+  deviation_options <- c("standardized", "absolute")
+  if (is.null(names(deviation))) {
+    deviation <- match.arg(deviation, deviation_options)
+    deviation <- c(TM = deviation, RR = deviation)
+  } else if (!setequal(names(deviation), c("TM", "RR")) ||
+             !all(deviation %in% deviation_options)) {
+    stop("A named `deviation` needs TM and RR entries, each \"standardized\" ",
+         "or \"absolute\".")
+  }
   signed_quantile <- match.arg(signed_quantile)
   if (length(baseline) != 1L ||
-      !grepl("^(lag_[0-9]+|all|pre|trend)$", baseline)) {
-    stop("`baseline` must be \"lag_<window>\", \"all\", \"pre\" or \"trend\".")
+      !grepl("^(lag_[0-9]+|all|pre|post|trend)$", baseline)) {
+    stop("`baseline` must be \"lag_<window>\", \"all\", \"pre\", \"post\" ",
+         "or \"trend\".")
+  }
+  if (is.null(sd_baseline)) {
+    sd_baseline <- baseline
+  } else if (length(sd_baseline) != 1L ||
+             !sd_baseline %in% c("all", "pre", "post")) {
+    stop("`sd_baseline` must be NULL, \"all\", \"pre\" or \"post\".")
   }
   in_sample <- !is.na(panel[[outcome]])
 
@@ -341,8 +371,8 @@ add_weather_variables <- function(panel, baseline = "lag_30",
       labels = c("<0.5", "0.5-1", "1-1.5", "1.5-2", "2-2.5", ">=2.5")
     )
   )
-  bin_info <- list(baseline = baseline, deviation = deviation,
-                   signed_quantile = signed_quantile)
+  bin_info <- list(baseline = baseline, sd_baseline = sd_baseline,
+                   deviation = deviation, signed_quantile = signed_quantile)
 
   for (v in c("TM", "RR")) {
     mean_col <- if (baseline == "trend") {
@@ -350,23 +380,24 @@ add_weather_variables <- function(panel, baseline = "lag_30",
     } else {
       paste0("mean_", v, "_", baseline)
     }
-    sd_col <- paste0("sd_", v, "_", baseline)
+    sd_col <- paste0("sd_", v, "_", sd_baseline)
     if (!all(c(mean_col, sd_col) %in% names(panel))) {
       stop("Baseline moments ", mean_col, " and ", sd_col, " are missing; ",
            "check `baseline` against config$climate_windows.")
     }
+    standardized <- deviation[[v]] == "standardized"
     anomaly <- panel[[v]] - panel[[mean_col]]
-    if (deviation == "standardized") anomaly <- anomaly / panel[[sd_col]]
+    if (standardized) anomaly <- anomaly / panel[[sd_col]]
     magnitude <- abs(anomaly)
 
     width <- if (!is.null(bin_width)) {
       if (is.null(names(bin_width))) bin_width[[1]] else bin_width[[v]]
-    } else if (deviation == "standardized") {
+    } else if (standardized) {
       0.5
     } else {
       0.5 * stats::sd(anomaly[in_sample], na.rm = TRUE)
     }
-    original_bins <- deviation == "standardized" && isTRUE(all.equal(width, 0.5))
+    original_bins <- standardized && isTRUE(all.equal(width, 0.5))
     coarse_breaks <- c(0, 2 * width, 4 * width, Inf)
     fine_breaks <- c(0, width * seq_len(5), Inf)
     signed_breaks <- width * c(-5:-1, 1:5)

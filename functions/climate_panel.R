@@ -107,9 +107,11 @@ derive_climate_moments <- function(series, config = panel_config()) {
     )
   }
 
-  period_all <- config$period_all
+  period_post <- config$period_post
   period_pre <- config$period_pre
 
+  # *_all spans each unit's entire climate series; *_pre and *_post the fixed
+  # periods of the config.
   series %>%
     group_by(gadm_level, climate_source, GID_0, GID_1) %>%
     arrange(year, .by_group = TRUE) %>%
@@ -117,10 +119,14 @@ derive_climate_moments <- function(series, config = panel_config()) {
     mutate(
       dTM = TM - lag_by_year(TM, year),
       dRR = RR - lag_by_year(RR, year),
-      mean_TM_all = mean(TM[in_period(year, period_all)], na.rm = TRUE),
-      sd_TM_all = sd(TM[in_period(year, period_all)], na.rm = TRUE),
-      mean_RR_all = mean(RR[in_period(year, period_all)], na.rm = TRUE),
-      sd_RR_all = sd(RR[in_period(year, period_all)], na.rm = TRUE),
+      mean_TM_all = mean(TM, na.rm = TRUE),
+      sd_TM_all = sd(TM, na.rm = TRUE),
+      mean_RR_all = mean(RR, na.rm = TRUE),
+      sd_RR_all = sd(RR, na.rm = TRUE),
+      mean_TM_post = mean(TM[in_period(year, period_post)], na.rm = TRUE),
+      sd_TM_post = sd(TM[in_period(year, period_post)], na.rm = TRUE),
+      mean_RR_post = mean(RR[in_period(year, period_post)], na.rm = TRUE),
+      sd_RR_post = sd(RR[in_period(year, period_post)], na.rm = TRUE),
       mean_TM_pre = mean(TM[in_period(year, period_pre)], na.rm = TRUE),
       sd_TM_pre = sd(TM[in_period(year, period_pre)], na.rm = TRUE),
       mean_RR_pre = mean(RR[in_period(year, period_pre)], na.rm = TRUE),
@@ -151,7 +157,7 @@ load_climate_panel <- function(geo_resolution, config = panel_config()) {
         config$climate_weight_year
       },
       windows = config$climate_windows,
-      period_all = config$period_all,
+      period_post = config$period_post,
       period_pre = config$period_pre,
       hamilton_h = config$hamilton_h,
       hamilton_p = config$hamilton_lags,
