@@ -305,3 +305,107 @@ print(component_summary)
 print(coefficients %>%
         filter(vcov == "Two-way: GID_0 + year") %>%
         select(model, term, estimate, std_error, p_value, observations))
+
+# (d) Anomalies against levels, with and without country-year FE -------------------
+#
+# zTM, zRR against the levels TM, RR. The region fixed effects demean the
+# levels, so TM gives the same coefficient as TM minus its regional mean or any
+# fixed-period mean; the anomaly instead removes the lagged baseline mean, which
+# the region trends largely absorb. Each pair is fitted under year FE and under
+# country-year FE, which leaves only variation within a country-year. Under
+# country-year FE, zTM gives the same coefficient as zTM_reg_res above, since
+# the world and national components are absorbed.
+FE_SETS <- c("Year FE" = SPEC$fixed_effects,
+             "Country-year FE" = paste("GID_0^year +", REGION_TRENDS))
+REGRESSORS <- c("Anomaly (zTM, zRR)" = "zTM + zRR", "Level (TM, RR)" = "TM + RR")
+
+level_models <- list()
+for (fe in names(FE_SETS)) {
+  for (r in names(REGRESSORS)) {
+    level_models[[paste0(r, ", ", fe)]] <- fit_main(
+      REGRESSORS[[r]], dose_sample,
+      spec = modifyList(SPEC, list(fixed_effects = FE_SETS[[fe]]))
+    )
+  }
+}
+level_coefficients <- bind_rows(lapply(names(level_models), function(label) {
+  bind_rows(lapply(names(VCOVS), function(vc) {
+    tidy_fixest(level_models[[label]], label, data = dose_sample,
+                vcov = VCOVS[[vc]]) %>%
+      mutate(vcov = vc)
+  }))
+})) %>%
+  mutate(
+    regressor = sub(", (Year|Country-year) FE$", "", model),
+    fixed_effects = sub("^.*, ", "", model),
+    variable = if_else(grepl("TM", term), "Temperature", "Precipitation")
+  )
+write_out(level_coefficients, "anomaly_vs_level_coefficients")
+
+# Variation each regressor keeps once the fixed effects are partialled out, and
+# how closely the demeaned anomaly tracks the demeaned level.
+within_variation <- bind_rows(lapply(names(FE_SETS), function(fe) {
+  demeaning <- fixest::feols(
+    stats::as.formula(paste("c(zTM, zRR, TM, RR) ~ 1 |", FE_SETS[[fe]])),
+    data = dose_sample
+  )
+  demeaned <- lapply(as.list(demeaning), stats::resid)
+  names(demeaned) <- c("zTM", "zRR", "TM", "RR")
+  used <- fixest::obs(demeaning[[1]])
+  bind_rows(lapply(names(demeaned), function(x) {
+    raw <- dose_sample[[x]][used]
+    v <- sub("^z", "", x)
+    tibble::tibble(
+      fixed_effects = fe, regressor = x,
+      sd_raw = stats::sd(raw),
+      sd_demeaned = stats::sd(demeaned[[x]]),
+      share_of_variance_kept = stats::var(demeaned[[x]]) / stats::var(raw),
+      correlation_anomaly_level = stats::cor(demeaned[[paste0("z", v)]],
+                                             demeaned[[v]]),
+      observations = length(used)
+    )
+  }))
+}))
+write_out(within_variation, "anomaly_vs_level_within_variation")
+
+regressor_levels <- names(REGRESSORS)
+level_plot_data <- level_coefficients %>%
+  filter(vcov == "Two-way: GID_0 + year") %>%
+  mutate(
+    variable = factor(variable, levels = c("Temperature", "Precipitation")),
+    fixed_effects = factor(fixed_effects, levels = rev(names(FE_SETS))),
+    regressor = factor(regressor, levels = regressor_levels),
+    across(c(estimate, conf_low, conf_high), ~ 100 * .x)
+  )
+level_x_label <- if (DEVIATION == "standardized") {
+  "Growth effect (percentage points; anomaly per SD, level per degree C or metre)"
+} else {
+  "Growth effect of one degree C or one metre (percentage points)"
+}
+p_levels <- ggplot(level_plot_data, aes(estimate, fixed_effects,
+                                        colour = regressor, shape = regressor)) +
+  geom_vline(xintercept = 0, colour = GRID_MUTED, linewidth = 0.3) +
+  geom_errorbar(aes(xmin = conf_low, xmax = conf_high), width = 0,
+                linewidth = 0.5, position = dodge) +
+  geom_point(size = 2.4, position = dodge) +
+  facet_wrap(~variable, scales = "free_x") +
+  scale_colour_manual(values = grid_colours(regressor_levels), name = NULL) +
+  scale_shape_manual(values = grid_shapes(regressor_levels), name = NULL) +
+  labs(
+    title = "Weather anomalies against weather levels, DOSE",
+    subtitle = paste0("CRU TS, area-weighted; ", DEVIATION, " anomalies ",
+                      "against the ", BASELINE, " baseline\n95% CI, two-way ",
+                      "clustered by country and year"),
+    x = level_x_label, y = NULL,
+    caption = "All models include region-specific quadratic trends."
+  ) +
+  theme_results() +
+  theme(panel.grid.major.x = element_line(colour = "#e6e5df", linewidth = 0.3),
+        panel.grid.major.y = element_blank())
+ggsave(file.path(OUT, "anomaly_vs_level_coefficients.png"), p_levels,
+       width = 9, height = 4.2, dpi = 200)
+
+print(within_variation)
+print(level_coefficients %>%
+        filter(vcov == "Two-way: GID_0 + year") %>%
+        select(model, term, estimate, std_error, p_value, observations))
