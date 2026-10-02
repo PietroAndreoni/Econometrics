@@ -12,3 +12,5 @@ results/
 data/cache/
 # Kummu 2025 raw inputs: rasters exceed GitHub's 100 MB file limit.
 data/kummu2025/cache
+
+*.pdf
