@@ -66,6 +66,30 @@ GDP-per-capita growth.
   area-weighted), under year, no-year and country-year fixed effects
 - `harmonize_dose_pwt.R`: DOSE-PWT harmonization
 
+## Fast versus slow warming
+
+Implementation of `FAST_VS_SLOW_WARMING_EMPIRICAL_STRATEGY.md` on DOSE
+(`grp_pc_lcu_2015`) x ERA5 (area weighted). The frozen design is
+`config/fast_slow_design.yml`; every output carries its SHA-256. Run in order
+from the project root:
+
+    Rscript tests/test_fast_slow_warming.R      # synthetic fixtures (a)-(g)
+    Rscript fast_slow_stage1_panel.R            # Stages 0-1: manifest, panel, QA
+    Rscript fast_slow_stage2_support.R          # Stage 2: outcome-blind support, power
+    Rscript fast_slow_stage3_7_models.R         # Stages 3-7: models, paths, decisions
+    Rscript fast_slow_stage8_12_checks.R        # Stages 8-12: anomaly model, robustness, falsification
+    Rscript fast_slow_report.R                  # results/fast_slow_warming/report.md
+
+Functions: `functions/fast_slow_rates.R` (the trailing 5-year OLS slope in
+C/year, hinges, anomalies, equal-endpoint paths and their contrasts),
+`functions/fast_slow_inference.R` (two-way CGM, wild cluster bootstrap-t with
+synchronized country/year Rademacher draws, Conley HAC with temporal lags, the
+section 7 decision rules), `functions/fast_slow_support.R` (support audit,
+fallback contrast, design-range power), `functions/fast_slow_pipeline.R`
+(design hash, stage status, registry, fixed-effect designs). Environment
+variables `FS_BOOT_REPS`, `FS_POWER_SIMS`, `FS_HUBER_REPS`, `FS_PERM_REPS`
+override the replication counts for quick runs.
+
 National-vs-subnational growth comparison, ranked subnational outliers and the
 outlier sensitivity of the signed-bin model, for every pair of sources:
 
