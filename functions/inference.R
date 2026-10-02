@@ -39,8 +39,10 @@ tidy_fixest <- function(fit, label = NULL, data = NULL, conf_level = 0.95,
 # one per row of G. G is a matrix (or a named vector for a single combination)
 # whose column names are coefficient names; coefficients not named in G get
 # weight zero. Covariances across terms are retained. `df = Inf` gives normal
-# intervals; pass e.g. the number of clusters minus one for t intervals.
-linear_combination <- function(model, G, conf_level = 0.95, df = Inf) {
+# intervals; pass e.g. the number of clusters minus one for t intervals. `vcov`
+# replaces stats::vcov(model), e.g. a cluster-robust matrix for a plm model.
+linear_combination <- function(model, G, conf_level = 0.95, df = Inf,
+                               vcov = NULL) {
   if (is.null(dim(G))) {
     G <- matrix(G, nrow = 1L, dimnames = list(NULL, names(G)))
   }
@@ -53,7 +55,8 @@ linear_combination <- function(model, G, conf_level = 0.95, df = Inf) {
     )
   }
   b <- stats::coef(model)[terms]
-  V <- stats::vcov(model)[terms, terms, drop = FALSE]
+  if (is.null(vcov)) vcov <- stats::vcov(model)
+  V <- vcov[terms, terms, drop = FALSE]
   critical <- stats::qt(1 - (1 - conf_level) / 2, df)
 
   estimate <- as.numeric(G %*% b)
