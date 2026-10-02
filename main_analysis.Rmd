@@ -66,7 +66,7 @@ precipitation terms. All tests add alternative weather-response terms to this
 base while retaining the same fixed effects.
 
 ```{r shared-specification}
-fixed_effects <- "year + GID_1 + GID_1[year] + GID_0^year"
+fixed_effects <- "year + GID_1 + GID_1[year]"
 # National (GADM0) panels have GID_1 = GID_0, so country-year effects would
 # absorb every observation.
 fixed_effects_iso3 <- "year + GID_1 + GID_1[year]"
@@ -83,10 +83,10 @@ fixed_effects_for <- function(model_data) {
 pan_id <- c("GID_1", "year")
 outcome <- "dlgrp_pc_usd"
 
-base_climate <- "TM + TM^2 + RR + RR^2"
+base_climate <- "TM + TM:mean_TM_all + RR + RR:mean_RR_all"
 model <- paste(base_climate, "+ zRR^2 + zTM^2")
 
-ECON_YEAR_MIN <- 1900
+ECON_YEAR_MIN <- 1979
 
 CLIMATE_VELOCITY_YEARS <- as.integer(params$climate_velocity_years)
 
@@ -101,6 +101,7 @@ if (length(CLIMATE_VELOCITY_YEARS) != 1L ||
 # Enough pre-estimation climate years are retained to calculate the first
 # trailing climate-velocity window, as well as the six-year model lags.
 panel_cfg <- panel_config(
+  climate_source="era5",
   climate_weight = "area",
   econ_year_min = ECON_YEAR_MIN,
   clim_history_years = max(6L, CLIMATE_VELOCITY_YEARS - 1L)
@@ -138,82 +139,14 @@ the estimation period.
 # build_dat() joins the economic panel to the derived climate moments and adds
 # the weather-response variables; both halves are built from raw sources and
 # cached under data/cache (see functions/build_dat.R).
-data <- build_dat(econ_data = params$econ_data, config = panel_cfg, )
+data <- build_dat(econ_data = params$econ_data, config = panel_cfg)
 
-data_iso3 <- build_dat(econ_data = "PWT", config = panel_cfg)
+data_iso3 <- build_dat(econ_data = "WB", config = panel_cfg)
 
 # Retained as `f` for the split-sample tests and interactive use.
 f <- make_formula(model)
 ```
 
-## Weather-response variables
-
-Weather deviations are standardized by each region's long-run variability.
-The derived variables support the piecewise-linear and discrete-bin tests below.
-
-```{r derive-weather-variables}
-table(data$TM_bin_signed, useNA = "ifany")
-table(data$RR_bin_signed, useNA = "ifany")
-table(data$TM_bin_level, useNA = "ifany")
-table(data$RR_bin_level, useNA = "ifany")
-table(data_iso3$TM_bin_signed, useNA = "ifany")
-table(data_iso3$RR_bin_signed, useNA = "ifany")
-```
-
-# Test: Correlation between fine temperature and precipitation bins
-
-The Spearman test treats the fine bins as ordered categories. The bin-pair
-matrix reports correlations between the indicator for each temperature bin and
-the indicator for each precipitation bin.
-
-```{r test-fine-bin-correlation}
-fine_bin_data <- data %>%
-  filter(
-    !is.na(dlgrp_pc_usd),
-    !is.na(TM_bin_fine),
-    !is.na(RR_bin_fine)
-  ) %>%
-  transmute(
-    TM_bin_fine,
-    RR_bin_fine,
-    TM_bin_rank = as.integer(TM_bin_fine),
-    RR_bin_rank = as.integer(RR_bin_fine)
-  )
-
-fine_bin_correlation_test <- cor.test(
-  fine_bin_data$TM_bin_rank,
-  fine_bin_data$RR_bin_rank,
-  method = "spearman",
-  exact = FALSE
-)
-
-fine_bin_correlation_test
-
-TM_bin_indicators <- model.matrix(
-  ~ TM_bin_fine - 1,
-  data = fine_bin_data
-)
-RR_bin_indicators <- model.matrix(
-  ~ RR_bin_fine - 1,
-  data = fine_bin_data
-)
-
-colnames(TM_bin_indicators) <- paste0(
-  "TM_",
-  levels(fine_bin_data$TM_bin_fine)
-)
-colnames(RR_bin_indicators) <- paste0(
-  "RR_",
-  levels(fine_bin_data$RR_bin_fine)
-)
-
-fine_bin_pair_correlations <- cor(
-  TM_bin_indicators,
-  RR_bin_indicators
-)
-
-round(fine_bin_pair_correlations, 3)
-```
 
 
 # Test 1: Quadratic weather deviations
@@ -228,7 +161,7 @@ IDEAS:
 - main specification should be this + distributed lag models of past SDs?
 - check last chatGPT chat for suggestions on spells
 
-```{r test-absolute}
+```{r test-quadratic}
 
 f_bhm <- make_formula(base_climate)
 m_bhm <- fit_climate_model(
@@ -249,6 +182,11 @@ m_base_iso3 <- fit_climate_model(
   model_base,
   model_data = data_iso3
 )
+model_abs <- paste(
+  base_climate,
+  "+ abs(zTM) + abs(zRR)"
+)
+m_abs <- fit_climate_model(model_abs)
 
 deviation_information_test <- fixest::wald(
   m_base,
@@ -257,26 +195,42 @@ deviation_information_test <- fixest::wald(
 )
 
 etable(
-  m_base_iso3,
   m_bhm,
+  m_abs,
   m_base,
-  headers = c("Iso3", "Naive", "Full"),
+  headers = c("Naive", "Absolute", "Quadratic"),
   fitstat = ~n + r2 + wr2 + aic + bic
 )
 
 ```
 
 
+# Different climate datasets
 
-```{r test-quadratic}
-model_abs <- paste(
-  base_climate,
-  "+ abs(zTM) + abs(zRR)"
+The quadratic specification of Test 1 estimated on the default DOSE panel with
+each climate source of the Weighted Climate Dataset. Every other panel setting
+and the fixed effects are those of the shared specification.
+
+```{r quadratic-climate-datasets}
+climate_sources <- c(ERA5 = "ERA5", `CRU TS` = "CRU TS", UDelaware = "UDelaware")
+
+m_base_climate <- lapply(climate_sources, function(source) {
+  cfg <- panel_config(
+    climate_source = source,
+    climate_weight = "area",
+    econ_year_min = ECON_YEAR_MIN,
+    clim_history_years = max(6L, CLIMATE_VELOCITY_YEARS - 1L)
+  )
+  fit_climate_model(
+    model_base,
+    model_data = build_dat(econ_data = "DOSE", config = cfg)
+  )
+})
+
+etable(
+  m_base_climate,
+  fitstat = ~n + r2 + wr2 + aic + bic
 )
-m_abs <- fit_climate_model(model_abs)
-
-etable(m_base,m_abs, fitstat = ~n + r2 + wr2)
-
 ```
 
 
@@ -291,13 +245,13 @@ data <- data |> group_by(GID_1) |>
   ungroup()
 
 model_lags <- paste(
-#  "l(TM,0:5) + l(TM,0:5):mean_TM_all",
-#  "+ l(RR,0:5) + l(RR,0:5):mean_RR_all",
-  "+ l(zRR^2,0:10) + l(zTM^2,0:10)"
+  "+ l(dRR,0:10) + l(dTM,0:10)",
+  "+ l(dRR,0:10):mean_RR_all + l(dTM,0:10):mean_TM_all",
+  "+ l(zTM^2,0:10) + + l(zRR^2,0:10)"
 )
 
 f_lags <- make_formula(model_lags)
-m_lags <- fit_climate_model(model_lags)
+m_lags <- fit_climate_model(model_lags, model_data=data_iso3)
 
 etable(m_lags, fitstat = ~n + r2 + wr2)
   
@@ -306,31 +260,37 @@ etable(m_lags, fitstat = ~n + r2 + wr2)
 
 ```{r plot-distributed-lags, fig.width=10, fig.height=6}
 # Each lag coefficient and the cumulative response through that lag; see
-# distributed_lag_effects() in functions/response_functions.R.
+# distributed_lag_effects() in functions/response_functions.R. The dTM and dRR
+# lags are interacted with the regional climate means, so their effects are
+# evaluated at the 10th, 50th and 90th percentiles of those means across the
+# regions in the estimation sample; the squared deviations are not interacted.
 lag_confidence_level <- 0.95
+lag_sample <- data[fixest::obs(m_lags), ]
 distributed_lag_data <- distributed_lag_effects(
   m_lags,
-  conf_level = lag_confidence_level
-)
-plot_distributed_lags(distributed_lag_data, conf_level = lag_confidence_level)
-```
-
-```{r test windows}
-
-model_windows <- paste(
-  base_climate,
-  " + abs((TM - mean_TM_lag_30) / sd_TM_lag_30)   + abs((TM - mean_TM_lag_5) / sd_TM_lag_5)",
-  " + abs((RR - mean_RR_lag_30) / sd_RR_lag_30)   + abs((RR - mean_RR_lag_5) / sd_RR_lag_5)"
+  conf_level = lag_confidence_level,
+  interactions = c(dTM = "mean_TM_all", dRR = "mean_RR_all"),
+  at = list(
+    mean_TM_all = region_quantiles(lag_sample, "mean_TM_all"),
+    mean_RR_all = region_quantiles(lag_sample, "mean_RR_all")
+  )
 )
 
-f_windows <- make_formula(model_windows)
-m_windows <- fit_climate_model(model_windows)
+plot_distributed_lags(
+  filter(distributed_lag_data, expression %in% c("dTM", "dRR")),
+  conf_level = lag_confidence_level,
+  colour = "at",
+  colour_name = "Regional climate mean",
+  title = "Distributed-lag paths of first differences",
+  subtitle = "Evaluated at percentiles of the regional climate mean"
+)
 
-etable(m_windows, fitstat = ~n + r2 + wr2)
-  
-
+plot_distributed_lags(
+  filter(distributed_lag_data, expression %in% c("zTM^2", "zRR^2")),
+  conf_level = lag_confidence_level,
+  title = "Distributed-lag paths of squared deviations"
+)
 ```
-
 
 # Test 3: Coarse unsigned anomaly bins
 
@@ -422,20 +382,6 @@ iplot(m_bins_signed, main = "Signed temperature anomaly bins")
 iplot(m_bins_signed, i.select=2,main = "Signed precipitation anomaly bins")
 
 ```
-
-# PREFERRED SPECIFICATION:
-
-```{r test-double deviation}
-
-data <- data |> 
-    mutate(zzTM = pmax(1.5,abs((TM - mean_TM_lag_30) / (sd_TM_lag_30)))-1.5 ) 
-
-m_pref <- fit_climate_model(paste(base_climate,"+ zzTM^2 + abs_zRRm"))
-
-etable(m_base, m_pref, fitstat = ~n + r2 + wr2)
-
-```
-
 
 ```{r signed, national}
 
@@ -966,6 +912,9 @@ climate_velocity_hist <- add_climate_runs(
 )
 check_climate_runs(climate_velocity_hist)
 
+climate_velocity_hist <- climate_velocity_hist |> mutate(warming_run_length_capped = pmin(6,warming_run_length),
+                                cooling_run_length_capped = pmin(6,cooling_run_length))
+
 warming_run_summary <- climate_velocity_hist %>%
   filter(warming_run) %>%
   group_by(GID_1, warming_run_id) %>%
@@ -1024,9 +973,8 @@ climate_velocity_hist |> filter(warming_run_total_length>=6) |> group_by(GID_1) 
 model_velocity_bool <- paste(
   base_climate, 
   "+ zRR^2 +",
-  "+ I(zTMp_f^2) : i(warming_run_length)",
-  "+ I(zTMm_f^2) : i(cooling_run_length)",
-  "+ l(zTMp_f^2,1:3) + l(zTMm_f^2,1:3)"
+  "+ zTMp_f^2 + zTMp_f^2 : i(warming_run_length_capped, ref=1) + i(warming_run_length_capped, ref=1)",
+  "+ zTMm_f^2 + zTMm_f^2 : i(cooling_run_length_capped, ref=1) + i(cooling_run_length_capped, ref=1)"
 )
 
 m_bool <- fit_climate_model(
@@ -1034,7 +982,7 @@ m_bool <- fit_climate_model(
   model_data = climate_velocity_hist
 )
 
-
+etable(m_bool)
 
 model_cumulative_change <- paste(
   base_climate,
@@ -1123,12 +1071,46 @@ iplot(
 )
 
 iplot(
-  m_bool, 
+  m_bool, i.select=1,
   main = "Temperature response and consecutive warming years"
 )
 
 etable(m_bool, fitstat = ~n + r2 + wr2)
 
+```
+
+### Cumulative response to persistent warm anomalies
+
+A 1 SD warm anomaly (`zTMp_f = 1`) persists for 1, 5 or 10 years inside a
+warming run, so episode year j is at run position min(j + 1, 6); afterwards the
+run ends (position 1) and only the lagged terms act. The cumulative sum of the
+growth effects is the deviation in log GDP per capita. Only the `zTMp_f^2`
+terms are included: the `TM` level terms depend on each region's SD and mean
+temperature.
+
+```{r m-bool-cumulative-response, fig.width=8, fig.height=4.5}
+bool_durations <- c(1, 5, 10)
+bool_horizon <- max(bool_durations) + 5
+
+m_bool_response <- bind_rows(lapply(bool_durations, function(d) {
+  project_effects(
+    m_bool,
+    run_episode_G(m_bool, duration = d, horizon = bool_horizon, max_lag = 0),
+    label = paste(d, if (d == 1) "year" else "years")
+  )
+})) %>%
+  mutate(trajectory = factor(trajectory, levels = unique(trajectory)))
+
+plot_projection(filter(m_bool_response, quantity == "Cumulative effect")) +
+  labs(
+    x = "Years since the anomaly began",
+    colour = "Anomaly duration",
+    fill = "Anomaly duration",
+    title = "Cumulative response to a 1 SD warm anomaly (m_bool)"
+  )
+
+m_bool_response %>%
+  filter(quantity == "Cumulative effect", year == bool_horizon)
 ```
 
 ## Association between cumulative-change and climate-velocity bins
@@ -1456,7 +1438,7 @@ plot_adaptation_response(
 ```{r test-absolute}
 
 model_demeaned <- paste(
-    "(TM - mean_TM_lag_30) + (TM - mean_TM_lag_30):mean_TM_lag_30",
+    "+ (TM - mean_TM_lag_30) + (TM - mean_TM_lag_30):mean_TM_lag_30",
      "+ (RR - mean_RR_lag_30) + (RR - mean_RR_lag_30):mean_RR_lag_30",
     "+ zTM^2 + zRR^2"
 )
@@ -1465,13 +1447,8 @@ m_dem <- fit_climate_model(
   model_demeaned
 )
 
-etable(m_dem)
-
-
 model_demeaned <- paste(
-    "(TM - mean_TM_all) + (TM - mean_TM_all):mean_TM_all",
-     "+ (RR - mean_RR_all) + (RR - mean_RR_all):mean_RR_all",
-    "+ abs_zTMp + abs_zTMm + abs_zTMp:mean_TM_all + abs_zTMm:mean_TM_all + + abs_zRRp + abs_zRRm + abs_zRRp:mean_RR_all + abs_zTMm:mean_RR_all"
+    "+ abs_zTMp^2 + abs_zTMm^2 + abs_zTMp^2:mean_TM_lag_30 + abs_zTMm^2:mean_TM_lag_30 + abs_zRRp^2 + abs_zRRm^2 + abs_zRRp^2:mean_RR_lag_30 + abs_zTMm^2:mean_RR_lag_30"
 )
 
 m_dem2 <- fit_climate_model(
