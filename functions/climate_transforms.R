@@ -18,11 +18,21 @@
 # is returned only for the training rows (the trend "over" that period). Returns
 # a same-length vector, NA where predictors are unavailable or too few rows are
 # available to estimate the regression.
-hamilton_trend <- function(y, h, p = 4L, train = NULL) {
+#
+# `window` (years) gives the real-time version instead: the trend for year t is
+# the forecast from a regression trained only on the `window` years up to the
+# forecast origin t - h, the rows whose outcome and predictors are all known by
+# then. Every forecast uses exactly `window` training rows, so its precision
+# does not grow over time; the trend is NA until a full window is available.
+# The series must be an annual series without gaps.
+hamilton_trend <- function(y, h, p = 4L, train = NULL, window = NULL) {
   h <- as.integer(h)
   p <- as.integer(p)
   n <- length(y)
   trend <- rep(NA_real_, n)
+  if (!is.null(window) && !is.null(train)) {
+    stop("`train` and `window` cannot be combined.")
+  }
   if (is.null(train)) {
     train <- rep(TRUE, n)
   }
@@ -34,6 +44,18 @@ hamilton_trend <- function(y, h, p = 4L, train = NULL) {
   X <- as.data.frame(stats::setNames(lag_cols, paste0("lag", seq.int(h, h + p - 1L))))
   df <- cbind(data.frame(y = y), X)
   has_predictors <- stats::complete.cases(X)
+  if (!is.null(window)) {
+    window <- as.integer(window)
+    complete <- stats::complete.cases(df)
+    design <- cbind(1, as.matrix(X))
+    for (t in which(has_predictors)) {
+      rows <- seq.int(t - h - window + 1L, t - h)
+      if (rows[[1]] < 1L || !all(complete[rows])) next
+      b <- stats::.lm.fit(design[rows, , drop = FALSE], y[rows])$coefficients
+      trend[[t]] <- sum(design[t, ] * b)
+    }
+    return(trend)
+  }
   fit_rows <- train & stats::complete.cases(df)
   if (sum(fit_rows) <= p + 1L) {
     return(trend)

@@ -4,7 +4,7 @@
 #   source("load_functions.R")
 #
 # Other packages are called with `pkg::` and only need to be installed:
-# arrow, curl, jsonlite, purrr, readxl, splines, tibble, zoo.
+# arrow, countrycode, curl, jsonlite, purrr, readxl, splines, tibble, zoo.
 
 suppressPackageStartupMessages({
   library(dplyr)

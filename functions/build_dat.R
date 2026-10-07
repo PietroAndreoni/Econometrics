@@ -15,6 +15,10 @@
 # carriers: they have no outcome but let lags and trailing windows resolve.
 # The fixed-period moments are *_all over each unit's entire climate series,
 # *_pre over `period_pre` and *_post over `period_post`.
+# The Hamilton trend (trend_TM, trend_RR) is fitted over each unit's entire
+# climate series by default; `hamilton_window` (years) fits it in real time
+# instead, each year's trend forecast from the `hamilton_window` years up to
+# the forecast origin (see hamilton_trend()).
 panel_config <- function(
     econ_year_min = 1950L,
     climate_source = "CRU TS",
@@ -25,6 +29,7 @@ panel_config <- function(
     period_pre = c(1960L, 1989L),
     hamilton_lags = 4L,
     hamilton_h = 2L,
+    hamilton_window = NULL,
     clim_history_years = 6L
 ) {
   list(
@@ -38,6 +43,7 @@ panel_config <- function(
     period_pre = as.integer(period_pre),
     hamilton_lags = as.integer(hamilton_lags),
     hamilton_h = as.integer(hamilton_h),
+    hamilton_window = if (is.null(hamilton_window)) NULL else as.integer(hamilton_window),
     clim_history_years = as.integer(clim_history_years)
   )
 }

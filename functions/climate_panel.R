@@ -132,10 +132,12 @@ derive_climate_moments <- function(series, config = panel_config()) {
       mean_RR_pre = mean(RR[in_period(year, period_pre)], na.rm = TRUE),
       sd_RR_pre = sd(RR[in_period(year, period_pre)], na.rm = TRUE),
       trend_TM = hamilton_trend(
-        TM, h = config$hamilton_h, p = config$hamilton_lags
+        TM, h = config$hamilton_h, p = config$hamilton_lags,
+        window = config$hamilton_window
       ),
       trend_RR = hamilton_trend(
-        RR, h = config$hamilton_h, p = config$hamilton_lags
+        RR, h = config$hamilton_h, p = config$hamilton_lags,
+        window = config$hamilton_window
       )
     ) %>%
     ungroup()
@@ -145,7 +147,11 @@ load_climate_panel <- function(geo_resolution, config = panel_config()) {
   cached_panel(
     paste0(
       "climate_", geo_resolution, "_", config$climate_source_code, "_",
-      gsub("[^a-z0-9]+", "_", tolower(config$climate_weight))
+      gsub("[^a-z0-9]+", "_", tolower(config$climate_weight)),
+      # Weights with a base year (e.g. population density 2000 vs 2015) get
+      # their own cache rather than overwriting each other.
+      if (is.null(config$climate_weight_year)) "" else paste0("_", config$climate_weight_year),
+      if (is.null(config$hamilton_window)) "" else paste0("_hamilton", config$hamilton_window)
     ),
     list(
       geo_resolution = geo_resolution,
@@ -161,8 +167,14 @@ load_climate_panel <- function(geo_resolution, config = panel_config()) {
       period_pre = config$period_pre,
       hamilton_h = config$hamilton_h,
       hamilton_p = config$hamilton_lags,
+      hamilton_window = if (is.null(config$hamilton_window)) {
+        "full series"
+      } else {
+        config$hamilton_window
+      },
       code = code_fingerprint(
-        load_climate_series, add_rolling_moments, derive_climate_moments
+        load_climate_series, add_rolling_moments, derive_climate_moments,
+        hamilton_trend
       )
     ),
     function() {

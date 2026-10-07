@@ -234,12 +234,25 @@ wcd_catalog <- function(geo_resolution = "gadm0",
   if (!refresh && !is.null(.wcd_memo[[geo_resolution]])) return(.wcd_memo[[geo_resolution]])
 
   idx_file <- file.path(cache_dir, paste0("catalog_", geo_resolution, ".rds"))
-  if (!refresh && file.exists(idx_file) &&
-      difftime(Sys.time(), file.mtime(idx_file), units = "days") < max_age_days) {
+  # A stale index is still used when Box cannot be reached (e.g. offline).
+  listing <- NULL
+  if (refresh || !file.exists(idx_file) ||
+      difftime(Sys.time(), file.mtime(idx_file), units = "days") >= max_age_days) {
+    .wcd_msg(verbose, "Indexing the public WCD Box folder for '", geo_resolution, "'...")
+    listing <- tryCatch(
+      .wcd_box_list(geo_resolution, verbose = verbose),
+      error = function(e) {
+        if (!file.exists(idx_file)) stop(e)
+        warning("Could not index the WCD Box folder (", conditionMessage(e),
+                "); using the cached index ", idx_file, call. = FALSE)
+        NULL
+      }
+    )
+  }
+  if (is.null(listing)) {
     cat_df <- readRDS(idx_file)
   } else {
-    .wcd_msg(verbose, "Indexing the public WCD Box folder for '", geo_resolution, "'...")
-    cat_df <- .wcd_box_list(geo_resolution, verbose = verbose)
+    cat_df <- listing
     m <- regmatches(cat_df$file, regexec(.WCD_FILE_RE, cat_df$file))
     keep <- lengths(m) == 7L
     cat_df <- cat_df[keep, , drop = FALSE]
