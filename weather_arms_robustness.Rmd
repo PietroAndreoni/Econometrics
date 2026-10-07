@@ -1,0 +1,1486 @@
+---
+title: "Weather Deviations and Growth"
+author: ''
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: '2'
+  html_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+    code_folding: show
+params:
+  start_year: 1960
+  preferred_definition: auto
+  preferred_form: auto
+  dose_variable: lcu2015_usd
+---
+
+# Research question
+
+Standard growth regressions (Dell, Jones and Olken 2012; Burke, Hsiang and
+Miguel 2015) find robust effects of temperature but little or no effect of
+precipitation. This notebook asks whether that changes when each variable's
+deviation from its long-run climate is measured in standard deviations and
+positive and negative deviations get separate arms: if dry and wet years both
+lower growth, a single slope cancels them out.
+
+1. The standard BHM specification on PWT x ERA5, with and without the conflict
+   and collapse controls and the growth outliers.
+2. The preferred deviation model on PWT x ERA5: deviation definitions and
+   linear or quadratic arms.
+3. Its robustness across national panels (PWT, World Bank) and climate datasets
+   (ERA5, CRU TS, UDelaware): (a) can the precipitation terms jointly be
+   rejected; (b) which arms are significant where; (c) the effect of a +/-3 SD
+   deviation in cold (dry), medium and hot (wet) climates.
+4. The same model on subnational data (DOSE).
+5. The same model in levels: log output per worker, with and without capital
+   (PWT x ERA5).
+
+Sample: `r params$start_year` to the last year of each panel. Climate:
+population-density weights at base year 2000. Every model has year and unit
+fixed effects and unit linear trends (BHM: quadratic trends), with errors
+clustered by country.
+
+# Setup
+
+```{r setup, message=FALSE, warning=FALSE}
+required_packages <- c("arrow", "countrycode", "dplyr", "fixest", "ggplot2", "knitr",
+                       "readxl", "tibble", "tidyr", "zoo")
+missing_packages <- required_packages[
+  !vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)
+]
+if (length(missing_packages)) {
+  stop(
+    "Install missing packages before running this notebook: ",
+    paste(missing_packages, collapse = ", ")
+  )
+}
+
+source("load_functions.R")
+
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+```
+
+## Shared specification
+
+```{r shared-specification}
+START_YEAR <- as.integer(params$start_year)
+CLIMATE_WEIGHT <- "population density"
+CLIMATE_WEIGHT_YEAR <- 2000L
+
+OUTCOME <- "dlgrp_pc_usd"
+FIXED_EFFECTS <- "year + GID_1 + GID_1[year]"
+# BHM (2015): unit fixed effects and unit quadratic trends.
+BHM_FIXED_EFFECTS <- "year + GID_1[t, t2]"
+
+# The UCDP/PRIO conflict indicators by the highest intensity of the country's
+# conflicts that year (functions/conflict.R): conflict_low, minor (25-999
+# battle deaths), and conflict_high, war (1,000 or more); and the post-Soviet
+# (with Albania) and post-Yugoslav collapse-year dummies
+# (functions/transition_collapse.R). National, so the same for every region of
+# a country in the subnational panel.
+CONFLICT_TERMS <- c("conflict_low", "conflict_high")
+CONTROLS <- c(
+  CONFLICT_TERMS,
+  "i(fsu_collapse_year, ref = 'none')",
+  "i(yug_collapse_year, ref = 'none')"
+)
+
+# Growth outliers: the country-years of data/growth_outlier_causes.csv, the 2.5%
+# lowest and the 2.5% highest growth rates of GDP per capita of PWT x ERA5 from
+# 1960 (growth_outliers.R), each with its likely cause. Dropped: those whose
+# cause does not involve weather; the droughts, storms, floods and harvests
+# among them are the response studied and stay. They are events of a country
+# and year, so they are dropped from every panel (in DOSE, from every region of
+# the country).
+OUTLIER_SHARE <- 0.05
+OUTLIER_CAUSES <- utils::read.csv(data_file("growth_outlier_causes.csv"),
+                                  stringsAsFactors = FALSE)
+OUTLIERS_ALL <- OUTLIER_CAUSES[, c("GID_0", "year")]
+OUTLIERS_DROPPED <- OUTLIER_CAUSES[OUTLIER_CAUSES$weather == "no", c("GID_0", "year")]
+
+# Moments of the two deviation definitions: over the horizon of the panel
+# (*_all, replaced below) and over the 20 years before the current one.
+MOMENTS <- c(
+  "mean_TM_all", "sd_TM_all", "mean_RR_all", "sd_RR_all",
+  "mean_TM_lag_20", "sd_TM_lag_20", "mean_RR_lag_20", "sd_RR_lag_20"
+)
+
+fit_model <- function(terms, model_data, fixed_effects = FIXED_EFFECTS, outcome = OUTCOME) {
+  fit_panel_model(
+    paste(terms, collapse = " + "),
+    model_data,
+    outcome = outcome,
+    fixed_effects = fixed_effects,
+    cluster = ~GID_0
+  )
+}
+
+# Labels for the coefficient tables; the collapse dummies are left out of them.
+DICT <- c(
+  TM = "T", TM2 = "T^2", RR = "P", RR2 = "P^2",
+  conflict_low = "Conflict, minor", conflict_high = "Conflict, war",
+  mean_TM_all = "mean T", mean_RR_all = "mean P",
+  devTM = "dT", devTM_pos = "dT+", devTM_neg = "dT-",
+  devTM_pos2 = "(dT+)^2", devTM_neg2 = "(dT-)^2",
+  devRR = "dP", devRR_pos = "dP+", devRR_neg = "dP-",
+  devRR_pos2 = "(dP+)^2", devRR_neg2 = "(dP-)^2"
+)
+DROP <- "collapse_year"
+# Temperature terms, then precipitation terms, then the controls (original names).
+ORDER <- c("%^devTM", "%^devRR", "%^conflict")
+FITSTAT <- ~n + wr2 + aic + bic
+```
+
+## Panels
+
+Each panel runs from `r params$start_year` to its last year with both growth
+and climate. `build_dat()` gives each unit's climate moments over its entire
+climate series; `mean_*_all` and `sd_*_all` are replaced here by the moments
+over the horizon of the panel,
+
+```text
+mean_TM_all, sd_TM_all = mean and SD of TM over start year .. last year of the panel
+mean_RR_all, sd_RR_all = the same for RR
+```
+
+from the climate series of every year in that horizon. The sample is the
+unit-years with growth, both weather variables, the conflict indicators and the
+moments of both deviation definitions (positive SDs), without the growth
+outliers whose cause does not involve weather (see the shared specification).
+
+```{r panel-builder}
+# Panel `econ` x `source` from START_YEAR, with the horizon moments, the
+# controls, the sample with and without the country-years `drop`, the rows
+# dropped, and every unit-year of the panel (`data`, for lags of the weather).
+prepare_panel <- function(econ, source, econ_variable = NULL, drop = OUTLIERS_DROPPED) {
+  cfg <- panel_config(
+    econ_year_min = START_YEAR,
+    climate_source = source,
+    climate_weight = CLIMATE_WEIGHT,
+    climate_weight_year = CLIMATE_WEIGHT_YEAR,
+    # Eleven earlier climate years: up to ten carry the lags of the deviations
+    # into the first years, one the lagged trailing moments. The sample starts
+    # at START_YEAR regardless.
+    clim_history_years = 11L
+  )
+  data <- suppressMessages(build_dat(econ_data = econ, config = cfg,
+                                     econ_variable = econ_variable))
+  level <- unique(data$gadm_level)
+  end_year <- max(data$year[est_row(data) & !is.na(data$TM) & !is.na(data$RR)])
+
+  horizon <- load_climate_panel(level, cfg) %>%
+    filter(gadm_level == level, year >= START_YEAR, year <= end_year) %>%
+    group_by(GID_1) %>%
+    summarise(
+      mean_TM_all = mean(TM, na.rm = TRUE), sd_TM_all = sd(TM, na.rm = TRUE),
+      mean_RR_all = mean(RR, na.rm = TRUE), sd_RR_all = sd(RR, na.rm = TRUE),
+      .groups = "drop"
+    )
+  data <- data %>%
+    select(-c(mean_TM_all, sd_TM_all, mean_RR_all, sd_RR_all)) %>%
+    left_join(horizon, by = "GID_1")
+  data <- add_yugoslav_collapse(add_soviet_collapse(add_conflict(data)))
+  data$TM2 <- data$TM^2
+  data$RR2 <- data$RR^2
+  data$t <- data$year - 1990L
+  data$t2 <- data$t^2
+
+  complete <- stats::complete.cases(
+    as.data.frame(data)[, c(OUTCOME, "TM", "RR", CONFLICT_TERMS, MOMENTS)]
+  )
+  positive_sd <- Reduce(`&`, lapply(grep("^sd_", MOMENTS, value = TRUE), function(x) {
+    !is.na(data[[x]]) & data[[x]] > 0
+  }))
+  sample_all <- data[est_row(data) & data$year >= START_YEAR & complete & positive_sd, ]
+  dropped <- paste(sample_all$GID_0, sample_all$year) %in% paste(drop$GID_0, drop$year)
+  list(
+    label = paste(econ, "x", source), econ = econ, source = source, level = level,
+    end_year = end_year, all = sample_all, clean = sample_all[!dropped, ],
+    outliers = sample_all[dropped, c("GID_0", "GID_1", "year", OUTCOME)], data = data
+  )
+}
+
+# (The argument is not called `panel`: tibble() would mask it with the column.)
+panel_summary <- function(p) {
+  tibble::tibble(
+    panel = p$label,
+    first_year = min(p$clean$year), last_year = max(p$clean$year),
+    countries = n_distinct(p$clean$GID_0), units = n_distinct(p$clean$GID_1),
+    observations = nrow(p$all), outliers_dropped = nrow(p$outliers),
+    minor_conflict = sum(p$clean$conflict_low), war = sum(p$clean$conflict_high)
+  )
+}
+
+main <- prepare_panel("PWT", "ERA5")
+
+# The outlier country-years are the growth tails of this sample.
+cutoffs <- stats::quantile(main$all[[OUTCOME]], c(OUTLIER_SHARE / 2, 1 - OUTLIER_SHARE / 2),
+                           names = FALSE)
+tails <- main$all[main$all[[OUTCOME]] < cutoffs[[1]] | main$all[[OUTCOME]] > cutoffs[[2]], ]
+stopifnot(setequal(paste(tails$GID_0, tails$year),
+                   paste(OUTLIERS_ALL$GID_0, OUTLIERS_ALL$year)))
+
+panel_summary(main) %>% knitr::kable(caption = "PWT x ERA5 (unit-years; conflict after outliers)")
+OUTLIER_CAUSES %>%
+  mutate(tail = ifelse(paste(GID_0, year) %in% paste(tails$GID_0[tails[[OUTCOME]] < 0],
+                                                    tails$year[tails[[OUTCOME]] < 0]),
+                       "low", "high"),
+         status = ifelse(weather == "yes", "kept (weather)", "dropped")) %>%
+  count(category, status, tail) %>%
+  tidyr::pivot_wider(names_from = tail, values_from = n, values_fill = 0) %>%
+  arrange(status, desc(low + high)) %>%
+  knitr::kable(caption = sprintf(paste(
+    "Growth outliers of PWT x ERA5 (growth below %.1f%% or above %.1f%%) by likely cause;",
+    "see data/growth_outlier_causes.csv"), 100 * cutoffs[[1]], 100 * cutoffs[[2]]))
+```
+
+# Standard BHM: controls and outliers
+
+The BHM specification in levels, with country fixed effects and country
+quadratic trends:
+
+```text
+growth = b1 TM + b2 TM^2 + b3 RR + b4 RR^2 [+ controls] + year + country + country quadratic trend
+```
+
+with the two conflict indicators alone, then with the collapse dummies too,
+without the outliers, and with both.
+
+```{r bhm}
+bhm_terms <- c("TM", "TM2", "RR", "RR2")
+BHM_COLUMNS <- c("Baseline", "Conflict", "Conflict + collapse", "Outliers dropped",
+                 "Controls, outliers dropped")
+m_bhm <- list(
+  fit_model(bhm_terms, main$all, BHM_FIXED_EFFECTS),
+  fit_model(c(bhm_terms, CONFLICT_TERMS), main$all, BHM_FIXED_EFFECTS),
+  fit_model(c(bhm_terms, CONTROLS), main$all, BHM_FIXED_EFFECTS),
+  fit_model(bhm_terms, main$clean, BHM_FIXED_EFFECTS),
+  fit_model(c(bhm_terms, CONTROLS), main$clean, BHM_FIXED_EFFECTS)
+)
+
+etable(
+  m_bhm,
+  headers = BHM_COLUMNS,
+  dict = DICT,
+  drop = DROP,
+  extralines = list(
+    "Collapse dummies" = c("No", "No", "Yes", "No", "Yes"),
+    "Outliers dropped" = c("No", "No", "No", "Yes", "Yes")
+  ),
+  fitstat = FITSTAT
+)
+
+# The temperature (precipitation) at which its marginal effect is zero,
+# -b1 / (2 b2), and the joint Wald tests of each variable's two terms.
+tibble::tibble(
+  model = BHM_COLUMNS,
+  turning_point_T = vapply(m_bhm, function(m) -coef(m)[["TM"]] / (2 * coef(m)[["TM2"]]), 0),
+  temperature_p = vapply(m_bhm, function(m) {
+    fixest::wald(m, keep = "^TM2?$", print = FALSE)$p
+  }, 0),
+  turning_point_P = vapply(m_bhm, function(m) -coef(m)[["RR"]] / (2 * coef(m)[["RR2"]]), 0),
+  precipitation_p = vapply(m_bhm, function(m) {
+    fixest::wald(m, keep = "^RR2?$", print = FALSE)$p
+  }, 0)
+) %>%
+  mutate(across(starts_with("turning"), ~ round(.x, 2)),
+         across(ends_with("_p"), ~ signif(.x, 2))) %>%
+  knitr::kable(caption = "Turning points (C, m) and joint tests of each variable")
+```
+
+# Preferred deviation model (PWT x ERA5)
+
+Each variable's deviation from its long-run climate, in SDs, from either of
+
+```text
+horizon:  dT = (TM - mean_TM_all) / sd_TM_all            (start year .. last year)
+20-year:  dT = (TM - mean_TM_lag_20) / sd_TM_lag_20      (the 20 years before)
+```
+
+(the same for precipitation, dP), in four combinations, and three forms of each
+variable's deviation, each interacted with its long-run climate (the horizon
+mean):
+
+```text
+dT+ = max(dT, 0)    dT- = max(-dT, 0)
+
+signed          a dT  + b dT x mean_TM_all
+linear arms     a+ dT+ + a- dT- + (b+ dT+ + b- dT-) x mean_TM_all
+quadratic arms  a+ (dT+)^2 + a- (dT-)^2 + (b+ (dT+)^2 + b- (dT-)^2) x mean_TM_all
+```
+
+(and the same in dP), with the same form for both variables, or linear arms for
+one and quadratic arms for the other:
+
+```text
+growth = temperature terms + precipitation terms + controls + FE
+```
+
+All on the same rows (controls included, outliers dropped). The preferred
+model is the arms model (linear, quadratic or mixed arms) with the lowest AIC,
+unless the `preferred_definition` and `preferred_form` parameters set it.
+
+```{r deviation-helpers}
+# Deviation terms against mean_<v>_<suffix> and sd_<v>_<suffix>, with one
+# suffix per variable, e.g. c(TM = "all", RR = "lag_20"). The same column
+# names under any definition, so the tables line up.
+add_deviation_terms <- function(model_data, suffix) {
+  for (v in c("TM", "RR")) {
+    dev <- (model_data[[v]] - model_data[[paste0("mean_", v, "_", suffix[[v]])]]) /
+      model_data[[paste0("sd_", v, "_", suffix[[v]])]]
+    model_data[[paste0("dev", v)]] <- dev
+    model_data[[paste0("dev", v, "_pos")]] <- pmax(dev, 0)
+    model_data[[paste0("dev", v, "_neg")]] <- pmax(-dev, 0)
+    model_data[[paste0("dev", v, "_pos2")]] <- pmax(dev, 0)^2
+    model_data[[paste0("dev", v, "_neg2")]] <- pmax(-dev, 0)^2
+  }
+  model_data
+}
+
+DEFINITIONS <- list(
+  "Horizon" = c(TM = "all", RR = "all"),
+  "20-year" = c(TM = "lag_20", RR = "lag_20"),
+  "T horizon, P 20-year" = c(TM = "all", RR = "lag_20"),
+  "T 20-year, P horizon" = c(TM = "lag_20", RR = "all")
+)
+# Each form: the deviation terms of each variable, by column suffix.
+SIGNED <- ""
+LINEAR <- c("_pos", "_neg")
+QUADRATIC <- c("_pos2", "_neg2")
+FORMS <- list(
+  "Signed" = list(TM = SIGNED, RR = SIGNED),
+  "Linear arms" = list(TM = LINEAR, RR = LINEAR),
+  "Quadratic arms" = list(TM = QUADRATIC, RR = QUADRATIC),
+  "T linear, P quadratic arms" = list(TM = LINEAR, RR = QUADRATIC),
+  "T quadratic, P linear arms" = list(TM = QUADRATIC, RR = LINEAR)
+)
+ARMS <- setdiff(names(FORMS), "Signed")
+
+form_terms <- function(form) {
+  terms <- unlist(lapply(c("TM", "RR"), function(v) {
+    x <- paste0("dev", v, form[[v]])
+    c(x, paste0(x, ":mean_", v, "_all"))
+  }))
+  c(terms, CONTROLS)
+}
+
+# Value of a deviation term (by column suffix) at deviations x.
+term_value <- function(suffix, x) {
+  if (suffix == "") return(x)
+  switch(suffix, "_pos" = pmax(x, 0), "_neg" = pmax(-x, 0),
+         "_pos2" = pmax(x, 0)^2, "_neg2" = pmax(-x, 0)^2)
+}
+interaction_name <- function(a, b, terms) {
+  intersect(c(paste0(a, ":", b), paste0(b, ":", a)), terms)[[1]]
+}
+
+# Fit of each model (all on the same rows) and the joint Wald tests of each
+# variable's terms.
+fit_summary <- function(models) {
+  tibble::tibble(
+    form = names(models),
+    observations = vapply(models, stats::nobs, 0),
+    within_r2 = vapply(models, function(m) fixest::fitstat(m, "wr2")[[1]], 0),
+    aic = vapply(models, stats::AIC, 0),
+    bic = vapply(models, stats::BIC, 0),
+    temperature_p = vapply(models, function(m) {
+      fixest::wald(m, keep = "^devTM", print = FALSE)$p
+    }, 0),
+    precipitation_p = vapply(models, function(m) {
+      fixest::wald(m, keep = "^devRR", print = FALSE)$p
+    }, 0)
+  )
+}
+```
+
+```{r model-selection}
+selection_models <- lapply(DEFINITIONS, function(def) {
+  d <- add_deviation_terms(main$clean, def)
+  lapply(FORMS, function(s) fit_model(form_terms(s), d))
+})
+selection <- bind_rows(lapply(names(selection_models), function(def) {
+  fit_summary(selection_models[[def]]) %>% mutate(definition = def, .before = 1)
+}))
+stopifnot(length(unique(selection$observations)) == 1)
+
+best_arms <- selection %>% filter(form %in% ARMS) %>% slice_min(aic, n = 1)
+PREFERRED_DEFINITION <- if (params$preferred_definition == "auto") {
+  best_arms$definition
+} else {
+  params$preferred_definition
+}
+PREFERRED_FORM <- if (params$preferred_form == "auto") best_arms$form else params$preferred_form
+stopifnot(PREFERRED_DEFINITION %in% names(DEFINITIONS), PREFERRED_FORM %in% ARMS)
+PREFERRED_SUFFIX <- DEFINITIONS[[PREFERRED_DEFINITION]]
+
+selection %>%
+  mutate(
+    aic_vs_best = aic - min(aic), bic_vs_best = bic - min(bic),
+    preferred = definition == PREFERRED_DEFINITION & form == PREFERRED_FORM,
+    within_r2 = round(within_r2, 4),
+    across(c(aic, bic, aic_vs_best, bic_vs_best), ~ round(.x, 1)),
+    across(ends_with("_p"), ~ signif(.x, 2))
+  ) %>%
+  select(-observations) %>%
+  knitr::kable(caption = paste0("PWT x ERA5, ", nrow(main$clean), " country-years: fit and ",
+                                "joint tests of each variable; AIC and BIC relative to the best ",
+                                "of all the models"))
+```
+
+Preferred model: **`r PREFERRED_FORM`**, with the **`r PREFERRED_DEFINITION`**
+deviations (temperature against mean_TM_`r PREFERRED_SUFFIX[["TM"]]`, precipitation
+against mean_RR_`r PREFERRED_SUFFIX[["RR"]]`).
+
+```{r preferred-table}
+# Short headers: etable cuts long ones.
+SHORT_FORM_NAMES <- c("Signed" = "Signed", "Linear arms" = "Linear", "Quadratic arms" = "Quadratic",
+                      "T linear, P quadratic arms" = "T lin, P quad",
+                      "T quadratic, P linear arms" = "T quad, P lin")
+etable(unname(selection_models[[PREFERRED_DEFINITION]]),
+       headers = unname(SHORT_FORM_NAMES[names(FORMS)]), dict = DICT, drop = DROP,
+       order = ORDER, fitstat = FITSTAT, title = paste("Deviations:", PREFERRED_DEFINITION))
+```
+
+## Binned response of the preferred model
+
+The preferred deviations by quarter of the long-run climate (the quartiles of
+`mean_TM_all` and `mean_RR_all` over the sample):
+
+- bins: 0.5 SD bins of the deviation within each quarter, centred on zero, with
+  the tails pooled until they hold 10 countries; the bin containing zero is the
+  quarter's reference. One model per variable: its bins, the other variable in
+  signed + quadratic arms (interacted with its long-run mean), and the controls;
+- curves: the signed and preferred forms, estimated once on the whole sample
+  (no quarter terms) and evaluated at the quarter's mean long-run climate,
+  relative to their mean over the quarter's reference-bin observations.
+
+```{r binned-helpers}
+BIN_WIDTH <- 0.5
+MIN_COUNTRIES <- 10L
+VARIABLE_LABELS <- c(TM = "Temperature", RR = "Precipitation")
+QUARTER_NAMES <- list(TM = c("coldest", "cool", "warm", "hottest"),
+                      RR = c("driest", "dry", "wet", "wettest"))
+CLIMATE_UNITS <- c(TM = "°C", RR = "m")
+CLIMATE_DIGITS <- c(TM = 1L, RR = 2L)
+# The other variable's terms in the bin models: signed + quadratic arms.
+ENCOMPASSING <- c("", "_pos2", "_neg2")
+wrap_text <- function(x, width) paste(strwrap(x, width = width), collapse = "\n")
+
+# Quarter of each variable's long-run climate and bins of its deviation within
+# each quarter (ids "<quarter>_<index>"), with each bin's size and mean deviation.
+add_quarter_bins <- function(model_data) {
+  quarters <- list()
+  bins <- list()
+  for (v in names(VARIABLE_LABELS)) {
+    climate <- model_data[[paste0("mean_", v, "_all")]]
+    breaks <- stats::quantile(climate, seq(0, 1, 0.25), names = FALSE)
+    quarter <- as.integer(cut(climate, breaks, include.lowest = TRUE))
+    dev <- model_data[[paste0("dev", v)]]
+    k_max <- ceiling((max(abs(dev)) + BIN_WIDTH / 2) / BIN_WIDTH)
+    edges <- seq(-BIN_WIDTH / 2 - k_max * BIN_WIDTH, BIN_WIDTH / 2 + k_max * BIN_WIDTH,
+                 by = BIN_WIDTH)
+    bin <- character(nrow(model_data))
+    for (q in 1:4) {
+      rows <- quarter == q
+      q_breaks <- pool_tails(dev[rows], edges, model_data$GID_0[rows], MIN_COUNTRIES)
+      bin[rows] <- sprintf("%d_%02d", q, as.integer(cut(dev[rows], q_breaks,
+                                                        include.lowest = TRUE)))
+      reference <- sprintf("%d_%02d", q, as.integer(cut(0, q_breaks)))
+      bins[[length(bins) + 1]] <- tibble::tibble(
+        variable = v, quarter = q, bin = bin[rows], deviation = dev[rows],
+        GID_0 = model_data$GID_0[rows]
+      ) %>%
+        group_by(variable, quarter, bin) %>%
+        summarise(observations = n(), countries = n_distinct(GID_0),
+                  mean_deviation = mean(deviation), .groups = "drop") %>%
+        mutate(reference = bin == !!reference)
+    }
+    model_data[[paste0(v, "_quarter")]] <- quarter
+    model_data[[paste0(v, "_bin")]] <- bin
+    fmt <- function(x) formatC(x, format = "f", digits = CLIMATE_DIGITS[[v]])
+    # Outside tibble(), whose `quarter` column would mask the vector.
+    mean_climate <- as.numeric(tapply(climate, quarter, mean))
+    quarters[[v]] <- tibble::tibble(
+      variable = v, quarter = 1:4, mean_climate = mean_climate,
+      label = sprintf("%s, %s quarter\n%s to %s %s; curves at the mean, %s %s",
+                      VARIABLE_LABELS[[v]], QUARTER_NAMES[[v]], fmt(breaks[-5]),
+                      fmt(breaks[-1]), CLIMATE_UNITS[[v]], fmt(mean_climate),
+                      CLIMATE_UNITS[[v]])
+    )
+  }
+  list(data = model_data, quarters = bind_rows(quarters), bins = bind_rows(bins))
+}
+
+# Effect of the interacted form with `suffixes` of variable v at long-run
+# climate m and deviations `devs`, relative to its mean over `ref_devs`.
+form_curve <- function(model, v, suffixes, m, devs, ref_devs) {
+  terms <- names(stats::coef(model))
+  G <- t(vapply(devs, function(x) {
+    w <- stats::setNames(numeric(length(terms)), terms)
+    for (s in suffixes) {
+      term <- paste0("dev", v, s)
+      value <- term_value(s, x) - mean(term_value(s, ref_devs))
+      w[[term]] <- value
+      w[[interaction_name(term, paste0("mean_", v, "_all"), terms)]] <- value * m
+    }
+    w
+  }, numeric(length(terms))))
+  colnames(G) <- terms
+  linear_combination(model, G) %>% mutate(deviation = devs)
+}
+
+# Bins by quarter of long-run climate against the interacted `forms`, both
+# variables, on common axes.
+plot_binned_response <- function(model_data, forms, title, note, caption) {
+  qb <- add_quarter_bins(model_data)
+  d <- qb$data
+  models <- lapply(FORMS[forms], function(s) fit_model(form_terms(s), d))
+  bins <- list()
+  curves <- list()
+  for (v in names(VARIABLE_LABELS)) {
+    other <- setdiff(names(VARIABLE_LABELS), v)
+    other_terms <- paste0("dev", other, ENCOMPASSING)
+    references <- qb$bins %>% filter(variable == v, reference) %>% pull(bin)
+    bin_term <- sprintf("i(%s_bin, ref = c(%s))", v,
+                        paste0("'", references, "'", collapse = ", "))
+    m_bins <- fit_model(c(bin_term, other_terms,
+                          paste0(other_terms, ":mean_", other, "_all"), CONTROLS), d)
+    prefix <- paste0(v, "_bin::")
+    estimates <- tidy_fixest(m_bins) %>%
+      filter(startsWith(term, prefix)) %>%
+      mutate(bin = sub(prefix, "", term, fixed = TRUE))
+    bins[[v]] <- qb$bins %>%
+      filter(variable == v) %>%
+      left_join(select(estimates, bin, estimate, conf_low, conf_high), by = "bin") %>%
+      mutate(across(c(estimate, conf_low, conf_high), ~ ifelse(reference, 0, .x)))
+
+    dev <- d[[paste0("dev", v)]]
+    for (q in 1:4) {
+      rows <- d[[paste0(v, "_quarter")]] == q
+      ref_devs <- dev[rows & d[[paste0(v, "_bin")]] %in% references]
+      grid <- seq(min(dev[rows]), max(dev[rows]), length.out = 100)
+      m <- qb$quarters$mean_climate[qb$quarters$variable == v & qb$quarters$quarter == q]
+      for (f in names(models)) {
+        curves[[length(curves) + 1]] <-
+          form_curve(models[[f]], v, FORMS[[f]][[v]], m, grid, ref_devs) %>%
+          mutate(variable = v, quarter = q, form = f)
+      }
+    }
+  }
+
+  facet_of <- function(variable, quarter) {
+    factor(qb$quarters$label[match(paste(variable, quarter),
+                                   paste(qb$quarters$variable, qb$quarters$quarter))],
+           levels = qb$quarters$label)
+  }
+  bins <- bind_rows(bins) %>%
+    mutate(facet = facet_of(variable, quarter),
+           across(c(estimate, conf_low, conf_high), ~ 100 * .x))
+  curves <- bind_rows(curves) %>%
+    mutate(facet = facet_of(variable, quarter), form = factor(form, levels = names(models)),
+           across(c(estimate, conf_low, conf_high), ~ 100 * .x))
+
+  ggplot() +
+    geom_hline(yintercept = 0, colour = GRID_MUTED, linewidth = 0.3) +
+    geom_vline(xintercept = 0, colour = GRID_MUTED, linewidth = 0.3) +
+    geom_line(data = curves, aes(deviation, estimate, colour = form), linewidth = 0.9) +
+    geom_linerange(data = filter(bins, !reference),
+                   aes(mean_deviation, ymin = conf_low, ymax = conf_high),
+                   colour = GRID_INK, linewidth = 0.5) +
+    geom_point(data = bins, aes(mean_deviation, estimate, shape = reference),
+               colour = GRID_INK, fill = "white", size = 2.2) +
+    # Common axes across all panels.
+    facet_wrap(~facet, nrow = 2) +
+    scale_colour_manual(values = grid_colours(names(FORMS))[names(models)], name = NULL) +
+    scale_shape_manual(values = c(`FALSE` = 16, `TRUE` = 21),
+                       labels = c(`FALSE` = "Deviation bin (95% CI)", `TRUE` = "Reference bin"),
+                       name = NULL) +
+    guides(colour = guide_legend(nrow = 1, order = 1), shape = guide_legend(order = 2)) +
+    labs(
+      x = "Deviation (SD)",
+      y = "Effect on growth that year (pp), relative to the reference bin",
+      title = title,
+      subtitle = wrap_text(paste0(
+        note, " Top: temperature, by quarter of long-run temperature; bottom: ",
+        "precipitation, by quarter of long-run precipitation. Bins of ", BIN_WIDTH,
+        " SD centred on zero (points at the bin's mean deviation; tails pooled to ",
+        MIN_COUNTRIES, " countries). Curves: the forms interacted with the long-run ",
+        "climate, estimated on the whole sample and evaluated at the quarter's mean ",
+        "long-run climate, relative to the reference bin. Common axes."), 175),
+      caption = wrap_text(caption, 175)
+    ) +
+    theme_results()
+}
+
+panel_caption <- function(panel) {
+  paste0(panel$label, ", ", CLIMATE_WEIGHT, " ", CLIMATE_WEIGHT_YEAR, " weights, ",
+         min(panel$clean$year), "-", max(panel$clean$year), "; controls: conflict ",
+         "(minor, war), post-Soviet and post-Yugoslav collapse dummies; ",
+         nrow(panel$outliers), " growth outliers not involving weather dropped. ",
+         "Fixed effects year + unit + unit linear trends; ",
+         "errors clustered by country.")
+}
+```
+
+```{r binned-preferred, fig.width=15, fig.height=8.5}
+plot_binned_response(
+  add_deviation_terms(main$clean, PREFERRED_SUFFIX),
+  forms = c("Signed", PREFERRED_FORM),
+  title = paste0("PWT x ERA5, ", PREFERRED_DEFINITION, " deviations: bins against signed and ",
+                 tolower(PREFERRED_FORM)),
+  note = paste0("dT from mean_TM_", PREFERRED_SUFFIX[["TM"]], ", dP from mean_RR_",
+                PREFERRED_SUFFIX[["RR"]], " (in the matching SDs)."),
+  caption = panel_caption(main)
+)
+```
+
+# Robustness across national and climate datasets
+
+The preferred model (and the signed form, for comparison) on every national
+panel: PWT and World Bank GDP per capita (both at constant prices) with ERA5,
+CRU TS and UDelaware climate. Each panel has its own horizon, long-run
+climate, sample and outliers.
+
+- (a) Joint Wald tests of all temperature terms and of all precipitation terms
+  of the preferred model, and of the precipitation terms of the signed form.
+- (b) and (c) The effect of a deviation of +3 SD and of -3 SD, against a normal
+  year, for a unit with a long-run temperature of 5, 15 or 25 °C and a
+  long-run precipitation of 0.5, 1.5 or 3 m a year. With arms, the +3 SD effect
+  depends only on the positive arm and the -3 SD effect only on the negative
+  one, so (b) is which of these effects are significant. The range of the
+  long-run climate across the units of each panel shows how far inside the
+  data each of these climates is.
+
+```{r robustness-helpers}
+# Deviations (SD) and long-run climates (C, m a year) at which the effects are
+# evaluated.
+EFFECT_AT <- c(-3, 3)
+EVAL_CLIMATE <- list(TM = c(5, 15, 25), RR = c(0.5, 1.5, 3))
+EVAL_LABELS <- list(TM = c("5 °C", "15 °C", "25 °C"), RR = c("0.5 m", "1.5 m", "3 m"))
+
+# The preferred and signed models on a panel, with its deviation data.
+fit_robustness <- function(panel) {
+  d <- add_deviation_terms(panel$clean, PREFERRED_SUFFIX)
+  list(
+    panel = panel, data = d,
+    preferred = fit_model(form_terms(FORMS[[PREFERRED_FORM]]), d),
+    signed = fit_model(form_terms(FORMS[["Signed"]]), d)
+  )
+}
+
+# (a) joint tests.
+joint_tests <- function(fit) {
+  wald_p <- function(m, pattern) fixest::wald(m, keep = pattern, print = FALSE)$p
+  panel_summary(fit$panel) %>%
+    select(panel, first_year, last_year, countries, units, outliers_dropped) %>%
+    mutate(
+      observations = stats::nobs(fit$preferred),
+      temperature_p = wald_p(fit$preferred, "^devTM"),
+      precipitation_p = wald_p(fit$preferred, "^devRR"),
+      precipitation_p_signed = wald_p(fit$signed, "^devRR"),
+      aic_vs_signed = stats::AIC(fit$preferred) - stats::AIC(fit$signed)
+    )
+}
+
+# (b), (c) effect of a deviation of EFFECT_AT SD of each variable at each
+# long-run climate of EVAL_CLIMATE, with delta-method CIs (clustered by country).
+climate_effects <- function(fit) {
+  model <- fit$preferred
+  terms <- names(stats::coef(model))
+  bind_rows(lapply(c("TM", "RR"), function(v) {
+    m <- EVAL_CLIMATE[[v]]
+    grid <- expand.grid(level = seq_along(m), deviation = EFFECT_AT)
+    G <- t(mapply(function(g, x) {
+      w <- stats::setNames(numeric(length(terms)), terms)
+      for (s in FORMS[[PREFERRED_FORM]][[v]]) {
+        term <- paste0("dev", v, s)
+        w[[term]] <- term_value(s, x)
+        w[[interaction_name(term, paste0("mean_", v, "_all"), terms)]] <- term_value(s, x) * m[[g]]
+      }
+      w
+    }, grid$level, grid$deviation))
+    colnames(G) <- terms
+    linear_combination(model, G) %>%
+      mutate(panel = fit$panel$label, variable = v, level_index = grid$level,
+             level = factor(EVAL_LABELS[[v]][grid$level], levels = EVAL_LABELS[[v]]),
+             climate = m[grid$level], deviation = grid$deviation,
+             p_value = 2 * stats::pnorm(-abs(estimate / std_error)), .before = 1)
+  }))
+}
+
+stars <- function(p) ifelse(p < 0.01, "***", ifelse(p < 0.05, "**", ifelse(p < 0.1, "*", "")))
+
+# (b) one row per panel: each effect with its significance.
+significance_map <- function(effects) {
+  effects %>%
+    mutate(cell = sprintf("%+.2f%s", 100 * estimate, stars(p_value)),
+           column = sprintf("%s %+d SD, %s", ifelse(variable == "TM", "T", "P"),
+                            deviation, level)) %>%
+    select(panel, column, cell) %>%
+    tidyr::pivot_wider(names_from = column, values_from = cell)
+}
+
+# (c) one table per variable: rows panel x deviation, columns long-run
+# climates, effect [95% CI] in pp.
+effects_table <- function(effects, v) {
+  effects %>%
+    filter(variable == v) %>%
+    mutate(cell = sprintf("%+.2f [%+.2f, %+.2f]%s", 100 * estimate, 100 * conf_low,
+                          100 * conf_high, stars(p_value)),
+           deviation = sprintf("%+d SD", deviation)) %>%
+    select(panel, deviation, level, cell) %>%
+    tidyr::pivot_wider(names_from = level, values_from = cell) %>%
+    mutate(panel = factor(panel, levels = unique(panel))) %>%
+    arrange(panel, deviation)
+}
+
+# Range of the long-run climate across the units (countries or regions) of
+# each panel.
+climate_support <- function(fits) {
+  bind_rows(lapply(fits, function(fit) {
+    units <- distinct(fit$data, GID_1, mean_TM_all, mean_RR_all)
+    bind_rows(lapply(c("TM", "RR"), function(v) {
+      q <- stats::quantile(units[[paste0("mean_", v, "_all")]], c(0, 0.1, 0.5, 0.9, 1),
+                           names = FALSE)
+      tibble::tibble(panel = fit$panel$label,
+                     variable = paste0(VARIABLE_LABELS[[v]], " (", CLIMATE_UNITS[[v]], ")"),
+                     units = nrow(units), min = q[1], p10 = q[2], median = q[3], p90 = q[4],
+                     max = q[5])
+    }))
+  })) %>%
+    mutate(across(c(min, p10, median, p90, max), ~ round(.x, 2))) %>%
+    arrange(variable)
+}
+
+PLOT_COLUMNS <- paste(EVAL_LABELS$TM, "/", EVAL_LABELS$RR)
+plot_effects <- function(effects, title) {
+  effects %>%
+    mutate(
+      row = factor(sprintf("%s, %+d SD", VARIABLE_LABELS[variable], deviation),
+                   levels = c("Temperature, +3 SD", "Temperature, -3 SD",
+                              "Precipitation, +3 SD", "Precipitation, -3 SD")),
+      column = factor(PLOT_COLUMNS[level_index], levels = PLOT_COLUMNS),
+      panel = factor(panel, levels = rev(unique(panel))),
+      across(c(estimate, conf_low, conf_high), ~ 100 * .x)
+    ) %>%
+    ggplot(aes(estimate, panel)) +
+    geom_vline(xintercept = 0, colour = GRID_MUTED, linewidth = 0.3) +
+    geom_linerange(aes(xmin = conf_low, xmax = conf_high), colour = GRID_PALETTE[[1]],
+                   linewidth = 0.6) +
+    geom_point(colour = GRID_PALETTE[[1]], size = 2) +
+    facet_grid(row ~ column) +
+    labs(x = "Effect on growth that year (pp), against a normal year; 95% CI", y = NULL,
+         title = title,
+         subtitle = paste0(PREFERRED_FORM, ", ", PREFERRED_DEFINITION, " deviations; at ",
+                           "long-run climates of 5, 15 and 25 °C (temperature) and 0.5, 1.5 ",
+                           "and 3 m a year (precipitation).")) +
+    theme_results() +
+    theme(panel.grid.major.x = element_line(colour = "#e6e5df", linewidth = 0.3))
+}
+```
+
+```{r robustness-national}
+NATIONAL <- expand.grid(source = c("ERA5", "CRU TS", "UDelaware"), econ = c("PWT", "WB"),
+                        stringsAsFactors = FALSE)
+national_panels <- lapply(seq_len(nrow(NATIONAL)), function(i) {
+  if (NATIONAL$econ[i] == "PWT" && NATIONAL$source[i] == "ERA5") return(main)
+  prepare_panel(NATIONAL$econ[i], NATIONAL$source[i])
+})
+national_fits <- lapply(national_panels, fit_robustness)
+national_effects <- bind_rows(lapply(national_fits, climate_effects))
+
+bind_rows(lapply(national_fits, joint_tests)) %>%
+  mutate(across(c(temperature_p, precipitation_p, precipitation_p_signed), ~ signif(.x, 2)),
+         aic_vs_signed = round(aic_vs_signed, 1)) %>%
+  knitr::kable(caption = paste("(a) Joint Wald tests of the preferred model (temperature,",
+                               "precipitation) and of the signed form (precipitation); AIC of the",
+                               "preferred model minus the signed form"))
+
+significance_map(national_effects) %>%
+  knitr::kable(caption = paste("(b) Effect of a +/-3 SD deviation at long-run climates of 5, 15,",
+                               "25 °C and 0.5, 1.5, 3 m (pp); *** p < 0.01, ** p < 0.05, * p < 0.1"))
+
+climate_support(national_fits) %>%
+  knitr::kable(caption = "Long-run climate across the countries of each panel")
+
+effects_table(national_effects, "TM") %>%
+  knitr::kable(caption = paste("(c) Temperature: effect of a +/-3 SD deviation (pp, 95% CI) at",
+                               "long-run temperatures of 5, 15 and 25 °C"))
+effects_table(national_effects, "RR") %>%
+  knitr::kable(caption = paste("(c) Precipitation: effect of a +/-3 SD deviation (pp, 95% CI) at",
+                               "long-run precipitation of 0.5, 1.5 and 3 m a year"))
+```
+
+```{r robustness-national-plot, fig.width=12, fig.height=9}
+plot_effects(national_effects, "Effect of a +/-3 SD deviation across national panels")
+```
+
+# Subnational data (DOSE)
+
+The same model on DOSE v2.14 regional GDP per capita (GADM1) with ERA5 climate
+(population-density weights at base year 2000, aggregated to the regions):
+GDP per capita at constant 2015 local prices converted at the fixed 2015
+exchange rate (`lcu2015_usd`; its growth is constant-local-price growth, free
+of exchange-rate movements). Region fixed effects and region linear trends;
+the conflict and collapse controls are national; the dropped outliers are the
+national country-years of the shared specification, dropped in every region of
+the country; errors are clustered by country.
+
+```{r subnational}
+dose <- prepare_panel("DOSE", "ERA5", econ_variable = params$dose_variable)
+dose_fit <- fit_robustness(dose)
+dose_effects <- climate_effects(dose_fit)
+
+joint_tests(dose_fit) %>%
+  mutate(across(c(temperature_p, precipitation_p, precipitation_p_signed), ~ signif(.x, 2)),
+         aic_vs_signed = round(aic_vs_signed, 1)) %>%
+  knitr::kable(caption = "(a) DOSE x ERA5: joint Wald tests")
+
+etable(list("Signed" = dose_fit$signed, "Preferred" = dose_fit$preferred), dict = DICT,
+       drop = DROP, order = ORDER, fitstat = FITSTAT, title = "DOSE x ERA5")
+
+significance_map(dose_effects) %>%
+  knitr::kable(caption = paste("(b) DOSE x ERA5: effect of a +/-3 SD deviation at long-run",
+                               "climates of 5, 15, 25 °C and 0.5, 1.5, 3 m (pp); *** p < 0.01,",
+                               "** p < 0.05, * p < 0.1"))
+climate_support(list(dose_fit)) %>%
+  knitr::kable(caption = "Long-run climate across the DOSE regions")
+effects_table(dose_effects, "TM") %>%
+  knitr::kable(caption = "(c) DOSE x ERA5, temperature: effect of a +/-3 SD deviation (pp, 95% CI)")
+effects_table(dose_effects, "RR") %>%
+  knitr::kable(caption = "(c) DOSE x ERA5, precipitation: effect of a +/-3 SD deviation (pp, 95% CI)")
+```
+
+```{r subnational-plot, fig.width=12, fig.height=9}
+plot_effects(bind_rows(national_effects, dose_effects),
+             "Effect of a +/-3 SD deviation: national panels and DOSE regions")
+```
+
+# Level model: output per worker and capital (PWT x ERA5)
+
+The preferred model with the log level of output per worker as the outcome,
+without capital, with log capital per worker (the intensive form of a
+production function), and with log capital and log employment separately:
+
+```text
+log(Y/L) = deviation terms (preferred model) + controls
+           [ + c log(K/L) ]  or  [ + c1 log K + c2 log L ]  + year + country + country trend
+```
+
+with `Y` real GDP and `K` the capital stock, both at constant national prices
+(PWT `rgdpna`, `rnna`), and `L` persons engaged (`emp`), all in the same year.
+Constant returns to scale in the last column mean `c2 = -c1`. With capital, the
+deviation terms are the effect on output given the capital stock (labour
+and productivity); without, the total. The growth model on the same rows is
+the reference. Rows: the PWT x ERA5 sample (outliers dropped) with employment
+and capital.
+
+```{r level-model}
+# Output, capital and employment from PWT 11.0 (millions of 2021 US$ at constant
+# national prices; millions of persons engaged).
+pwt_levels <- readxl::read_excel(data_file(ECON_RAW_FILES[["PWT110"]]), sheet = "Data") %>%
+  transmute(GID_0 = as.character(countrycode), year = as.integer(year),
+            rgdpna = as.numeric(rgdpna), rnna = as.numeric(rnna), emp = as.numeric(emp)) %>%
+  filter(rgdpna > 0, rnna > 0, emp > 0) %>%
+  transmute(GID_0, year, log_y_worker = log(rgdpna / emp), log_k_worker = log(rnna / emp),
+            log_k = log(rnna), log_emp = log(emp))
+level_data <- add_deviation_terms(main$clean, PREFERRED_SUFFIX) %>%
+  inner_join(pwt_levels, by = c("GID_0", "year"))
+
+preferred_terms <- form_terms(FORMS[[PREFERRED_FORM]])
+m_level <- list(
+  "Growth" = fit_model(preferred_terms, level_data),
+  "Level" = fit_model(preferred_terms, level_data, outcome = "log_y_worker"),
+  "Level, K/L" = fit_model(c(preferred_terms, "log_k_worker"), level_data,
+                           outcome = "log_y_worker"),
+  "Level, K, L" = fit_model(c(preferred_terms, "log_k", "log_emp"), level_data,
+                            outcome = "log_y_worker")
+)
+stopifnot(length(unique(vapply(m_level, stats::nobs, 0))) == 1)
+
+LEVEL_DICT <- c(DICT, log_k_worker = "log K/L", log_k = "log K", log_emp = "log L")
+etable(m_level, dict = LEVEL_DICT, drop = DROP,
+       order = c("%^log_k_worker$", "%^log_k$", "%^log_emp$", ORDER), fitstat = FITSTAT,
+       notes = paste("Outcome: growth of GDP per capita (first column), log GDP per worker",
+                     "(the others)."))
+
+tibble::tibble(
+  model = names(m_level),
+  observations = vapply(m_level, stats::nobs, 0),
+  countries = n_distinct(level_data$GID_0),
+  temperature_p = vapply(m_level, function(m) {
+    fixest::wald(m, keep = "^devTM", print = FALSE)$p
+  }, 0),
+  precipitation_p = vapply(m_level, function(m) {
+    fixest::wald(m, keep = "^devRR", print = FALSE)$p
+  }, 0),
+  # Constant returns to scale: c1 + c2 = 0.
+  constant_returns_p = c(NA, NA, NA, lincom(m_level[["Level, K, L"]],
+                                            c(log_k = 1, log_emp = 1))$p_value)
+) %>%
+  mutate(across(ends_with("_p"), ~ signif(.x, 2))) %>%
+  knitr::kable(caption = "Joint tests of each variable's deviation terms, and of constant returns")
+
+level_effects <- bind_rows(lapply(names(m_level), function(k) {
+  climate_effects(list(preferred = m_level[[k]], panel = list(label = k)))
+}))
+significance_map(level_effects) %>%
+  knitr::kable(caption = paste("Effect of a +/-3 SD deviation at long-run climates of 5, 15,",
+                               "25 °C and 0.5, 1.5, 3 m: growth (pp, first row), level of output",
+                               "per worker (%, the others); *** p < 0.01, ** p < 0.05, * p < 0.1"))
+```
+
+## Growth with capital accumulation
+
+The preferred growth model with the growth of capital per capita, of the same
+year or of the year before, and with the growth of the employment share (a
+growth-accounting decomposition):
+
+```text
+growth = deviation terms (preferred model) + controls
+         [ + a dlog(K/N) ]  or  [ + a dlog(K/N)(t-1) ]  or  [ + a dlog(K/N) + b dlog(L/N) ] + FE
+```
+
+with `N` population and `L` persons engaged (PWT `pop`, `emp`). The capital
+stock of a year includes that year's investment, which can respond to the
+same weather, so the same-year capital growth may absorb part of the weather
+effect (it is partly an outcome); the previous year's is set before the
+weather. With capital growth, the deviation terms are the effect on growth
+given capital deepening (labour and productivity). All columns on the same
+rows.
+
+```{r growth-capital}
+pwt_growth <- readxl::read_excel(data_file(ECON_RAW_FILES[["PWT110"]]), sheet = "Data") %>%
+  transmute(GID_0 = as.character(countrycode), year = as.integer(year),
+            rnna = as.numeric(rnna), pop = as.numeric(pop), emp = as.numeric(emp)) %>%
+  filter(rnna > 0, pop > 0) %>%
+  arrange(GID_0, year) %>%
+  group_by(GID_0) %>%
+  mutate(
+    log_k_pc = log(rnna / pop),
+    dlk_pc = log_k_pc - lag_by_year(log_k_pc, year),
+    dlk_pc_lag = lag_by_year(dlk_pc, year),
+    log_emp_pop = log(ifelse(emp > 0, emp / pop, NA_real_)),
+    dl_emp_pop = log_emp_pop - lag_by_year(log_emp_pop, year)
+  ) %>%
+  ungroup() %>%
+  select(GID_0, year, dlk_pc, dlk_pc_lag, dl_emp_pop)
+growth_data <- add_deviation_terms(main$clean, PREFERRED_SUFFIX) %>%
+  inner_join(pwt_growth, by = c("GID_0", "year")) %>%
+  filter(!is.na(dlk_pc), !is.na(dlk_pc_lag), !is.na(dl_emp_pop))
+
+m_growth_k <- list(
+  "Growth" = fit_model(preferred_terms, growth_data),
+  "+ dk" = fit_model(c(preferred_terms, "dlk_pc"), growth_data),
+  "+ dk(t-1)" = fit_model(c(preferred_terms, "dlk_pc_lag"), growth_data),
+  "+ dk, dl" = fit_model(c(preferred_terms, "dlk_pc", "dl_emp_pop"), growth_data)
+)
+stopifnot(length(unique(vapply(m_growth_k, stats::nobs, 0))) == 1)
+
+GROWTH_DICT <- c(DICT, dlk_pc = "dlog(K/N)", dlk_pc_lag = "dlog(K/N)(t-1)",
+                 dl_emp_pop = "dlog(L/N)")
+etable(m_growth_k, dict = GROWTH_DICT, drop = DROP,
+       order = c("%^dlk_pc$", "%^dlk_pc_lag$", "%^dl_emp_pop$", ORDER), fitstat = FITSTAT)
+
+tibble::tibble(
+  model = names(m_growth_k),
+  observations = vapply(m_growth_k, stats::nobs, 0),
+  temperature_p = vapply(m_growth_k, function(m) {
+    fixest::wald(m, keep = "^devTM", print = FALSE)$p
+  }, 0),
+  precipitation_p = vapply(m_growth_k, function(m) {
+    fixest::wald(m, keep = "^devRR", print = FALSE)$p
+  }, 0)
+) %>%
+  mutate(across(ends_with("_p"), ~ signif(.x, 2))) %>%
+  knitr::kable(caption = "Joint tests of each variable's deviation terms")
+
+growth_k_effects <- bind_rows(lapply(names(m_growth_k), function(k) {
+  climate_effects(list(preferred = m_growth_k[[k]], panel = list(label = k)))
+}))
+significance_map(growth_k_effects) %>%
+  knitr::kable(caption = paste("Effect of a +/-3 SD deviation on growth (pp) at long-run",
+                               "climates of 5, 15, 25 °C and 0.5, 1.5, 3 m; *** p < 0.01,",
+                               "** p < 0.05, * p < 0.1"))
+```
+
+# Preferred model and the BHM level terms
+
+The preferred model with the BHM level terms added, on every panel (the same
+fixed effects as the preferred model: unit linear trends):
+
+```text
+growth = deviation terms (preferred model) + b1 TM + b2 TM^2 + b3 RR + b4 RR^2 + controls + FE
+```
+
+Does each block still matter given the other? Joint Wald tests of the deviation
+terms of each variable and of its BHM terms, alone and together, and the AIC of
+the combined model against each alone. In the combined model a deviation of
+the year also moves `TM` and `TM^2` (or `RR`, `RR^2`), so its effect is not
+the deviation terms alone; the joint tests and the AIC are the comparison.
+
+```{r bhm-preferred}
+BHM_TERMS <- c("TM", "TM2", "RR", "RR2")
+wald_p <- function(m, pattern) fixest::wald(m, keep = pattern, print = FALSE)$p
+
+bhm_comparison <- function(fit) {
+  d <- fit$data
+  m_bhm <- fit_model(c(BHM_TERMS, CONTROLS), d)
+  m_both <- fit_model(c(preferred_terms, BHM_TERMS), d)
+  stopifnot(stats::nobs(m_bhm) == stats::nobs(fit$preferred),
+            stats::nobs(m_both) == stats::nobs(fit$preferred))
+  list(
+    models = list("BHM" = m_bhm, "Preferred" = fit$preferred, "Preferred + BHM" = m_both),
+    tests = tibble::tibble(
+      panel = fit$panel$label,
+      dev_T_alone = wald_p(fit$preferred, "^devTM"),
+      dev_T_with_bhm = wald_p(m_both, "^devTM"),
+      bhm_T_alone = wald_p(m_bhm, "^TM2?$"),
+      bhm_T_with_dev = wald_p(m_both, "^TM2?$"),
+      dev_P_alone = wald_p(fit$preferred, "^devRR"),
+      dev_P_with_bhm = wald_p(m_both, "^devRR"),
+      bhm_P_alone = wald_p(m_bhm, "^RR2?$"),
+      bhm_P_with_dev = wald_p(m_both, "^RR2?$"),
+      aic_vs_preferred = stats::AIC(m_both) - stats::AIC(fit$preferred),
+      aic_vs_bhm = stats::AIC(m_both) - stats::AIC(m_bhm)
+    )
+  )
+}
+
+bhm_comparisons <- lapply(c(national_fits, list(dose_fit)), bhm_comparison)
+
+etable(bhm_comparisons[[1]]$models, dict = DICT, drop = DROP,
+       order = c("%^TM$", "%^TM2$", "%^RR$", "%^RR2$", ORDER), fitstat = FITSTAT,
+       title = main$label)
+
+bind_rows(lapply(bhm_comparisons, `[[`, "tests")) %>%
+  mutate(across(c(starts_with("dev_"), starts_with("bhm_")), ~ signif(.x, 2)),
+         across(starts_with("aic_"), ~ round(.x, 1))) %>%
+  knitr::kable(caption = paste("Joint Wald tests (p) of the deviation terms (dev) and of the BHM",
+                               "terms (bhm) of each variable, alone and with the other block;",
+                               "AIC of the combined model minus each alone"))
+```
+
+# Preferred model and lagged income
+
+The preferred model with the previous year's log GDP per capita, on every
+panel:
+
+```text
+growth = deviation terms (preferred model) + h log(GDP per capita)(t-1) + controls + FE
+```
+
+With unit fixed effects and trends, `h` is mostly mean reversion within units
+(and has the small-T bias of a lagged level with unit effects). Do the
+deviation terms survive it?
+
+```{r lagged-income}
+lagged_income <- function(fit) {
+  d <- mutate(fit$data, lag_log_gdp_pc = lgrp_pc_usd - dlgrp_pc_usd)
+  m <- fit_model(c(preferred_terms, "lag_log_gdp_pc"), d)
+  stopifnot(stats::nobs(m) == stats::nobs(fit$preferred))
+  ct <- fixest::coeftable(m)
+  list(
+    model = m,
+    tests = tibble::tibble(
+      panel = fit$panel$label,
+      lag_gdp = ct["lag_log_gdp_pc", 1], lag_gdp_se = ct["lag_log_gdp_pc", 2],
+      within_r2_without = fixest::fitstat(fit$preferred, "wr2")[[1]],
+      within_r2_with = fixest::fitstat(m, "wr2")[[1]],
+      T_p_without = wald_p(fit$preferred, "^devTM"), T_p_with = wald_p(m, "^devTM"),
+      P_p_without = wald_p(fit$preferred, "^devRR"), P_p_with = wald_p(m, "^devRR")
+    )
+  )
+}
+
+income_fits <- lapply(c(national_fits, list(dose_fit)), lagged_income)
+
+bind_rows(lapply(income_fits, `[[`, "tests")) %>%
+  mutate(across(c(lag_gdp, lag_gdp_se, within_r2_without, within_r2_with), ~ round(.x, 4)),
+         across(ends_with("_without") | ends_with("_with"), ~ signif(.x, 2))) %>%
+  knitr::kable(caption = paste("Lagged log GDP per capita: its coefficient, the within R2 and the",
+                               "joint tests (p) of each variable's deviation terms without and",
+                               "with it"))
+
+income_effects <- bind_rows(lapply(seq_along(income_fits), function(i) {
+  climate_effects(list(preferred = income_fits[[i]]$model,
+                       panel = list(label = income_fits[[i]]$tests$panel)))
+}))
+significance_map(income_effects) %>%
+  knitr::kable(caption = paste("With lagged log GDP per capita: effect of a +/-3 SD deviation",
+                               "(pp) at long-run climates of 5, 15, 25 °C and 0.5, 1.5, 3 m;",
+                               "*** p < 0.01, ** p < 0.05, * p < 0.1"))
+```
+
+# Lags of the deviations
+
+Instead of lagged income, the deviation terms of the previous five years, in
+the same forms and interacted with the same long-run climate, for both
+variables:
+
+```text
+growth = sum over k = 0..5 of [ temperature terms(t-k) + precipitation terms(t-k) ] + controls + FE
+```
+
+The lags are the deviations of the calendar years before (from every year of
+the panel, whether or not it has growth), so a unit-year enters only with all
+five lags. The cumulative effect of a deviation through year K is the sum of
+its effects on growth in years 0..K, i.e. its effect on the level of GDP per
+capita after K years: if a loss is recovered it returns towards zero, if it
+persists it stays. The model without lags is re-estimated on the same rows.
+
+Two versions:
+
+- unrestricted: every lag has its own arm coefficients and its own
+  interactions with the long-run climate (8 coefficients a lag);
+- common interaction: every lag has its own arm coefficients, but each arm has
+  one interaction with the long-run climate shared by all lags,
+
+  ```text
+  sum over k of [ a+_k dT+(t-k) + a-_k dT-(t-k) ]
+    + b+ (sum over k of dT+(t-k)) x mean_TM_all + b- (sum over k of dT-(t-k)) x mean_TM_all
+  ```
+
+  (and the same for precipitation), so the effect of lag k at long-run climate
+  m is `a_k + b m`: the climate shifts the response equally in every year.
+  The test of the restriction is the joint (chi-square) Wald test, in the
+  unrestricted model, that each arm's interaction is the same at every lag.
+
+```{r deviation-lags}
+N_LAGS <- 5L
+lag_suffix <- function(k) if (k == 0) "" else paste0("_l", k)
+
+# Columns of the deviation terms of variable v in the preferred form.
+form_columns <- function(v) paste0("dev", v, FORMS[[PREFERRED_FORM]][[v]])
+
+# Unrestricted: the deviation terms of variable v at lag k, with their
+# interactions.
+lag_terms <- function(v, k) {
+  x <- paste0(form_columns(v), lag_suffix(k))
+  c(x, paste0(x, ":mean_", v, "_all"))
+}
+# Common interaction: the terms of variable v at lags 1..n_lags (lag 0 is in
+# the preferred model, without its interaction), and each arm's sum over lags
+# 0..n_lags interacted with the long-run climate.
+restricted_terms <- function(v, n_lags = N_LAGS) {
+  cols <- form_columns(v)
+  c(cols, unlist(lapply(seq_len(n_lags), function(k) paste0(cols, lag_suffix(k)))),
+    paste0(cols, "_sum:mean_", v, "_all"))
+}
+
+# The sample of a fit with the deviations of the previous n_lags calendar years,
+# on the unit-years with all of them, and each arm's sum over lags 0..n_lags.
+add_deviation_lags <- function(fit, n_lags = N_LAGS) {
+  full <- add_deviation_terms(fit$panel$data, PREFERRED_SUFFIX)
+  cols <- c(form_columns("TM"), form_columns("RR"))
+  out <- fit$data
+  for (k in seq_len(n_lags)) {
+    lagged <- as.data.frame(full)[, c("GID_1", "year", cols)]
+    lagged$year <- lagged$year + k
+    names(lagged)[-(1:2)] <- paste0(cols, lag_suffix(k))
+    out <- left_join(out, lagged, by = c("GID_1", "year"))
+  }
+  lag_cols <- unlist(lapply(seq_len(n_lags), function(k) paste0(cols, lag_suffix(k))))
+  # Finite, not only present: a zero trailing SD gives an infinite deviation.
+  out <- out[Reduce(`&`, lapply(lag_cols, function(x) is.finite(out[[x]]))), ]
+  for (col in cols) {
+    out[[paste0(col, "_sum")]] <- Reduce(`+`, lapply(0:n_lags, function(k) {
+      out[[paste0(col, lag_suffix(k))]]
+    }))
+  }
+  out
+}
+
+# Chi-square Wald test of H b = 0 (clustered VCOV of the model).
+wald_linear_p <- function(model, H) {
+  b <- stats::coef(model)[colnames(H)]
+  V <- stats::vcov(model)[colnames(H), colnames(H)]
+  r <- H %*% b
+  stat <- as.numeric(t(r) %*% solve(H %*% V %*% t(H)) %*% r)
+  stats::pchisq(stat, df = nrow(H), lower.tail = FALSE)
+}
+# In the unrestricted model: each arm of the variables `vars` has the same
+# interaction at every lag (b_k = b_0 for k = 1..N_LAGS).
+equal_interactions_p <- function(model, vars) {
+  terms <- names(stats::coef(model))
+  rows <- list()
+  for (v in vars) for (col in form_columns(v)) {
+    climate <- paste0("mean_", v, "_all")
+    base <- interaction_name(col, climate, terms)
+    for (k in seq_len(N_LAGS)) {
+      h <- stats::setNames(numeric(length(terms)), terms)
+      h[[interaction_name(paste0(col, lag_suffix(k)), climate, terms)]] <- 1
+      h[[base]] <- -1
+      rows[[length(rows) + 1]] <- h
+    }
+  }
+  wald_linear_p(model, do.call(rbind, rows))
+}
+
+distributed_lags <- function(fit) {
+  d <- add_deviation_lags(fit)
+  all_lags <- unlist(lapply(seq_len(N_LAGS), function(k) c(lag_terms("TM", k), lag_terms("RR", k))))
+  m0 <- fit_model(preferred_terms, d)
+  m <- fit_model(c(preferred_terms, all_lags), d)
+  mr <- fit_model(c(restricted_terms("TM"), restricted_terms("RR"), CONTROLS), d)
+  stopifnot(stats::nobs(m0) == stats::nobs(m), stats::nobs(m0) == stats::nobs(mr))
+  list(
+    panel = fit$panel, no_lags = m0, lags = m, restricted = mr,
+    tests = tibble::tibble(
+      panel = fit$panel$label, first_year = min(d$year), observations = stats::nobs(m),
+      T_p_no_lags = wald_p(m0, "^devTM"), P_p_no_lags = wald_p(m0, "^devRR"),
+      T_lags_p = wald_p(m, "^devTM[^:]*_l[0-9]"), P_lags_p = wald_p(m, "^devRR[^:]*_l[0-9]"),
+      T_lags_p_common = wald_p(mr, "^devTM[^:]*_l[0-9]"),
+      P_lags_p_common = wald_p(mr, "^devRR[^:]*_l[0-9]"),
+      equal_T_p = equal_interactions_p(m, "TM"), equal_P_p = equal_interactions_p(m, "RR"),
+      aic_lags_vs_no_lags = stats::AIC(m) - stats::AIC(m0),
+      aic_common_vs_no_lags = stats::AIC(mr) - stats::AIC(m0)
+    )
+  )
+}
+
+# Cumulative effect through year `through` of a deviation of EFFECT_AT SD in
+# year 0, at each long-run climate of EVAL_CLIMATE. With the common interaction
+# (`restricted`), the deviation enters the summed interaction in each of the
+# years 0..through.
+cumulative_effects <- function(model, label, restricted = FALSE, n_lags = N_LAGS) {
+  terms <- names(stats::coef(model))
+  bind_rows(lapply(c("TM", "RR"), function(v) {
+    m <- EVAL_CLIMATE[[v]]
+    climate <- paste0("mean_", v, "_all")
+    grid <- expand.grid(level = seq_along(m), deviation = EFFECT_AT, through = 0:n_lags)
+    G <- t(mapply(function(g, x, through) {
+      w <- stats::setNames(numeric(length(terms)), terms)
+      for (s in FORMS[[PREFERRED_FORM]][[v]]) {
+        value <- term_value(s, x)
+        col <- paste0("dev", v, s)
+        for (k in 0:through) w[[paste0(col, lag_suffix(k))]] <- value
+        if (restricted) {
+          w[[interaction_name(paste0(col, "_sum"), climate, terms)]] <- (through + 1) * value * m[[g]]
+        } else {
+          for (k in 0:through) {
+            w[[interaction_name(paste0(col, lag_suffix(k)), climate, terms)]] <- value * m[[g]]
+          }
+        }
+      }
+      w
+    }, grid$level, grid$deviation, grid$through))
+    colnames(G) <- terms
+    linear_combination(model, G) %>%
+      mutate(panel = label, variable = v, level_index = grid$level,
+             level = factor(EVAL_LABELS[[v]][grid$level], levels = EVAL_LABELS[[v]]),
+             climate = m[grid$level], deviation = grid$deviation, through = grid$through,
+             p_value = 2 * stats::pnorm(-abs(estimate / std_error)), .before = 1)
+  }))
+}
+
+lag_fits <- lapply(c(national_fits, list(dose_fit)), distributed_lags)
+lag_effects <- bind_rows(lapply(lag_fits, function(x) {
+  cumulative_effects(x$lags, x$panel$label)
+}))
+common_effects <- bind_rows(lapply(lag_fits, function(x) {
+  cumulative_effects(x$restricted, x$panel$label, restricted = TRUE)
+}))
+
+lag_tests <- bind_rows(lapply(lag_fits, `[[`, "tests")) %>%
+  mutate(across(c(starts_with("T_"), starts_with("P_"), starts_with("equal_")),
+                ~ format.pval(signif(.x, 2), eps = 0.001)),
+         across(starts_with("aic_"), ~ round(.x, 1)))
+lag_tests %>%
+  select(panel, first_year, observations, T_p_no_lags, P_p_no_lags, T_lags_p, P_lags_p,
+         aic_lags_vs_no_lags) %>%
+  knitr::kable(caption = paste("Unrestricted lags: joint tests (p) of the deviation terms without",
+                               "lags and of all the lags of each variable; AIC with lags minus",
+                               "without"))
+lag_tests %>%
+  select(panel, T_lags_p_common, P_lags_p_common, equal_T_p, equal_P_p, aic_common_vs_no_lags,
+         aic_lags_vs_no_lags) %>%
+  mutate(aic_common_vs_unrestricted = aic_common_vs_no_lags - aic_lags_vs_no_lags) %>%
+  select(-aic_lags_vs_no_lags) %>%
+  knitr::kable(caption = paste("Common interaction: joint tests (p) of the lags of each variable;",
+                               "test that each arm's interaction is the same at every lag (in",
+                               "the unrestricted model); AIC against no lags and against the",
+                               "unrestricted lags"))
+
+significance_map(filter(lag_effects, through == 0)) %>%
+  knitr::kable(caption = paste("Unrestricted lags: effect in the year of the deviation (pp);",
+                               "*** p < 0.01, ** p < 0.05, * p < 0.1"))
+significance_map(filter(lag_effects, through == N_LAGS)) %>%
+  knitr::kable(caption = paste("Unrestricted lags: cumulative effect over the year of the",
+                               "deviation and the five after (pp of GDP per capita); *** p < 0.01,",
+                               "** p < 0.05, * p < 0.1"))
+significance_map(filter(common_effects, through == 0)) %>%
+  knitr::kable(caption = paste("Common interaction: effect in the year of the deviation (pp);",
+                               "*** p < 0.01, ** p < 0.05, * p < 0.1"))
+significance_map(filter(common_effects, through == N_LAGS)) %>%
+  knitr::kable(caption = paste("Common interaction: cumulative effect over the year of the",
+                               "deviation and the five after (pp of GDP per capita); *** p < 0.01,",
+                               "** p < 0.05, * p < 0.1"))
+```
+
+```{r deviation-lags-plot, fig.width=13, fig.height=7}
+LAG_CELLS <- tibble::tribble(
+  ~variable, ~deviation, ~level_index,
+  "TM", 3, 3L, "TM", -3, 3L, "TM", -3, 1L,
+  "RR", -3, 1L, "RR", -3, 2L, "RR", 3, 1L
+)
+plot_lag_paths <- function(effects, version) {
+  effects %>%
+    semi_join(LAG_CELLS, by = c("variable", "deviation", "level_index")) %>%
+    mutate(
+      cell = sprintf("%s %+d SD at %s", VARIABLE_LABELS[variable], deviation, level),
+      cell = factor(cell, levels = unique(cell)),
+      main_panel = panel == main$label,
+      panel = factor(panel, levels = unique(panel)),
+      across(c(estimate, conf_low, conf_high), ~ 100 * .x)
+    ) %>%
+    ggplot(aes(through, estimate, colour = panel)) +
+    geom_hline(yintercept = 0, colour = GRID_MUTED, linewidth = 0.3) +
+    geom_ribbon(data = function(x) filter(x, main_panel),
+                aes(ymin = conf_low, ymax = conf_high), fill = GRID_PALETTE[[1]], alpha = 0.12,
+                colour = NA) +
+    geom_line(linewidth = 0.7) +
+    geom_point(size = 1.4) +
+    facet_wrap(~cell, nrow = 2) +
+    scale_colour_manual(values = stats::setNames(GRID_PALETTE[seq_along(lag_fits)],
+                                                 vapply(lag_fits, function(x) x$panel$label, "")),
+                        name = NULL) +
+    labs(x = "Years after the deviation", y = "Cumulative effect on GDP per capita (pp)",
+         title = paste("Cumulative effect of a +/-3 SD year over the following years:",
+                       version),
+         subtitle = paste0(PREFERRED_FORM, ", ", PREFERRED_DEFINITION, " deviations, five lags; ",
+                           "band: 95% CI for ", main$label, ".")) +
+    theme_results()
+}
+plot_lag_paths(lag_effects, "unrestricted lags")
+plot_lag_paths(common_effects, "common interaction")
+```
+
+## Ten lags, common interaction
+
+The common-interaction model with the deviations of the previous ten years,
+against the model without lags on the same rows (the ERA5 panels then start in
+1970: a 20-year precipitation deviation needs climate from 20 years before).
+The confidence intervals of the cumulative effects use the full clustered
+covariance of all the lag coefficients.
+
+```{r ten-lags}
+N_LAGS_LONG <- 10L
+common_long_lags <- function(fit) {
+  d <- add_deviation_lags(fit, N_LAGS_LONG)
+  m0 <- fit_model(preferred_terms, d)
+  mr <- fit_model(c(restricted_terms("TM", N_LAGS_LONG), restricted_terms("RR", N_LAGS_LONG),
+                    CONTROLS), d)
+  stopifnot(stats::nobs(m0) == stats::nobs(mr))
+  list(
+    panel = fit$panel, model = mr,
+    tests = tibble::tibble(
+      panel = fit$panel$label, first_year = min(d$year), observations = stats::nobs(mr),
+      T_lags_p = wald_p(mr, "^devTM[^:]*_l[0-9]"), P_lags_p = wald_p(mr, "^devRR[^:]*_l[0-9]"),
+      aic_vs_no_lags = stats::AIC(mr) - stats::AIC(m0)
+    )
+  )
+}
+
+long_fits <- lapply(c(national_fits, list(dose_fit)), common_long_lags)
+long_effects <- bind_rows(lapply(long_fits, function(x) {
+  cumulative_effects(x$model, x$panel$label, restricted = TRUE, n_lags = N_LAGS_LONG)
+}))
+
+bind_rows(lapply(long_fits, `[[`, "tests")) %>%
+  mutate(across(c(T_lags_p, P_lags_p), ~ format.pval(signif(.x, 2), eps = 0.001)),
+         aic_vs_no_lags = round(aic_vs_no_lags, 1)) %>%
+  knitr::kable(caption = paste("Ten lags, common interaction: joint tests (p) of the lags of each",
+                               "variable; AIC minus the model without lags on the same rows"))
+
+significance_map(filter(long_effects, through == 5)) %>%
+  knitr::kable(caption = paste("Ten lags, common interaction: cumulative effect through five years",
+                               "(pp of GDP per capita); *** p < 0.01, ** p < 0.05, * p < 0.1"))
+significance_map(filter(long_effects, through == N_LAGS_LONG)) %>%
+  knitr::kable(caption = paste("Ten lags, common interaction: cumulative effect through ten years",
+                               "(pp of GDP per capita); *** p < 0.01, ** p < 0.05, * p < 0.1"))
+```
+
+```{r ten-lags-plot, fig.width=13, fig.height=7}
+plot_lag_paths(long_effects, "ten lags, common interaction") +
+  scale_x_continuous(breaks = 0:N_LAGS_LONG) +
+  labs(subtitle = paste0(PREFERRED_FORM, ", ", PREFERRED_DEFINITION, " deviations, ten lags; ",
+                         "band: 95% CI for ", main$label, " (full clustered covariance of the ",
+                         "lag coefficients)."))
+```
+
+# Growth outliers: none, non-weather or all dropped
+
+The preferred model on every panel with no growth outlier dropped, with the
+outliers whose cause does not involve weather dropped (the main sample), and
+with all of them dropped (the weather-driven ones too). The same country-years
+in every panel. For each: the joint tests, the effect of a +/-3 SD deviation in
+the year, and the cumulative effects of the dry and hot tails (five
+unrestricted lags; ten lags with the common interaction).
+
+```{r outlier-samples}
+OUTLIER_SAMPLES <- list(
+  "none dropped" = OUTLIERS_ALL[0, ],
+  "non-weather dropped" = OUTLIERS_DROPPED,
+  "all dropped" = OUTLIERS_ALL
+)
+outlier_fit <- function(panel, sample) {
+  drop <- OUTLIER_SAMPLES[[sample]]
+  keep <- !paste(panel$all$GID_0, panel$all$year) %in% paste(drop$GID_0, drop$year)
+  d <- add_deviation_terms(panel$all[keep, ], PREFERRED_SUFFIX)
+  list(panel = modifyList(panel, list(label = paste0(panel$label, " | ", sample))),
+       data = d, preferred = fit_model(preferred_terms, d),
+       source_panel = panel$label, sample = sample)
+}
+all_panels <- c(national_panels, list(dose))
+outlier_fits <- unlist(lapply(all_panels, function(p) {
+  lapply(names(OUTLIER_SAMPLES), function(s) outlier_fit(p, s))
+}), recursive = FALSE)
+
+bind_rows(lapply(outlier_fits, function(f) {
+  tibble::tibble(panel = f$source_panel, sample = f$sample, rows = stats::nobs(f$preferred),
+                 temperature_p = wald_p(f$preferred, "^devTM"),
+                 precipitation_p = wald_p(f$preferred, "^devRR"))
+})) %>%
+  mutate(across(ends_with("_p"), ~ format.pval(signif(.x, 2), eps = 0.001))) %>%
+  knitr::kable(caption = "Joint tests (p) of each variable's deviation terms by outlier sample")
+
+significance_map(bind_rows(lapply(outlier_fits, climate_effects))) %>%
+  knitr::kable(caption = paste("Effect of a +/-3 SD deviation in the year (pp) by outlier sample;",
+                               "*** p < 0.01, ** p < 0.05, * p < 0.1"))
+
+# Dry and hot tails: in the year, and cumulative with lags.
+TAIL_CELLS <- tibble::tribble(
+  ~cell, ~variable, ~deviation, ~level_index,
+  "P -3 SD, 0.5 m", "RR", -3, 1L,
+  "P -3 SD, 1.5 m", "RR", -3, 2L,
+  "T +3 SD, 25 °C", "TM", 3, 3L
+)
+tail_summary <- function(f) {
+  d5 <- add_deviation_lags(f, 5L)
+  lags5 <- unlist(lapply(1:5, function(k) c(lag_terms("TM", k), lag_terms("RR", k))))
+  m5 <- fit_model(c(preferred_terms, lags5), d5)
+  d10 <- add_deviation_lags(f, 10L)
+  m10 <- fit_model(c(restricted_terms("TM", 10L), restricted_terms("RR", 10L), CONTROLS), d10)
+  effects <- bind_rows(
+    mutate(climate_effects(f), horizon = "year"),
+    mutate(filter(cumulative_effects(m5, f$panel$label, FALSE, 5L), through == 5), horizon = "5 years"),
+    mutate(filter(cumulative_effects(m10, f$panel$label, TRUE, 10L), through == 10),
+           horizon = "10 years")
+  )
+  effects %>%
+    inner_join(TAIL_CELLS, by = c("variable", "deviation", "level_index")) %>%
+    transmute(panel = f$source_panel, sample = f$sample,
+              column = paste0(cell, ": ", horizon),
+              value = sprintf("%+.2f%s", 100 * estimate, stars(p_value))) %>%
+    tidyr::pivot_wider(names_from = column, values_from = value)
+}
+bind_rows(lapply(outlier_fits, tail_summary)) %>%
+  knitr::kable(caption = paste("Dry and hot tails by outlier sample (pp of GDP per capita): in the",
+                               "year, cumulative over five years (unrestricted lags) and ten years",
+                               "(common interaction); *** p < 0.01, ** p < 0.05, * p < 0.1"))
+```
