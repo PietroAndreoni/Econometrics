@@ -144,3 +144,38 @@ plot_signed_bin_paths <- function(paths, removal_counts, title,
       axis.title = element_text(colour = "#52514e")
     )
 }
+
+# Growth outliers of selected years, e.g. the cool years after the Pinatubo
+# eruption (1991-1993): country-years whose growth shock, the outcome net of
+# `fixed_effects` and of `controls` (no climate terms), is among the `share`
+# largest in absolute value over the whole sample, and whose year is in
+# `years`. Returns `flag`, a logical vector over the rows of `data`, and
+# `table`, the flagged country-years with their growth shock and the cutoff.
+flag_growth_outliers <- function(
+    data,
+    controls,
+    fixed_effects,
+    years,
+    share = 0.025,
+    outcome = "dlgrp_pc_usd"
+) {
+  terms <- if (length(controls) && any(nzchar(controls))) {
+    paste(controls[nzchar(controls)], collapse = " + ")
+  } else {
+    "1"
+  }
+  net <- fit_panel_model(terms, data, outcome = outcome, fixed_effects = fixed_effects,
+                         cluster = ~GID_0)
+  shock <- rep(NA_real_, nrow(data))
+  shock[fixest::obs(net)] <- stats::resid(net)
+  cutoff <- stats::quantile(abs(shock), 1 - share, na.rm = TRUE, names = FALSE)
+  flag <- !is.na(shock) & abs(shock) >= cutoff & data$year %in% years
+  list(
+    flag = flag,
+    table = tibble::tibble(
+      GID_0 = data$GID_0[flag], year = data$year[flag], growth = data[[outcome]][flag],
+      growth_shock = shock[flag], shock_cutoff = cutoff
+    ) %>%
+      arrange(growth_shock)
+  )
+}
