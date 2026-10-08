@@ -860,158 +860,452 @@ plot_effects(bind_rows(national_effects, dose_effects),
              "Effect of a +/-3 SD deviation: national panels and DOSE regions")
 ```
 
-# Level model: output per worker and capital (PWT x ERA5)
+# Preferred model and SPEI (PWT x CRU TS)
 
-The preferred model with the log level of output per worker as the outcome,
-without capital, with log capital per worker (the intensive form of a
-production function), and with log capital and log employment separately:
+SPEI, the Standardized Precipitation-Evapotranspiration Index (CSIC SPEIbase,
+from the Weighted Climate Dataset with population-density weights at base year
+2000), is the standardized climatic water balance, precipitation minus
+potential evapotranspiration, accumulated over 1, 12 or 36 months. SPEIbase is
+computed from CRU TS, so this section uses PWT x CRU TS, whose temperature and
+precipitation deviations come from the same data. SPEI is monthly; the annual
+indicators are
 
-```text
-log(Y/L) = deviation terms (preferred model) + controls
-           [ + c log(K/L) ]  or  [ + c1 log K + c2 log L ]  + year + country + country trend
-```
+- SPEI1, annual mean: the mean of the twelve monthly 1-month values;
+- SPEI12, December: the water balance of the calendar year;
+- SPEI36, December: the water balance of the three calendar years to December.
 
-with `Y` real GDP and `K` the capital stock, both at constant national prices
-(PWT `rgdpna`, `rnna`), and `L` persons engaged (`emp`), all in the same year.
-Constant returns to scale in the last column mean `c2 = -c1`. With capital, the
-deviation terms are the effect on output given the capital stock (labour
-and productivity); without, the total. The growth model on the same rows is
-the reference. Rows: the PWT x ERA5 sample (outliers dropped) with employment
-and capital.
-
-```{r level-model}
-# Output, capital and employment from PWT 11.0 (millions of 2021 US$ at constant
-# national prices; millions of persons engaged).
-pwt_levels <- readxl::read_excel(data_file(ECON_RAW_FILES[["PWT110"]]), sheet = "Data") %>%
-  transmute(GID_0 = as.character(countrycode), year = as.integer(year),
-            rgdpna = as.numeric(rgdpna), rnna = as.numeric(rnna), emp = as.numeric(emp)) %>%
-  filter(rgdpna > 0, rnna > 0, emp > 0) %>%
-  transmute(GID_0, year, log_y_worker = log(rgdpna / emp), log_k_worker = log(rnna / emp),
-            log_k = log(rnna), log_emp = log(emp))
-level_data <- add_deviation_terms(main$clean, PREFERRED_SUFFIX) %>%
-  inner_join(pwt_levels, by = c("GID_0", "year"))
-
-preferred_terms <- form_terms(FORMS[[PREFERRED_FORM]])
-m_level <- list(
-  "Growth" = fit_model(preferred_terms, level_data),
-  "Level" = fit_model(preferred_terms, level_data, outcome = "log_y_worker"),
-  "Level, K/L" = fit_model(c(preferred_terms, "log_k_worker"), level_data,
-                           outcome = "log_y_worker"),
-  "Level, K, L" = fit_model(c(preferred_terms, "log_k", "log_emp"), level_data,
-                            outcome = "log_y_worker")
-)
-stopifnot(length(unique(vapply(m_level, stats::nobs, 0))) == 1)
-
-LEVEL_DICT <- c(DICT, log_k_worker = "log K/L", log_k = "log K", log_emp = "log L")
-etable(m_level, dict = LEVEL_DICT, drop = DROP,
-       order = c("%^log_k_worker$", "%^log_k$", "%^log_emp$", ORDER), fitstat = FITSTAT,
-       notes = paste("Outcome: growth of GDP per capita (first column), log GDP per worker",
-                     "(the others)."))
-
-tibble::tibble(
-  model = names(m_level),
-  observations = vapply(m_level, stats::nobs, 0),
-  countries = n_distinct(level_data$GID_0),
-  temperature_p = vapply(m_level, function(m) {
-    fixest::wald(m, keep = "^devTM", print = FALSE)$p
-  }, 0),
-  precipitation_p = vapply(m_level, function(m) {
-    fixest::wald(m, keep = "^devRR", print = FALSE)$p
-  }, 0),
-  # Constant returns to scale: c1 + c2 = 0.
-  constant_returns_p = c(NA, NA, NA, lincom(m_level[["Level, K, L"]],
-                                            c(log_k = 1, log_emp = 1))$p_value)
-) %>%
-  mutate(across(ends_with("_p"), ~ signif(.x, 2))) %>%
-  knitr::kable(caption = "Joint tests of each variable's deviation terms, and of constant returns")
-
-level_effects <- bind_rows(lapply(names(m_level), function(k) {
-  climate_effects(list(preferred = m_level[[k]], panel = list(label = k)))
-}))
-significance_map(level_effects) %>%
-  knitr::kable(caption = paste("Effect of a +/-3 SD deviation at long-run climates of 5, 15,",
-                               "25 °C and 0.5, 1.5, 3 m: growth (pp, first row), level of output",
-                               "per worker (%, the others); *** p < 0.01, ** p < 0.05, * p < 0.1"))
-```
-
-## Growth with capital accumulation
-
-The preferred growth model with the growth of capital per capita, of the same
-year or of the year before, and with the growth of the employment share (a
-growth-accounting decomposition):
+Like the deviations, each is demeaned (each country's mean and linear and
+quadratic trend removed, on the years from `r params$start_year` minus ten to
+the last year of the panel) before its arms are cut, S- = max(-S, 0) (dry) and
+S+ = max(S, 0) (wet). Each enters the preferred model in two forms, interacted
+with the long-run precipitation as the precipitation deviations are:
 
 ```text
-growth = deviation terms (preferred model) + controls
-         [ + a dlog(K/N) ]  or  [ + a dlog(K/N)(t-1) ]  or  [ + a dlog(K/N) + b dlog(L/N) ] + FE
+signed SPEI:  c S + d S x clim_RR
+SPEI arms:    c+ S+ + c- S- + (d+ S+ + d- S-) x clim_RR
 ```
 
-with `N` population and `L` persons engaged (PWT `pop`, `emp`). The capital
-stock of a year includes that year's investment, which can respond to the
-same weather, so the same-year capital growth may absorb part of the weather
-effect (it is partly an outcome); the previous year's is set before the
-weather. With capital growth, the deviation terms are the effect on growth
-given capital deepening (labour and productivity). All columns on the same
-rows.
+All models on the same rows: the PWT x CRU TS sample (outliers dropped) with
+every SPEI indicator.
 
-```{r growth-capital}
-pwt_growth <- readxl::read_excel(data_file(ECON_RAW_FILES[["PWT110"]]), sheet = "Data") %>%
-  transmute(GID_0 = as.character(countrycode), year = as.integer(year),
-            rnna = as.numeric(rnna), pop = as.numeric(pop), emp = as.numeric(emp)) %>%
-  filter(rnna > 0, pop > 0) %>%
-  arrange(GID_0, year) %>%
-  group_by(GID_0) %>%
-  mutate(
-    log_k_pc = log(rnna / pop),
-    dlk_pc = log_k_pc - lag_by_year(log_k_pc, year),
-    dlk_pc_lag = lag_by_year(dlk_pc, year),
-    log_emp_pop = log(ifelse(emp > 0, emp / pop, NA_real_)),
-    dl_emp_pop = log_emp_pop - lag_by_year(log_emp_pop, year)
-  ) %>%
-  ungroup() %>%
-  select(GID_0, year, dlk_pc, dlk_pc_lag, dl_emp_pop)
-growth_data <- add_deviation_terms(main$clean, PREFERRED_SUFFIX) %>%
-  inner_join(pwt_growth, by = c("GID_0", "year")) %>%
-  filter(!is.na(dlk_pc), !is.na(dlk_pc_lag), !is.na(dl_emp_pop))
+```{r spei}
+SPEI_INDICATORS <- c(spei1 = "SPEI1, annual mean", spei12 = "SPEI12, December",
+                     spei36 = "SPEI36, December")
+SPEI_FORMS <- c("signed", "arms")
 
-m_growth_k <- list(
-  "Growth" = fit_model(preferred_terms, growth_data),
-  "+ dk" = fit_model(c(preferred_terms, "dlk_pc"), growth_data),
-  "+ dk(t-1)" = fit_model(c(preferred_terms, "dlk_pc_lag"), growth_data),
-  "+ dk, dl" = fit_model(c(preferred_terms, "dlk_pc", "dl_emp_pop"), growth_data)
+# Monthly SPEI by country (cached on disk by wcd_get()).
+spei_monthly <- function(variable) {
+  x <- wcd_get(variable = variable, source = "CSIC", geo_resolution = "gadm0",
+               weight = CLIMATE_WEIGHT, weight_year = CLIMATE_WEIGHT_YEAR,
+               time_frequency = "monthly", verbose = FALSE)
+  tibble::tibble(GID_0 = x$GID_0, year = as.integer(format(x$date, "%Y")),
+                 month = as.integer(format(x$date, "%m")), value = x[[3]])
+}
+spei_december <- function(variable, name) {
+  spei_monthly(variable) %>% filter(month == 12) %>% transmute(GID_0, year, !!name := value)
+}
+spei_raw <- spei_monthly("SPEI1") %>%
+  group_by(GID_0, year) %>%
+  summarise(spei1 = if (sum(!is.na(value)) == 12) mean(value) else NA_real_, .groups = "drop") %>%
+  full_join(spei_december("SPEI12", "spei12"), by = c("GID_0", "year")) %>%
+  full_join(spei_december("SPEI36", "spei36"), by = c("GID_0", "year"))
+
+cru <- national_panels[[match("PWT x CRU TS", vapply(national_panels, `[[`, "", "label"))]]
+
+# Availability: the SPEI series, and the PWT x CRU TS country-years they cover.
+bind_rows(lapply(names(SPEI_INDICATORS), function(k) {
+  have <- spei_raw[!is.na(spei_raw[[k]]), ]
+  covered <- paste(cru$clean$GID_0, cru$clean$year) %in% paste(have$GID_0, have$year)
+  tibble::tibble(indicator = SPEI_INDICATORS[[k]], first_year = min(have$year),
+                 last_year = max(have$year), countries = n_distinct(have$GID_0),
+                 sample_rows = nrow(cru$clean), rows_with_spei = sum(covered),
+                 countries_without = paste(sort(unique(cru$clean$GID_0[!covered])),
+                                           collapse = ", "))
+})) %>%
+  knitr::kable(caption = paste("SPEI (CSIC SPEIbase, WCD, population density 2000): availability",
+                               "and coverage of the PWT x CRU TS sample"))
+
+# Demeaned SPEI (each country's mean and quadratic trend removed, as the
+# deviations) and its arms.
+spei <- spei_raw %>% filter(year >= START_YEAR - MAX_LAGS, year <= cru$end_year)
+for (k in names(SPEI_INDICATORS)) {
+  ok <- which(is.finite(spei[[k]]))
+  sub <- data.frame(GID_1 = spei$GID_0[ok], t = spei$year[ok] - 1990L, x = spei[[k]][ok])
+  sub$t2 <- sub$t^2
+  m <- fixest::feols(x ~ 1 | GID_1[t, t2], sub, notes = FALSE)
+  demeaned <- rep(NA_real_, nrow(spei))
+  demeaned[ok[fixest::obs(m)]] <- stats::resid(m)
+  spei[[k]] <- demeaned
+  spei[[paste0(k, "_dry")]] <- pmax(-demeaned, 0)
+  spei[[paste0(k, "_wet")]] <- pmax(demeaned, 0)
+}
+
+spei_data <- add_deviation_terms(cru$clean, PREFERRED_SUFFIX) %>%
+  inner_join(spei, by = c("GID_0", "year")) %>%
+  filter(if_all(all_of(names(SPEI_INDICATORS)), ~ !is.na(.x)))
+
+# Correlations of the demeaned indicators with the deviations (same rows).
+stats::cor(as.data.frame(spei_data)[, c(names(SPEI_INDICATORS), "devRR", "devTM")]) %>%
+  round(2) %>%
+  knitr::kable(caption = paste("PWT x CRU TS: correlations of the demeaned SPEI indicators and",
+                               "deviations (dP = devRR, dT = devTM)"))
+
+spei_terms <- function(k, form) {
+  x <- if (form == "signed") k else paste0(k, c("_dry", "_wet"))
+  c(x, paste0(x, ":clim_RR"))
+}
+spei_models <- c(
+  list("Preferred" = fit_model(preferred_terms, spei_data)),
+  unlist(lapply(names(SPEI_INDICATORS), function(k) {
+    stats::setNames(lapply(SPEI_FORMS, function(f) {
+      fit_model(c(preferred_terms, spei_terms(k, f)), spei_data)
+    }), paste0(SPEI_INDICATORS[[k]], ", ", SPEI_FORMS))
+  }), recursive = FALSE)
 )
-stopifnot(length(unique(vapply(m_growth_k, stats::nobs, 0))) == 1)
-
-GROWTH_DICT <- c(DICT, dlk_pc = "dlog(K/N)", dlk_pc_lag = "dlog(K/N)(t-1)",
-                 dl_emp_pop = "dlog(L/N)")
-etable(m_growth_k, dict = GROWTH_DICT, drop = DROP,
-       order = c("%^dlk_pc$", "%^dlk_pc_lag$", "%^dl_emp_pop$", ORDER), fitstat = FITSTAT)
+stopifnot(length(unique(vapply(spei_models, stats::nobs, 0))) == 1)
 
 tibble::tibble(
-  model = names(m_growth_k),
-  observations = vapply(m_growth_k, stats::nobs, 0),
-  temperature_p = vapply(m_growth_k, function(m) {
-    fixest::wald(m, keep = "^devTM", print = FALSE)$p
+  model = names(spei_models),
+  within_r2 = vapply(spei_models, function(m) fixest::fitstat(m, "wr2")[[1]], 0),
+  aic_vs_preferred = vapply(spei_models, stats::AIC, 0) - stats::AIC(spei_models[[1]]),
+  spei_p = vapply(spei_models, function(m) {
+    if (any(startsWith(names(stats::coef(m)), "spei"))) wald_p(m, "^spei") else NA_real_
   }, 0),
-  precipitation_p = vapply(m_growth_k, function(m) {
-    fixest::wald(m, keep = "^devRR", print = FALSE)$p
-  }, 0)
+  temperature_p = vapply(spei_models, function(m) wald_p(m, "^devTM"), 0),
+  precipitation_p = vapply(spei_models, function(m) wald_p(m, "^devRR"), 0)
 ) %>%
-  mutate(across(ends_with("_p"), ~ signif(.x, 2))) %>%
-  knitr::kable(caption = "Joint tests of each variable's deviation terms")
+  mutate(within_r2 = round(within_r2, 4), aic_vs_preferred = round(aic_vs_preferred, 1),
+         across(ends_with("_p"), ~ signif(.x, 2))) %>%
+  knitr::kable(caption = paste0("PWT x CRU TS, ", stats::nobs(spei_models[[1]]),
+                                " country-years: the preferred model with each SPEI indicator; ",
+                                "AIC relative to the preferred model; joint tests (p) of the SPEI, ",
+                                "temperature and precipitation terms"))
 
-growth_k_effects <- bind_rows(lapply(names(m_growth_k), function(k) {
-  climate_effects(list(preferred = m_growth_k[[k]], panel = list(label = k)))
-}))
-significance_map(growth_k_effects) %>%
-  knitr::kable(caption = paste("Effect of a +/-3 SD deviation on growth (pp) at long-run",
-                               "climates of 5, 15, 25 °C and 0.5, 1.5, 3 m; *** p < 0.01,",
-                               "** p < 0.05, * p < 0.1"))
+SPEI_DICT <- c(DICT, stats::setNames(
+  paste0(rep(c("SPEI1", "SPEI12", "SPEI36"), each = 3), c("", " dry", " wet")),
+  paste0(rep(names(SPEI_INDICATORS), each = 3), c("", "_dry", "_wet"))
+))
+etable(spei_models[c("Preferred", paste0(SPEI_INDICATORS, ", arms"))],
+       headers = c("Preferred", "SPEI1", "SPEI12", "SPEI36"), dict = SPEI_DICT, drop = DROP,
+       order = c("%^devTM", "%^devRR", "%^spei", "%^conflict"), fitstat = FITSTAT,
+       title = "PWT x CRU TS: the preferred model and SPEI arms")
+
+# Effect of SPEI = x at the long-run precipitation of EVAL_CLIMATE$RR.
+SPEI_AT <- c(-2, 2)
+spei_effects <- function(model, k, form, label) {
+  terms <- names(stats::coef(model))
+  m <- EVAL_CLIMATE$RR
+  grid <- expand.grid(level = seq_along(m), x = SPEI_AT)
+  G <- t(mapply(function(g, x) {
+    w <- stats::setNames(numeric(length(terms)), terms)
+    values <- if (form == "signed") {
+      stats::setNames(x, k)
+    } else {
+      stats::setNames(c(max(-x, 0), max(x, 0)), paste0(k, c("_dry", "_wet")))
+    }
+    for (term in names(values)) {
+      w[[term]] <- values[[term]]
+      w[[interaction_name(term, "clim_RR", terms)]] <- values[[term]] * m[[g]]
+    }
+    w
+  }, grid$level, grid$x))
+  colnames(G) <- terms
+  linear_combination(model, G) %>%
+    mutate(model = label, column = sprintf("SPEI %+d, %s", grid$x, EVAL_LABELS$RR[grid$level]),
+           p_value = 2 * stats::pnorm(-abs(estimate / std_error)))
+}
+bind_rows(lapply(names(SPEI_INDICATORS), function(k) {
+  bind_rows(lapply(SPEI_FORMS, function(f) {
+    label <- paste0(SPEI_INDICATORS[[k]], ", ", f)
+    spei_effects(spei_models[[label]], k, f, label)
+  }))
+})) %>%
+  mutate(cell = sprintf("%+.2f%s", 100 * estimate, stars(p_value))) %>%
+  select(model, column, cell) %>%
+  tidyr::pivot_wider(names_from = column, values_from = cell) %>%
+  knitr::kable(caption = paste("Effect of SPEI of -2 (extremely dry) and +2 (extremely wet) on",
+                               "growth (pp) at long-run precipitation of 0.5, 1.5 and 3 m;",
+                               "*** p < 0.01, ** p < 0.05, * p < 0.1"))
+
+# The temperature and precipitation deviations with and without SPEI.
+significance_map(bind_rows(lapply(names(spei_models), function(k) {
+  climate_effects(list(preferred = spei_models[[k]], panel = list(label = k)))
+}))) %>%
+  knitr::kable(caption = paste("Effect of a +/-3 SD deviation (pp) without and with SPEI;",
+                               "*** p < 0.01, ** p < 0.05, * p < 0.1"))
+```
+
+# 20-year deviations with the baseline fixed during runs
+
+With a trailing baseline, a sequence of warm years raises the baseline as it
+goes, so each later warm year looks less anomalous than the first. The
+run-fixed deviation (as `add_climate_runs()` in functions/climate_runs.R, there
+for temperature) holds the trailing mean and SD at their value at the start of
+the run:
+
+- a warming run is a maximal sequence of at least two consecutive years with
+  strictly rising temperature; position 1 is the year before the first rise.
+  Cooling runs are the same with falling temperature, so a peak or trough ends
+  one run and starts the other;
+- within a run, the deviation uses the trailing 20-year mean and SD of its
+  position-1 year; outside runs (and at position 1), the moving ones;
+- the warm arm is cut from the warming-run deviation, the cold arm from the
+  cooling-run deviation.
+
+Precipitation is treated the same way, with wetting (rising) and drying
+(falling) runs. The run-fixed deviations are demeaned as the others (each
+unit's mean and quadratic trend removed) before their arms are cut. The model:
+20-year deviations, quadratic arms for temperature and linear arms for
+precipitation, interacted with the horizon mean, as in the selection table; the
+moving and run-fixed versions on the same rows.
+
+```{r run-fixed-baseline}
+RUN_FORM <- "T quadratic, P linear arms"
+RUN_DEFINITION <- "20-year"
+RUN_DIRECTIONS <- c(up = 1, down = -1)
+
+# Each unit's mean and linear and quadratic trend removed from x (as the
+# deviations of prepare_panel()), on the finite values.
+demean_unit_trend <- function(unit, year, x) {
+  ok <- which(is.finite(x))
+  sub <- data.frame(GID_1 = unit[ok], t = year[ok] - 1990L, x = x[ok])
+  sub$t2 <- sub$t^2
+  m <- fixest::feols(x ~ 1 | GID_1[t, t2], sub, notes = FALSE)
+  out <- rep(NA_real_, length(x))
+  out[ok[fixest::obs(m)]] <- stats::resid(m)
+  out
+}
+
+# Deviation of variable v from its trailing moments (`baseline`), with the
+# moments held at their position-1 values through each rising (direction 1)
+# or falling (-1) run of v; outside runs, the moving deviation. The run
+# identifiers are those of add_climate_runs() (.run_ids()).
+run_fixed_deviation <- function(data, v, direction, baseline = "lag_20") {
+  mean_col <- paste0("mean_", v, "_", baseline)
+  sd_col <- paste0("sd_", v, "_", baseline)
+  data %>%
+    group_by(GID_1) %>%
+    arrange(year, .by_group = TRUE) %>%
+    mutate(change = if_else(year == dplyr::lag(year) + 1L,
+                            .data[[v]] - dplyr::lag(.data[[v]]), NA_real_),
+           run_id = .run_ids(change, direction)) %>%
+    group_by(GID_1, run_id) %>%
+    mutate(in_run = !is.na(run_id) & n() >= 2L,
+           position = if_else(in_run, row_number(), 1L),
+           mean_fixed = if_else(in_run, first(.data[[mean_col]]), .data[[mean_col]]),
+           sd_fixed = if_else(in_run, first(.data[[sd_col]]), .data[[sd_col]]),
+           deviation = (.data[[v]] - mean_fixed) / sd_fixed) %>%
+    ungroup() %>%
+    select(GID_1, year, position, deviation)
+}
+
+# The panel's clean rows with the demeaned fixed-baseline deviations of each
+# variable and direction from `fixed_deviation` (dm_<v>_<tag><direction>) and
+# the positions in the runs or spells (position_<v>_<tag>_<direction>).
+add_run_fixed <- function(panel, fixed_deviation = run_fixed_deviation, tag = "run") {
+  data <- panel$data %>%
+    filter(year >= START_YEAR - MAX_LAGS, year <= panel$end_year, !is.na(TM), !is.na(RR))
+  out <- data %>% select(GID_1, year)
+  for (v in c("TM", "RR")) for (dir in names(RUN_DIRECTIONS)) {
+    x <- fixed_deviation(data, v, RUN_DIRECTIONS[[dir]])
+    x[[paste0("dm_", v, "_", tag, dir)]] <- demean_unit_trend(x$GID_1, x$year, x$deviation)
+    names(x)[names(x) == "position"] <- paste0("position_", v, "_", tag, "_", dir)
+    out <- left_join(out, select(x, -deviation), by = c("GID_1", "year"))
+  }
+  # A run that starts before the trailing moments exist has no fixed baseline;
+  # those rows are left out, for the moving baseline too.
+  fixed_columns <- paste0("dm_", rep(c("TM", "RR"), each = 2), "_", tag, names(RUN_DIRECTIONS))
+  panel$clean %>%
+    inner_join(out, by = c("GID_1", "year")) %>%
+    filter(if_all(all_of(fixed_columns), is.finite))
+}
+
+# The deviation terms of the 20-year definition, with the arms of `fixed`
+# variables cut from the fixed-baseline deviations (warm or wet arm from the
+# rising runs or warm spells, cold or dry arm from the falling runs or cold
+# spells).
+run_fixed_terms <- function(model_data, fixed = c("TM", "RR"), tag = "run") {
+  d <- add_deviation_terms(model_data, DEFINITIONS[[RUN_DEFINITION]])
+  for (v in fixed) {
+    up <- model_data[[paste0("dm_", v, "_", tag, "up")]]
+    down <- model_data[[paste0("dm_", v, "_", tag, "down")]]
+    d[[paste0("dev", v, "_pos")]] <- pmax(up, 0)
+    d[[paste0("dev", v, "_neg")]] <- pmax(-down, 0)
+    d[[paste0("dev", v, "_pos2")]] <- pmax(up, 0)^2
+    d[[paste0("dev", v, "_neg2")]] <- pmax(-down, 0)^2
+  }
+  d
+}
+# The variants: which variables have the fixed baseline ("<label>-fixed T and
+# P", "... T", "... P"), against the moving baseline.
+run_variants <- function(label) {
+  stats::setNames(list(character(0), c("TM", "RR"), "TM", "RR"),
+                  c("Moving baseline", paste0(label, "-fixed ", c("T and P", "T", "P"))))
+}
+
+# 1. How often and how much the fixed baseline changes the deviation, on the
+# rows `d` (names: the rising and falling sequences of each variable).
+fixed_change_table <- function(d, tag, names_TM, names_RR, what) {
+  moving <- add_deviation_terms(d, DEFINITIONS[[RUN_DEFINITION]])
+  bind_rows(lapply(c("TM", "RR"), function(v) {
+    sequence_names <- if (v == "TM") names_TM else names_RR
+    bind_rows(lapply(names(RUN_DIRECTIONS), function(dir) {
+      fixed <- d[[paste0("dm_", v, "_", tag, dir)]]
+      position <- d[[paste0("position_", v, "_", tag, "_", dir)]]
+      later <- position >= 2
+      arm <- if (dir == "up") pmax(fixed, 0) else pmax(-fixed, 0)
+      arm_moving <- moving[[paste0("dev", v, if (dir == "up") "_pos" else "_neg")]]
+      tibble::tibble(variable = v, sequence = sequence_names[[dir]],
+                     share_at_position_2_plus = mean(later),
+                     share_at_position_5_plus = mean(position >= 5),
+                     mean_change_at_2_plus = mean((fixed - moving[[paste0("dev", v)]])[later]),
+                     arm_above_2sd_moving = sum(arm_moving > 2), arm_above_2sd_fixed = sum(arm > 2),
+                     correlation = stats::cor(fixed, moving[[paste0("dev", v)]]))
+    }))
+  })) %>%
+    mutate(across(where(is.double), ~ round(.x, 3))) %>%
+    knitr::kable(caption = paste0(
+      main$label, ": country-years at ", what, " position 2 or later and 5 or later, mean ",
+      "change of the demeaned deviation from position 2 (fixed minus moving, SD), arm values ",
+      "above 2 SD, and the correlation of the two deviations"))
+}
+
+# 2. The model with moving and fixed baselines on the main panel (same rows):
+# fit and joint tests, effects, and coefficients (printed by the caller, so
+# that knitr renders the tables).
+fixed_model_tables <- function(d, tag, label) {
+  models <- lapply(run_variants(label), function(fixed) {
+    fit_model(form_terms(FORMS[[RUN_FORM]]), run_fixed_terms(d, fixed, tag))
+  })
+  stopifnot(length(unique(vapply(models, stats::nobs, 0))) == 1)
+  list(
+    fit = fit_summary(models) %>%
+      mutate(aic_vs_moving = round(aic - aic[1], 1), within_r2 = round(within_r2, 4),
+             across(ends_with("_p"), ~ signif(.x, 2))) %>%
+      select(-aic, -bic) %>%
+      knitr::kable(caption = paste0(main$label, ": ", RUN_FORM, ", ", RUN_DEFINITION,
+                                    " deviations, moving and ", tolower(label), "-fixed ",
+                                    "baselines; joint tests (p) and AIC relative to the moving ",
+                                    "baseline")),
+    effects = significance_map(bind_rows(lapply(names(models), function(k) {
+      climate_effects(list(preferred = models[[k]], panel = list(label = k)), RUN_FORM)
+    }))) %>%
+      knitr::kable(caption = paste0(main$label, ": effect of a +/-3 SD deviation (pp), moving ",
+                                    "and ", tolower(label), "-fixed baselines; *** p < 0.01, ",
+                                    "** p < 0.05, * p < 0.1")),
+    coefficients = etable(models, dict = DICT, drop = DROP, order = ORDER, fitstat = FITSTAT,
+                          title = paste0(main$label, ": ", RUN_FORM, " with moving and ",
+                                         tolower(label), "-fixed baselines"))
+  )
+}
+
+# 3. Moving against fixed (T and P) on every national panel.
+RUN_CELLS <- c("T +3 SD, 25 °C", "T -3 SD, 5 °C", "P -3 SD, 0.5 m", "P -3 SD, 1.5 m")
+fixed_panel_table <- function(panel_data, tag, label) {
+  variants <- run_variants(label)[1:2]
+  bind_rows(lapply(names(panel_data), function(p) {
+    bind_rows(lapply(names(variants), function(k) {
+      m <- fit_model(form_terms(FORMS[[RUN_FORM]]),
+                     run_fixed_terms(panel_data[[p]], variants[[k]], tag))
+      effects <- significance_map(climate_effects(list(preferred = m, panel = list(label = p)),
+                                                  RUN_FORM))
+      tibble::tibble(panel = p, baseline = k, aic = stats::AIC(m),
+                     temperature_p = wald_p(m, "^devTM"),
+                     precipitation_p = wald_p(m, "^devRR")) %>%
+        bind_cols(select(effects, all_of(RUN_CELLS)))
+    }))
+  })) %>%
+    group_by(panel) %>%
+    mutate(aic_vs_moving = round(aic - aic[1], 1)) %>%
+    ungroup() %>%
+    select(panel, baseline, aic_vs_moving, temperature_p, precipitation_p, all_of(RUN_CELLS)) %>%
+    mutate(across(ends_with("_p"), ~ signif(.x, 2))) %>%
+    knitr::kable(caption = paste0(
+      "Every national panel: ", RUN_FORM, ", ", RUN_DEFINITION, " deviations, moving against ",
+      tolower(label), "-fixed (T and P) baselines; joint tests (p), AIC relative to the moving ",
+      "baseline, and effects of a +/-3 SD deviation (pp); *** p < 0.01, ** p < 0.05, * p < 0.1"))
+}
+
+run_data <- lapply(national_panels, add_run_fixed)
+names(run_data) <- vapply(national_panels, `[[`, "", "label")
+fixed_change_table(run_data[[main$label]], "run", c(up = "warming run", down = "cooling run"),
+                   c(up = "wetting run", down = "drying run"), "run")
+run_tables <- fixed_model_tables(run_data[[main$label]], "run", "Run")
+run_tables$fit
+run_tables$effects
+run_tables$coefficients
+fixed_panel_table(run_data, "run", "Run")
+```
+
+## Fixed during spells above or below the baseline
+
+A spell is a sequence of years on the same side of the baseline, rather than of
+rising (falling) years: a warm spell starts in a year above its trailing
+20-year mean, and the baseline (mean and SD) is held at that year's value for
+as long as the following years stay above it; it ends with the first year at or
+below the held mean (or a gap), and the next year starts afresh from its own
+trailing moments. Membership is judged against the held baseline, so the rising
+trailing mean cannot end a spell by itself. Cold, wet and dry spells are the
+same, below or above. The first year of a spell has its moving deviation; the
+warm (wet) arm is cut from the warm-spell deviation and the cold (dry) arm from
+the cold-spell one, demeaned as before. Everything else as above.
+
+```{r spell-fixed-baseline}
+# Deviation of x from its trailing moments (mu, s), held at the first year of
+# each spell on the `direction` side (1 above, -1 below), and the position in
+# the spell (0 outside spells).
+fix_spells <- function(x, mu, s, year, direction) {
+  n <- length(x)
+  deviation <- rep(NA_real_, n)
+  position <- integer(n)
+  held_mean <- NA_real_
+  held_sd <- NA_real_
+  p <- 0L
+  for (i in seq_len(n)) {
+    continuing <- p > 0L && year[i] == year[i - 1L] + 1L && is.finite(x[i]) &&
+      direction * (x[i] - held_mean) > 0
+    if (continuing) {
+      p <- p + 1L
+    } else {
+      held_mean <- mu[i]
+      held_sd <- s[i]
+      p <- if (is.finite(x[i]) && is.finite(held_mean) && direction * (x[i] - held_mean) > 0) 1L else 0L
+    }
+    deviation[i] <- (x[i] - held_mean) / held_sd
+    position[i] <- p
+  }
+  list(deviation = deviation, position = position)
+}
+spell_fixed_deviation <- function(data, v, direction, baseline = "lag_20") {
+  data <- data[order(data$GID_1, data$year), ]
+  deviation <- rep(NA_real_, nrow(data))
+  position <- integer(nrow(data))
+  for (idx in split(seq_len(nrow(data)), data$GID_1)) {
+    r <- fix_spells(data[[v]][idx], data[[paste0("mean_", v, "_", baseline)]][idx],
+                    data[[paste0("sd_", v, "_", baseline)]][idx], data$year[idx], direction)
+    deviation[idx] <- r$deviation
+    position[idx] <- r$position
+  }
+  tibble::tibble(GID_1 = data$GID_1, year = data$year, position = position,
+                 deviation = deviation)
+}
+
+spell_data <- lapply(national_panels, add_run_fixed, fixed_deviation = spell_fixed_deviation,
+                     tag = "spell")
+names(spell_data) <- vapply(national_panels, `[[`, "", "label")
+fixed_change_table(spell_data[[main$label]], "spell", c(up = "warm spell", down = "cold spell"),
+                   c(up = "wet spell", down = "dry spell"), "spell")
+spell_tables <- fixed_model_tables(spell_data[[main$label]], "spell", "Spell")
+spell_tables$fit
+spell_tables$effects
+spell_tables$coefficients
+fixed_panel_table(spell_data, "spell", "Spell")
 ```
 
 # Preferred model and the BHM level terms
 
 The preferred model with the BHM level terms added, on every panel (the same
-fixed effects as the preferred model: unit linear trends):
+fixed effects as the preferred model: unit linear and quadratic trends):
 
 ```text
 growth = deviation terms (preferred model) + b1 TM + b2 TM^2 + b3 RR + b4 RR^2 + controls + FE
@@ -1483,4 +1777,415 @@ bind_rows(lapply(outlier_fits, tail_summary)) %>%
   knitr::kable(caption = paste("Dry and hot tails by outlier sample (pp of GDP per capita): in the",
                                "year, cumulative over five years (unrestricted lags) and ten years",
                                "(common interaction); *** p < 0.01, ** p < 0.05, * p < 0.1"))
+```
+
+# Warming scenario: one set of coefficients, three deviation definitions
+
+Three warming paths, with no natural variability and each country's SD
+unchanged:
+
+- gradual: a linear warming of 0.2 °C a decade until +1 °C (50 years), then
+  constant for 30 years;
+- step: +1 °C at once, then constant for 30 years;
+- pulse: +1 °C for one year, then back to the pre-warming climate (30 years
+  after).
+
+Precipitation is unchanged (dP = 0). The temperature coefficients are those of
+the preferred model (PWT x ERA5) in every case, so the three definitions differ
+only in how the warming becomes a deviation and in the long-run climate of the
+interaction:
+
+```text
+(a) horizon:                          dT_t = W_t / sd_all,          climate T0
+(b) 20-year, horizon interaction:     dT_t = (W_t - W20_t) / sd_20, climate T0
+(c) 20-year, matched interaction:     dT_t = (W_t - W20_t) / sd_20, climate T0 + W20_t
+```
+
+where W_t is the warming in year t, W20_t its mean over the 20 years before t
+(zero before the warming starts; after the pulse, the years back at T0 are
+below W20_t, so they enter the cold arm), T0 the pre-warming climate (the horizon
+mean), and sd_all and sd_20 the horizon and trailing 20-year SDs. The growth
+effect in year t is the preferred form's temperature terms at dT_t and the
+climate; the cumulative effect through year K is their sum over years 1..K (the
+effect on the level of GDP per capita, in log points x 100), with 95% CIs by the
+delta method (errors clustered by country).
+
+Typical cold, average and hot country: the terciles of the countries of
+PWT x ERA5 by long-run temperature; within each, the median long-run
+temperature, horizon SD, and trailing 20-year SD (each country's median over
+its years).
+
+The model was estimated on deviations with each unit's mean and quadratic trend
+removed, i.e. on year-to-year deviations around the unit's trend; applying it
+to a sustained shift extrapolates those responses.
+
+```{r warming-scenario, fig.width=13, fig.height=7}
+WARMING_TOTAL <- 1       # °C
+YEARS_AFTER <- 30L       # years after +1 °C is reached
+TRAILING <- 20L          # years of the trailing mean of the 20-year definition
+
+# Each path: the warming above the pre-warming climate in years 1, 2, ... and
+# the year +1 °C is reached.
+gradual_path <- function(rate_per_decade) {
+  reach <- as.integer(round(10 * WARMING_TOTAL / rate_per_decade))
+  list(warming = pmin(rate_per_decade / 10 * seq_len(reach + YEARS_AFTER), WARMING_TOTAL),
+       reach = reach)
+}
+WARMING_PATHS <- list(
+  "Gradual: 0.2 C a decade to +1 C, then constant" = gradual_path(0.2),
+  "Step: +1 C at once, then constant" = list(warming = rep(WARMING_TOTAL, 1L + YEARS_AFTER),
+                                             reach = 1L),
+  "Pulse: +1 C for one year" = list(warming = c(WARMING_TOTAL, rep(0, YEARS_AFTER)), reach = 1L)
+)
+# Mean of the warming over the TRAILING years before each year (zero before year 1).
+trailing_mean <- function(warming) {
+  padded <- c(rep(0, TRAILING), warming)
+  vapply(seq_along(warming), function(t) mean(padded[t:(t + TRAILING - 1)]), 0)
+}
+
+countries <- main$clean %>%
+  group_by(GID_1) %>%
+  summarise(T0 = first(mean_TM_all), sd_all = first(sd_TM_all),
+            sd_20 = stats::median(sd_TM_lag_20), .groups = "drop")
+countries$type <- cut(countries$T0, stats::quantile(countries$T0, c(0, 1 / 3, 2 / 3, 1)),
+                      labels = c("Cold", "Average", "Hot"), include.lowest = TRUE)
+typical <- countries %>%
+  group_by(type) %>%
+  summarise(countries = n(), T_range = sprintf("%.1f to %.1f", min(T0), max(T0)),
+            T0 = stats::median(T0), sd_all = stats::median(sd_all),
+            sd_20 = stats::median(sd_20), .groups = "drop") %>%
+  mutate(warming_sd_all = WARMING_TOTAL / sd_all, warming_sd_20 = WARMING_TOTAL / sd_20)
+
+typical %>%
+  mutate(across(where(is.double), ~ round(.x, 2))) %>%
+  knitr::kable(caption = paste("Typical countries (terciles of PWT x ERA5 by long-run temperature,",
+                               "medians): long-run temperature (C), SDs (C) and +1 C in SDs"))
+
+SCENARIOS <- c("(a) Horizon", "(b) 20-year, horizon interaction",
+               "(c) 20-year, matched interaction")
+# Deviation (SD) and long-run climate (C) of each year of `warming` under
+# definition `s`.
+scenario_path <- function(s, warming, T0, sd_all, sd_20) {
+  trailing <- trailing_mean(warming)
+  fixed <- rep(T0, length(warming))
+  switch(s,
+         "(a) Horizon" = list(deviation = warming / sd_all, climate = fixed),
+         "(b) 20-year, horizon interaction" = list(deviation = (warming - trailing) / sd_20,
+                                                   climate = fixed),
+         "(c) 20-year, matched interaction" = list(deviation = (warming - trailing) / sd_20,
+                                                   climate = T0 + trailing))
+}
+
+scenario_model <- selection_models[[PREFERRED_DEFINITION]][[PREFERRED_FORM]]
+scenario_terms <- names(stats::coef(scenario_model))
+# Growth effect of each year (rows) as weights on the coefficients.
+year_weights <- function(path) {
+  t(mapply(function(x, m) {
+    w <- stats::setNames(numeric(length(scenario_terms)), scenario_terms)
+    for (s in FORMS[[PREFERRED_FORM]][["TM"]]) {
+      term <- paste0("devTM", s)
+      w[[term]] <- term_value(s, x)
+      w[[interaction_name(term, "clim_TM", scenario_terms)]] <- term_value(s, x) * m
+    }
+    w
+  }, path$deviation, path$climate))
+}
+
+scenario_effects <- bind_rows(lapply(names(WARMING_PATHS), function(p) {
+  warming <- WARMING_PATHS[[p]]$warming
+  bind_rows(lapply(SCENARIOS, function(s) {
+    bind_rows(lapply(seq_len(nrow(typical)), function(i) {
+      # (Not called `path`: mutate() below creates a column of that name.)
+      dev_path <- scenario_path(s, warming, typical$T0[i], typical$sd_all[i], typical$sd_20[i])
+      W <- year_weights(dev_path)
+      colnames(W) <- scenario_terms
+      cumulative <- apply(W, 2, cumsum)
+      bind_rows(
+        mutate(linear_combination(scenario_model, W), quantity = "year"),
+        mutate(linear_combination(scenario_model, cumulative), quantity = "cumulative")
+      ) %>%
+        mutate(path = p, scenario = s, type = as.character(typical$type[i]),
+               year = rep(seq_along(warming), 2), deviation = rep(dev_path$deviation, 2),
+               climate = rep(dev_path$climate, 2),
+               p_value = 2 * stats::pnorm(-abs(estimate / std_error)))
+    }))
+  }))
+}))
+
+# Cumulative effect when +1 °C is reached and 10, 20 and 30 years after.
+REPORT_AFTER <- c(0L, 10L, 20L, YEARS_AFTER)
+scenario_effects %>%
+  filter(quantity == "cumulative") %>%
+  mutate(after = year - vapply(WARMING_PATHS[path], `[[`, 0L, "reach")) %>%
+  filter(after %in% REPORT_AFTER) %>%
+  mutate(cell = sprintf("%+.1f [%+.1f, %+.1f]%s", 100 * estimate, 100 * conf_low,
+                        100 * conf_high, stars(p_value)),
+         column = factor(ifelse(after == 0, "+1 C reached", sprintf("%d years after", after)),
+                         levels = c("+1 C reached", sprintf("%d years after", REPORT_AFTER[-1])))) %>%
+  select(path, scenario, type, column, cell) %>%
+  arrange(column) %>%
+  tidyr::pivot_wider(names_from = column, values_from = cell) %>%
+  knitr::kable(caption = paste0(
+    "Cumulative effect of the warming on GDP per capita (log points x 100, 95% CI), with the ",
+    "coefficients of the preferred model (", PREFERRED_FORM, ", ", PREFERRED_DEFINITION,
+    "); +1 C is reached in year ", WARMING_PATHS[[1]]$reach, " (gradual) or year 1 (step, ",
+    "pulse); *** p < 0.01, ** p < 0.05, * p < 0.1"))
+
+QUANTITY_LABELS <- c(deviation = "Deviation (SD)",
+                     cumulative = "Cumulative effect (log points x 100)")
+plot_scenario <- function(p) {
+  plot_data <- bind_rows(
+    scenario_effects %>%
+      filter(path == p, quantity == "year") %>%
+      transmute(scenario, type, year, quantity = "deviation", estimate = deviation,
+                conf_low = NA_real_, conf_high = NA_real_),
+    scenario_effects %>%
+      filter(path == p, quantity == "cumulative") %>%
+      transmute(scenario, type, year, quantity = "cumulative", estimate = 100 * estimate,
+                conf_low = 100 * conf_low, conf_high = 100 * conf_high)
+  ) %>%
+    mutate(quantity = factor(QUANTITY_LABELS[quantity], levels = QUANTITY_LABELS),
+           scenario = factor(scenario, levels = SCENARIOS),
+           type = sprintf("%s country (%.1f C; SD %.2f horizon, %.2f 20-year)", type,
+                          typical$T0[match(type, as.character(typical$type))],
+                          typical$sd_all[match(type, as.character(typical$type))],
+                          typical$sd_20[match(type, as.character(typical$type))])) %>%
+    mutate(type = factor(type, levels = unique(type)))
+
+  ggplot(plot_data, aes(year, estimate, colour = scenario, fill = scenario)) +
+    geom_hline(yintercept = 0, colour = GRID_MUTED, linewidth = 0.3) +
+    geom_vline(xintercept = WARMING_PATHS[[p]]$reach, colour = GRID_MUTED, linewidth = 0.3,
+               linetype = "dotted") +
+    geom_ribbon(aes(ymin = conf_low, ymax = conf_high), alpha = 0.15, colour = NA,
+                data = filter(plot_data, !is.na(conf_low))) +
+    geom_line(linewidth = 0.8) +
+    facet_grid(quantity ~ type, scales = "free_y", switch = "y") +
+    scale_colour_manual(values = grid_colours(SCENARIOS), name = NULL) +
+    scale_fill_manual(values = grid_colours(SCENARIOS), name = NULL) +
+    labs(x = "Year from the start of the warming", y = NULL,
+         title = paste0(p, ": one set of coefficients, three deviation definitions"),
+         subtitle = wrap_text(paste0(
+           "Coefficients of the preferred model (", PREFERRED_FORM, ", ", PREFERRED_DEFINITION,
+           " deviations, PWT x ERA5). No natural variability; SDs unchanged; precipitation ",
+           "unchanged. Top: the temperature deviation ((b) and (c) share it); bottom: the ",
+           "cumulative effect on GDP per capita. Dotted line: +1 C reached. Shaded: 95% CI ",
+           "(clustered by country)."), 175)) +
+    theme_results() +
+    theme(strip.placement = "outside")
+}
+for (p in names(WARMING_PATHS)) print(plot_scenario(p))
+```
+
+# Where shocks matter: robustness by country
+
+For every national panel (PWT and World Bank with ERA5, CRU TS and UDelaware),
+every deviation definition interacted with the horizon mean (horizon, 20-year
+and the two mixes) and every arms form (linear, quadratic and the two mixes),
+6 x 4 x 4 = 96 fits, each on its own rows: the effect on growth that year of a
+cold (dry) and a hot (wet) shock in each country, at its recent climate.
+
+- The shock is three times the SD of the country's last 10 years of the panel
+  (°C or m), converted to the deviation units of the fit: divided by the
+  country's horizon SD, or by its trailing 20-year SD of the last year. The
+  same physical shock in every fit.
+- The long-run climate of the interaction is the country's mean of the same 10
+  years.
+- Each panel uses its own climate data for both.
+
+The maps show the effect of the shock in the preferred model (PWT x ERA5), and
+its robustness across the 96 fits by pattern, against the sign of the
+preferred estimate:
+
+- plain fill: the estimate has that sign (significant or not) in more than 80%
+  of the fits; with a thick border if it is also significant at 5% with that
+  sign in more than 80% of them;
+- dots: otherwise, the estimate has that sign in more than 50% of the fits;
+- stripes: neither.
+
+Countries outside the PWT x ERA5 sample are grey. The table lists the countries
+with a thick border, ranked by recent mean climate.
+
+```{r robust-shocks, fig.width=14, fig.height=8.5}
+RECENT_YEARS <- 10L
+SHOCK_SD <- 3
+PLAIN_SIGN <- 0.8        # plain fill: share of fits with the preferred sign
+DOTS_SIGN <- 0.5         # dots: share of fits with the preferred sign
+BORDER_SIGNIFICANT <- 0.8 # thick border: share of fits significant with the preferred sign
+PATTERN_SPACING <- 250e3 # metres between dots and between stripes (Robinson projection)
+ROBINSON <- "+proj=robin"
+SHOCK_DEFINITIONS <- names(DEFINITIONS)[!grepl("matched", names(DEFINITIONS))]
+
+# Each country's climate over the last RECENT_YEARS years of the panel (mean
+# and SD of each variable), and the SDs of the two deviation baselines (horizon,
+# and the trailing 20 years of the last year).
+recent_climate <- function(panel) {
+  panel$data %>%
+    filter(GID_0 %in% panel$clean$GID_0, year > panel$end_year - RECENT_YEARS,
+           year <= panel$end_year, !is.na(TM), !is.na(RR)) %>%
+    group_by(GID_0) %>%
+    filter(n() == RECENT_YEARS) %>%
+    summarise(mean_TM = mean(TM), sd_TM = sd(TM), mean_RR = mean(RR), sd_RR = sd(RR),
+              sd_TM_all = first(sd_TM_all), sd_RR_all = first(sd_RR_all),
+              sd_TM_lag_20 = sd_TM_lag_20[which.max(year)],
+              sd_RR_lag_20 = sd_RR_lag_20[which.max(year)], .groups = "drop") %>%
+    filter(sd_TM_lag_20 > 0, sd_RR_lag_20 > 0)
+}
+
+# Effect of a shock of -/+ SHOCK_SD recent SDs in each country of `rc`, in a
+# model of `form` with deviations of definition `def`.
+shock_effects <- function(model, form, def, rc) {
+  terms <- names(stats::coef(model))
+  bind_rows(lapply(c("TM", "RR"), function(v) {
+    grid <- expand.grid(i = seq_len(nrow(rc)), sign = c(-1, 1))
+    sd_fit <- rc[[paste0("sd_", v, "_", DEFINITIONS[[def]][[v]])]][grid$i]
+    x <- grid$sign * SHOCK_SD * rc[[paste0("sd_", v)]][grid$i] / sd_fit
+    m <- rc[[paste0("mean_", v)]][grid$i]
+    G <- matrix(0, nrow(grid), length(terms), dimnames = list(NULL, terms))
+    for (s in FORMS[[form]][[v]]) {
+      term <- paste0("dev", v, s)
+      G[, term] <- term_value(s, x)
+      G[, interaction_name(term, paste0("clim_", v), terms)] <- term_value(s, x) * m
+    }
+    linear_combination(model, G) %>%
+      mutate(GID_0 = rc$GID_0[grid$i], variable = v,
+             shock = ifelse(grid$sign < 0, "negative", "positive"),
+             p_value = 2 * stats::pnorm(-abs(estimate / std_error)))
+  }))
+}
+
+recent <- lapply(national_panels, recent_climate)
+shock_fits <- bind_rows(lapply(seq_along(national_panels), function(j) {
+  p <- national_panels[[j]]
+  bind_rows(lapply(SHOCK_DEFINITIONS, function(def) {
+    d <- add_deviation_terms(p$clean, DEFINITIONS[[def]])
+    bind_rows(lapply(ARMS, function(f) {
+      shock_effects(fit_model(form_terms(FORMS[[f]]), d), f, def, recent[[j]]) %>%
+        mutate(panel = p$label, definition = def, form = f)
+    }))
+  }))
+}))
+
+SHOCK_FACETS <- tibble::tibble(
+  variable = c("TM", "TM", "RR", "RR"), shock = c("negative", "positive", "negative", "positive"),
+  facet = c("Temperature: cold shock (-3 recent SD)", "Temperature: hot shock (+3 recent SD)",
+            "Precipitation: dry shock (-3 recent SD)", "Precipitation: wet shock (+3 recent SD)")
+)
+# Recent climate of each country, averaged over the panels that have it.
+recent_mean <- bind_rows(recent) %>%
+  group_by(GID_0) %>%
+  summarise(across(c(mean_TM, sd_TM, mean_RR, sd_RR), mean), .groups = "drop")
+# The shock in the preferred model (PWT x ERA5, at its recent climate), and the
+# agreement of the 96 fits with the sign of that estimate.
+preferred_shock <- shock_effects(selection_models[[PREFERRED_DEFINITION]][[PREFERRED_FORM]],
+                                 PREFERRED_FORM, PREFERRED_DEFINITION, recent[[1]]) %>%
+  select(GID_0, variable, shock, preferred = estimate, preferred_p = p_value)
+shock_summary <- shock_fits %>%
+  inner_join(preferred_shock, by = c("GID_0", "variable", "shock")) %>%
+  group_by(GID_0, variable, shock, preferred, preferred_p) %>%
+  summarise(fits = n(),
+            robust = mean(p_value < 0.05 & sign(estimate) == sign(preferred)),
+            same_sign = mean(sign(estimate) == sign(preferred)), .groups = "drop") %>%
+  mutate(pattern = case_when(same_sign > PLAIN_SIGN ~ "fill", same_sign > DOTS_SIGN ~ "dots",
+                             TRUE ~ "stripes"),
+         border = pattern == "fill" & robust > BORDER_SIGNIFICANT) %>%
+  inner_join(SHOCK_FACETS, by = c("variable", "shock")) %>%
+  left_join(recent_mean, by = "GID_0")
+
+world <- rnaturalearth::ne_countries(scale = "small", returnclass = "sf") %>%
+  mutate(GID_0 = ifelse(iso_a3 == "-99", adm0_a3, iso_a3)) %>%
+  filter(GID_0 != "ATA") %>%
+  select(GID_0, geometry) %>%
+  sf::st_transform(ROBINSON) %>%
+  sf::st_make_valid()
+# (rbind, not bind_rows(): it keeps the sf class.)
+shock_map <- do.call(rbind, lapply(SHOCK_FACETS$facet, function(f) {
+  world %>%
+    left_join(filter(shock_summary, facet == f) %>% select(GID_0, preferred, pattern, border),
+              by = "GID_0") %>%
+    mutate(facet = factor(f, levels = SHOCK_FACETS$facet))
+}))
+
+# Patterns as ordinary geometries, built once (fast to draw, unlike pattern
+# fills): a regular grid of dots kept inside the dotted countries, and diagonal
+# lines clipped to the striped ones.
+box <- sf::st_bbox(world)
+height <- box[["ymax"]] - box[["ymin"]]
+dot_grid <- sf::st_sf(geometry = sf::st_make_grid(world, cellsize = PATTERN_SPACING,
+                                                  what = "centers"))
+stripe_lines <- sf::st_sfc(lapply(
+  seq(box[["xmin"]] - height, box[["xmax"]], by = PATTERN_SPACING * sqrt(2)),
+  function(x0) sf::st_linestring(rbind(c(x0, box[["ymin"]]), c(x0 + height, box[["ymax"]])))
+), crs = sf::st_crs(world))
+pattern_layer <- function(kind) {
+  layers <- lapply(SHOCK_FACETS$facet, function(f) {
+    polygons <- shock_map[shock_map$facet == f & shock_map$pattern %in% kind, ]
+    if (!nrow(polygons)) return(NULL)
+    geometry <- if (kind == "dots") {
+      sf::st_geometry(dot_grid)[lengths(sf::st_intersects(dot_grid, polygons)) > 0]
+    } else {
+      sf::st_collection_extract(sf::st_intersection(stripe_lines, sf::st_union(polygons)),
+                                "LINESTRING")
+    }
+    if (!length(geometry)) return(NULL)
+    sf::st_sf(facet = factor(f, levels = SHOCK_FACETS$facet), geometry = geometry)
+  })
+  do.call(rbind, Filter(Negate(is.null), layers))
+}
+dots <- pattern_layer("dots")
+stripes <- pattern_layer("stripes")
+
+fill_limit <- stats::quantile(abs(100 * shock_summary$preferred), 0.98, names = FALSE)
+ggplot() +
+  geom_sf(data = shock_map, aes(fill = 100 * preferred), colour = "white", linewidth = 0.1) +
+  (if (!is.null(stripes)) geom_sf(data = stripes, colour = "grey20", linewidth = 0.2)) +
+  (if (!is.null(dots)) geom_sf(data = dots, colour = "grey15", size = 0.35, shape = 16)) +
+  geom_sf(data = shock_map[shock_map$border %in% TRUE, ], fill = NA, colour = "grey10",
+          linewidth = 0.5) +
+  facet_wrap(~facet, nrow = 2) +
+  coord_sf(crs = ROBINSON, expand = FALSE, datum = NA) +
+  scale_fill_gradient2(low = "#c0392b", mid = "#f2f1ec", high = GRID_PALETTE[[1]], midpoint = 0,
+                       limits = c(-fill_limit, fill_limit), oob = scales::squish,
+                       na.value = "grey85",
+                       name = "Effect on growth that year,\npreferred model (pp)") +
+  labs(title = "Effect of a shock in the preferred model, and its robustness across specifications and datasets",
+       subtitle = wrap_text(paste0(
+         "Effect that year of a shock of ", SHOCK_SD, " SDs of the country's last ", RECENT_YEARS,
+         " years, at the mean climate of those years: ", PREFERRED_FORM, ", ",
+         PREFERRED_DEFINITION, " deviations, PWT x ERA5 (colour scale capped at the 98th ",
+         "percentile). Robustness across the fits (up to ",
+         length(national_panels) * length(SHOCK_DEFINITIONS) * length(ARMS), ": ",
+         length(national_panels), " national panels x ", length(SHOCK_DEFINITIONS),
+         " deviation definitions x ", length(ARMS), " arms forms), against the sign of the ",
+         "preferred estimate: plain, that sign in more than ", 100 * PLAIN_SIGN, "% of them ",
+         "(thick border: also significant at 5% in more than ", 100 * BORDER_SIGNIFICANT,
+         "%); dots, that sign in more than ", 100 * DOTS_SIGN, "%; stripes, neither. Grey: ",
+         "outside the PWT x ERA5 sample."), 170)) +
+  theme_results() +
+  theme(axis.text = element_blank(), legend.key.width = grid::unit(2.5, "cm"))
+
+# Countries with a thick border, ranked by recent mean climate.
+shock_summary %>%
+  filter(border) %>%
+  mutate(country = countrycode::countrycode(GID_0, "iso3c", "country.name", warn = FALSE),
+         recent_mean = ifelse(variable == "TM", mean_TM, mean_RR),
+         recent_sd = ifelse(variable == "TM", sd_TM, sd_RR),
+         facet = factor(facet, levels = SHOCK_FACETS$facet)) %>%
+  arrange(facet, recent_mean) %>%
+  transmute(shock = facet, country, preferred_pp = round(100 * preferred, 2),
+            preferred_p = signif(preferred_p, 2), robust_share = round(robust, 2), fits,
+            recent_mean = round(recent_mean, 2), recent_sd = round(recent_sd, 2)) %>%
+  knitr::kable(caption = paste0(
+    "Countries where the shock is significant (5%) with the sign of the preferred estimate in ",
+    "more than ", 100 * BORDER_SIGNIFICANT, "% of their fits (thick border), by shock, ranked ",
+    "by the mean climate of ",
+    "the last ", RECENT_YEARS, " years (°C or m a year, averaged over the panels; SD of the ",
+    "same years)"))
+
+# Countries by pattern.
+shock_summary %>%
+  mutate(pattern = factor(ifelse(border, "fill, thick border", pattern),
+                          levels = c("fill, thick border", "fill", "dots", "stripes"))) %>%
+  count(facet = factor(facet, levels = SHOCK_FACETS$facet), pattern, .drop = FALSE) %>%
+  tidyr::pivot_wider(names_from = pattern, values_from = n, values_fill = 0) %>%
+  knitr::kable(caption = "Countries of the PWT x ERA5 sample by robustness pattern")
 ```
