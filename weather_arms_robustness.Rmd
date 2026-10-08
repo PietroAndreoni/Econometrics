@@ -99,14 +99,14 @@ CONTROLS <- c(
   "i(yug_collapse_year, ref = 'none')"
 )
 
-# Growth outliers: the country-years of data/growth_outlier_causes.csv, the 2.5%
-# lowest and the 2.5% highest growth rates of GDP per capita of PWT x ERA5 from
+# Growth outliers: the country-years of data/growth_outlier_causes.csv, the 5%
+# lowest and the 5% highest growth rates of GDP per capita of PWT x ERA5 from
 # 1960 (growth_outliers.R), each with its likely cause. Dropped: those whose
-# cause does not involve weather; the droughts, storms, floods and harvests
-# among them are the response studied and stay. They are events of a country
-# and year, so they are dropped from every panel (in DOSE, from every region of
-# the country).
-OUTLIER_SHARE <- 0.05
+# cause does not involve weather (including those with no identified cause); the
+# droughts, storms, floods and harvests among them are the response studied and
+# stay. They are events of a country and year, so they are dropped from every
+# panel (in DOSE, from every region of the country).
+OUTLIER_SHARE <- 0.10
 OUTLIER_CAUSES <- utils::read.csv(data_file("growth_outlier_causes.csv"),
                                   stringsAsFactors = FALSE)
 OUTLIERS_ALL <- OUTLIER_CAUSES[, c("GID_0", "year")]

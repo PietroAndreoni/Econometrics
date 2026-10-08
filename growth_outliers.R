@@ -4,8 +4,8 @@
 # years from 1960 with growth of GDP per capita and both weather variables (the
 # sample of weather_arms_robustness.Rmd before any outlier is dropped).
 #
-# Outliers: the country-years whose growth of GDP per capita is below the 2.5th
-# or above the 97.5th percentile of all the country-years of the panel (5% in
+# Outliers: the country-years whose growth of GDP per capita is below the 5th or
+# above the 95th percentile of all the country-years of the panel (10% in
 # total).
 #
 # Each outlier is matched with the UCDP/PRIO armed conflicts located in the
@@ -27,7 +27,7 @@
 source("load_functions.R")
 
 START_YEAR <- 1960L
-SHARE <- 0.05
+SHARE <- 0.10
 OUTPUT_DIR <- file.path("results", "growth_outliers")
 CONTROLS <- c("conflict_low", "conflict_high", "i(fsu_collapse_year, ref = 'none')",
               "i(yug_collapse_year, ref = 'none')")
