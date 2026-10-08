@@ -215,7 +215,17 @@ panel_summary <- function(p) {
   )
 }
 
-main <- prepare_panel("PWT", "ERA5")
+# Every panel: the national ones (PWT and World Bank with ERA5, CRU TS and
+# UDelaware; PWT x ERA5 is the main one) and DOSE x ERA5.
+NATIONAL <- expand.grid(source = c("ERA5", "CRU TS", "UDelaware"), econ = c("PWT", "WB"),
+                        stringsAsFactors = FALSE)
+national_panels <- lapply(seq_len(nrow(NATIONAL)), function(i) {
+  prepare_panel(NATIONAL$econ[i], NATIONAL$source[i])
+})
+main <- national_panels[[1]]
+stopifnot(main$label == "PWT x ERA5")
+dose <- prepare_panel("DOSE", "ERA5", econ_variable = params$dose_variable)
+all_panels <- c(national_panels, list(dose))
 
 # The outlier country-years are the growth tails of this sample.
 cutoffs <- stats::quantile(main$all[[OUTCOME]], c(OUTLIER_SHARE / 2, 1 - OUTLIER_SHARE / 2),
@@ -784,12 +794,6 @@ plot_effects <- function(effects, title) {
 ```
 
 ```{r robustness-national}
-NATIONAL <- expand.grid(source = c("ERA5", "CRU TS", "UDelaware"), econ = c("PWT", "WB"),
-                        stringsAsFactors = FALSE)
-national_panels <- lapply(seq_len(nrow(NATIONAL)), function(i) {
-  if (NATIONAL$econ[i] == "PWT" && NATIONAL$source[i] == "ERA5") return(main)
-  prepare_panel(NATIONAL$econ[i], NATIONAL$source[i])
-})
 national_fits <- lapply(national_panels, fit_robustness)
 national_effects <- bind_rows(lapply(national_fits, climate_effects))
 
@@ -1730,7 +1734,6 @@ outlier_fit <- function(panel, sample) {
        data = d, preferred = fit_model(preferred_terms, d),
        source_panel = panel$label, sample = sample)
 }
-all_panels <- c(national_panels, list(dose))
 outlier_fits <- unlist(lapply(all_panels, function(p) {
   lapply(names(OUTLIER_SAMPLES), function(s) outlier_fit(p, s))
 }), recursive = FALSE)
