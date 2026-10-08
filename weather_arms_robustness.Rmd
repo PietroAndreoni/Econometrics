@@ -36,13 +36,16 @@ lower growth, a single slope cancels them out.
    rejected; (b) which arms are significant where; (c) the effect of a +/-3 SD
    deviation in cold (dry), medium and hot (wet) climates.
 4. The same model on subnational data (DOSE).
-5. The same model in levels: log output per worker, with and without capital
-   (PWT x ERA5).
+5. The same model with a drought index (SPEI) added to the temperature and
+   precipitation deviations (PWT x CRU TS, the climate data SPEI is built on).
 
 Sample: `r params$start_year` to the last year of each panel. Climate:
 population-density weights at base year 2000. Every model has year and unit
-fixed effects and unit linear trends (BHM: quadratic trends), with errors
-clustered by country.
+fixed effects and unit linear and quadratic trends (as in BHM), with errors
+clustered by country. The deviations are demeaned before their arms are cut:
+each unit's mean and quadratic trend are removed, so that warm and cold years
+are spread over the whole period rather than split by date by the warming
+(section "Deviations demeaned before the arms").
 
 # Setup
 
@@ -72,9 +75,16 @@ CLIMATE_WEIGHT <- "population density"
 CLIMATE_WEIGHT_YEAR <- 2000L
 
 OUTCOME <- "dlgrp_pc_usd"
-FIXED_EFFECTS <- "year + GID_1 + GID_1[year]"
-# BHM (2015): unit fixed effects and unit quadratic trends.
-BHM_FIXED_EFFECTS <- "year + GID_1[t, t2]"
+# Year effects, unit effects and unit linear and quadratic trends (t = year -
+# 1990, t2 = t^2), as in BHM (2015), in every model.
+FIXED_EFFECTS <- "year + GID_1[t, t2]"
+BHM_FIXED_EFFECTS <- FIXED_EFFECTS
+
+# Lags of the deviations (sections on lags); the panels keep MAX_LAGS earlier
+# climate years and the demeaning covers them.
+N_LAGS <- 5L
+N_LAGS_LONG <- 10L
+MAX_LAGS <- N_LAGS_LONG
 
 # The UCDP/PRIO conflict indicators by the highest intensity of the country's
 # conflicts that year (functions/conflict.R): conflict_low, minor (25-999
@@ -108,6 +118,9 @@ MOMENTS <- c(
   "mean_TM_all", "sd_TM_all", "mean_RR_all", "sd_RR_all",
   "mean_TM_lag_20", "sd_TM_lag_20", "mean_RR_lag_20", "sd_RR_lag_20"
 )
+# The demeaned deviations of each variable and baseline (built by prepare_panel()).
+BASELINES <- c("all", "lag_20")
+DEMEANED <- as.vector(outer(c("TM", "RR"), BASELINES, function(v, b) paste0("dm_", v, "_", b)))
 
 fit_model <- function(terms, model_data, fixed_effects = FIXED_EFFECTS, outcome = OUTCOME) {
   fit_panel_model(
@@ -152,6 +165,19 @@ unit-years with growth, both weather variables, the conflict indicators and the
 moments of both deviation definitions (positive SDs), without the growth
 outliers whose cause does not involve weather (see the shared specification).
 
+Each deviation, from either baseline (the horizon or the trailing 20 years), is
+also demeaned here: each unit's mean and its linear and quadratic trend in the
+year are removed, fitted on the years from `r params$start_year` minus ten (to
+cover the lags) to the last year of the panel, with no year effects:
+
+```text
+dT     = (TM - mean_TM_<baseline>) / sd_TM_<baseline>
+dm_TM  = dT - (unit mean + unit linear and quadratic trend)         (the same for RR)
+```
+
+The arms of every model are cut from the demeaned deviations (see the next
+section for why), in the units of the original deviation.
+
 ```{r panel-builder}
 # Panel `econ` x `source` from START_YEAR, with the horizon moments, the
 # controls, the sample with and without the country-years `drop`, the rows
@@ -189,8 +215,20 @@ prepare_panel <- function(econ, source, econ_variable = NULL, drop = OUTLIERS_DR
   data$t <- data$year - 1990L
   data$t2 <- data$t^2
 
+  # Demeaned deviations: each unit's mean and quadratic trend removed.
+  window <- data$year >= START_YEAR - MAX_LAGS & data$year <= end_year
+  for (v in c("TM", "RR")) for (b in BASELINES) {
+    raw <- (data[[v]] - data[[paste0("mean_", v, "_", b)]]) / data[[paste0("sd_", v, "_", b)]]
+    ok <- which(window & is.finite(raw))
+    sub <- data.frame(GID_1 = data$GID_1[ok], t = data$t[ok], t2 = data$t2[ok], x = raw[ok])
+    m <- fixest::feols(x ~ 1 | GID_1[t, t2], sub, notes = FALSE)
+    demeaned <- rep(NA_real_, nrow(data))
+    demeaned[ok[fixest::obs(m)]] <- stats::resid(m)
+    data[[paste0("dm_", v, "_", b)]] <- demeaned
+  }
+
   complete <- stats::complete.cases(
-    as.data.frame(data)[, c(OUTCOME, "TM", "RR", CONFLICT_TERMS, MOMENTS)]
+    as.data.frame(data)[, c(OUTCOME, "TM", "RR", CONFLICT_TERMS, MOMENTS, DEMEANED)]
   )
   positive_sd <- Reduce(`&`, lapply(grep("^sd_", MOMENTS, value = TRUE), function(x) {
     !is.na(data[[x]]) & data[[x]] > 0
@@ -713,17 +751,25 @@ horizon:  dT = (TM - mean_TM_all) / sd_TM_all            (start year .. last yea
 20-year:  dT = (TM - mean_TM_lag_20) / sd_TM_lag_20      (the 20 years before)
 ```
 
-(the same for precipitation, dP), in four combinations, and three forms of each
-variable's deviation, each interacted with its long-run climate (the horizon
-mean):
+each demeaned (the unit's mean and quadratic trend removed, see "Panels"), in
+four combinations (the same for precipitation, dP), and three forms of each
+variable's deviation, each interacted with its long-run climate `clim_TM`:
 
 ```text
 dT+ = max(dT, 0)    dT- = max(-dT, 0)
 
-signed          a dT  + b dT x mean_TM_all
-linear arms     a+ dT+ + a- dT- + (b+ dT+ + b- dT-) x mean_TM_all
-quadratic arms  a+ (dT+)^2 + a- (dT-)^2 + (b+ (dT+)^2 + b- (dT-)^2) x mean_TM_all
+signed          a dT  + b dT x clim_TM
+linear arms     a+ dT+ + a- dT- + (b+ dT+ + b- dT-) x clim_TM
+quadratic arms  a+ (dT+)^2 + a- (dT-)^2 + (b+ (dT+)^2 + b- (dT-)^2) x clim_TM
 ```
+
+The long-run climate is the horizon mean (`clim_TM = mean_TM_all`) or, with a
+matched interaction, the mean of the deviation's own baseline: for a 20-year
+deviation the mean of the 20 years before (`clim_TM = mean_TM_lag_20`, which
+moves with the year), for a horizon deviation the horizon mean. With horizon
+deviations of both variables the two coincide, so there are seven definitions:
+the four combinations with the horizon mean, and the three that contain a
+20-year deviation with the matched interaction.
 
 (and the same in dP), with the same form for both variables, or linear arms for
 one and quadratic arms for the other:
@@ -962,7 +1008,7 @@ panel_caption <- function(panel) {
          min(panel$clean$year), "-", max(panel$clean$year), "; controls: conflict ",
          "(minor, war), post-Soviet and post-Yugoslav collapse dummies; ",
          nrow(panel$outliers), " growth outliers not involving weather dropped. ",
-         "Fixed effects year + unit + unit linear trends; ",
+         "Demeaned deviations; fixed effects year + unit + unit linear and quadratic trends; ",
          "errors clustered by country.")
 }
 ```
@@ -1120,13 +1166,13 @@ The same model on DOSE v2.14 regional GDP per capita (GADM1) with ERA5 climate
 (population-density weights at base year 2000, aggregated to the regions):
 GDP per capita at constant 2015 local prices converted at the fixed 2015
 exchange rate (`lcu2015_usd`; its growth is constant-local-price growth, free
-of exchange-rate movements). Region fixed effects and region linear trends;
+of exchange-rate movements). Region fixed effects and region linear and
+quadratic trends (and the deviations demeaned by region);
 the conflict and collapse controls are national; the dropped outliers are the
 national country-years of the shared specification, dropped in every region of
 the country; errors are clustered by country.
 
 ```{r subnational}
-dose <- prepare_panel("DOSE", "ERA5", econ_variable = params$dose_variable)
 dose_fit <- fit_robustness(dose)
 dose_effects <- climate_effects(dose_fit)
 
@@ -1730,59 +1776,18 @@ Two versions:
 
   ```text
   sum over k of [ a+_k dT+(t-k) + a-_k dT-(t-k) ]
-    + b+ (sum over k of dT+(t-k)) x mean_TM_all + b- (sum over k of dT-(t-k)) x mean_TM_all
+    + b+ (sum over k of dT+(t-k)) x clim_TM + b- (sum over k of dT-(t-k)) x clim_TM
   ```
 
   (and the same for precipitation), so the effect of lag k at long-run climate
   m is `a_k + b m`: the climate shifts the response equally in every year.
+
+  In both, the long-run climate is that of the current year t (with a matched
+  20-year interaction, the mean of the 20 years before t, for every lag).
   The test of the restriction is the joint (chi-square) Wald test, in the
   unrestricted model, that each arm's interaction is the same at every lag.
 
 ```{r deviation-lags}
-N_LAGS <- 5L
-lag_suffix <- function(k) if (k == 0) "" else paste0("_l", k)
-
-# Columns of the deviation terms of variable v in the preferred form.
-form_columns <- function(v) paste0("dev", v, FORMS[[PREFERRED_FORM]][[v]])
-
-# Unrestricted: the deviation terms of variable v at lag k, with their
-# interactions.
-lag_terms <- function(v, k) {
-  x <- paste0(form_columns(v), lag_suffix(k))
-  c(x, paste0(x, ":mean_", v, "_all"))
-}
-# Common interaction: the terms of variable v at lags 1..n_lags (lag 0 is in
-# the preferred model, without its interaction), and each arm's sum over lags
-# 0..n_lags interacted with the long-run climate.
-restricted_terms <- function(v, n_lags = N_LAGS) {
-  cols <- form_columns(v)
-  c(cols, unlist(lapply(seq_len(n_lags), function(k) paste0(cols, lag_suffix(k)))),
-    paste0(cols, "_sum:mean_", v, "_all"))
-}
-
-# The sample of a fit with the deviations of the previous n_lags calendar years,
-# on the unit-years with all of them, and each arm's sum over lags 0..n_lags.
-add_deviation_lags <- function(fit, n_lags = N_LAGS) {
-  full <- add_deviation_terms(fit$panel$data, PREFERRED_SUFFIX)
-  cols <- c(form_columns("TM"), form_columns("RR"))
-  out <- fit$data
-  for (k in seq_len(n_lags)) {
-    lagged <- as.data.frame(full)[, c("GID_1", "year", cols)]
-    lagged$year <- lagged$year + k
-    names(lagged)[-(1:2)] <- paste0(cols, lag_suffix(k))
-    out <- left_join(out, lagged, by = c("GID_1", "year"))
-  }
-  lag_cols <- unlist(lapply(seq_len(n_lags), function(k) paste0(cols, lag_suffix(k))))
-  # Finite, not only present: a zero trailing SD gives an infinite deviation.
-  out <- out[Reduce(`&`, lapply(lag_cols, function(x) is.finite(out[[x]]))), ]
-  for (col in cols) {
-    out[[paste0(col, "_sum")]] <- Reduce(`+`, lapply(0:n_lags, function(k) {
-      out[[paste0(col, lag_suffix(k))]]
-    }))
-  }
-  out
-}
-
 # Chi-square Wald test of H b = 0 (clustered VCOV of the model).
 wald_linear_p <- function(model, H) {
   b <- stats::coef(model)[colnames(H)]
@@ -1797,7 +1802,7 @@ equal_interactions_p <- function(model, vars) {
   terms <- names(stats::coef(model))
   rows <- list()
   for (v in vars) for (col in form_columns(v)) {
-    climate <- paste0("mean_", v, "_all")
+    climate <- paste0("clim_", v)
     base <- interaction_name(col, climate, terms)
     for (k in seq_len(N_LAGS)) {
       h <- stats::setNames(numeric(length(terms)), terms)
@@ -1922,7 +1927,6 @@ The confidence intervals of the cumulative effects use the full clustered
 covariance of all the lag coefficients.
 
 ```{r ten-lags}
-N_LAGS_LONG <- 10L
 common_long_lags <- function(fit) {
   d <- add_deviation_lags(fit, N_LAGS_LONG)
   m0 <- fit_model(preferred_terms, d)
