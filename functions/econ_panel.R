@@ -11,8 +11,13 @@
 #   WB              GADM0  NY.GDP.PCAP.KD           constant 2015 local prices,
 #                                                   converted at the 2015 official
 #                                                   exchange rate (2015 US$)
+#   WB_PPP          GADM0  NY.GDP.PCAP.PP.KD        PPP, constant 2021 int. $
+#                                                   (from 1990; October 2026
+#                                                   vintage, wdi_download.R)
 #
-# All four growth rates are real (volume) growth and comparable.
+# All five growth rates are real (volume) growth and comparable. WB_PPP is the
+# 2021 PPP level carried over the years by the growth at constant local prices,
+# so its growth is that of NY.GDP.PCAP.KD of the same vintage.
 #
 # Levels: DOSE and WB are in exchange-rate dollars (2015 US$ at 2015 exchange
 # rates) and comparable with each other; KUMMU and PWT are in PPP dollars
@@ -37,19 +42,22 @@ ECON_RAW_FILES <- c(
   DOSE_V2_14 = "DOSE_V2.14.csv",
   KUMMU2025_GRID = "kummu2025",        # Raw inputs; see kummu_grid.R.
   PWT110 = "pwt110.xlsx",
-  WB = "wb_gdp_data.csv"
+  WB = "wb_gdp_data.csv",
+  WB_PPP = "wb_ppp_sector_data.csv"
 )
 
 # World Bank WDI "Data Bank" csv export with GDP per capita (NY.GDP.PCAP.KD)
 # and population (SP.POP.TOTL): one row per country and series, one column per
 # year, ".." for missing. Aggregates (WLD, EUU, ...) are kept; they simply never
-# match a GADM country.
-read_wdi_csv <- function(path) {
+# match a GADM country. `series` names the columns returned for the series read
+# (wdi_download.R writes other series in the same layout).
+read_wdi_csv <- function(path, series = c(gdp_pc = "NY.GDP.PCAP.KD",
+                                          population = "SP.POP.TOTL")) {
   raw <- utils::read.csv(path, check.names = FALSE, stringsAsFactors = FALSE)
   year_cols <- grep("^[0-9]{4}", names(raw), value = TRUE)
 
   raw %>%
-    filter(`Series Code` %in% c("NY.GDP.PCAP.KD", "SP.POP.TOTL")) %>%
+    filter(`Series Code` %in% series) %>%
     mutate(across(all_of(year_cols), as.character)) %>%
     tidyr::pivot_longer(
       all_of(year_cols),
@@ -64,13 +72,55 @@ read_wdi_csv <- function(path) {
       value = suppressWarnings(as.numeric(if_else(value == "..", NA, value)))
     ) %>%
     tidyr::pivot_wider(names_from = series, values_from = value) %>%
-    transmute(
-      GID_0,
-      country,
-      year,
-      gdp_pc = NY.GDP.PCAP.KD,
-      population = SP.POP.TOTL
-    )
+    select(GID_0, country, year, all_of(series))
+}
+
+# World Bank WDI series downloaded by wdi_download.R (October 2026 vintage):
+# GDP per capita at constant 2015 US$ and at constant 2021 PPP, total GDP and
+# the value added of agriculture, industry and services at constant 2015 US$,
+# and population.
+WDI_EXTRA_FILE <- "wb_ppp_sector_data.csv"
+WDI_EXTRA_SERIES <- c(
+  gdp_pc = "NY.GDP.PCAP.KD", gdp_pc_ppp = "NY.GDP.PCAP.PP.KD", gdp = "NY.GDP.MKTP.KD",
+  va_agr = "NV.AGR.TOTL.KD", va_ind = "NV.IND.TOTL.KD", va_srv = "NV.SRV.TOTL.KD",
+  population = "SP.POP.TOTL"
+)
+WDI_SECTORS <- c(agr = "agriculture", ind = "industry", srv = "services")
+
+# Country-year growth of the series of WDI_EXTRA_FILE, matched on calendar
+# year (a gap gives NA): log growth of GDP per capita (g_gdp_pc, g_gdp_pc_ppp)
+# and of each sector's value added per head (g_agr, g_ind, g_srv); and each
+# sector's contribution to the simple growth of the three sectors' value added
+# per head (c_agr + c_ind + c_srv = c_total), with the sector's lagged share
+# (s_agr, ...) of that value added. Nothing is converted, interpolated or
+# extrapolated.
+load_wdi_growth <- function() {
+  log_growth <- function(x, year) {
+    lag_x <- lag_by_year(x, year)
+    ifelse(x > 0 & lag_x > 0, log(x) - log(lag_x), NA_real_)
+  }
+  read_wdi_csv(data_file(WDI_EXTRA_FILE), WDI_EXTRA_SERIES) %>%
+    mutate(across(c(va_agr, va_ind, va_srv), ~ .x / population, .names = "{.col}_pc"),
+           va_total_pc = va_agr_pc + va_ind_pc + va_srv_pc) %>%
+    group_by(GID_0) %>%
+    arrange(year, .by_group = TRUE) %>%
+    mutate(
+      g_gdp_pc = log_growth(gdp_pc, year),
+      g_gdp_pc_ppp = log_growth(gdp_pc_ppp, year),
+      g_agr = log_growth(va_agr_pc, year),
+      g_ind = log_growth(va_ind_pc, year),
+      g_srv = log_growth(va_srv_pc, year),
+      lag_total = lag_by_year(va_total_pc, year),
+      s_agr = lag_by_year(va_agr_pc, year) / lag_total,
+      s_ind = lag_by_year(va_ind_pc, year) / lag_total,
+      s_srv = lag_by_year(va_srv_pc, year) / lag_total,
+      c_agr = (va_agr_pc - lag_by_year(va_agr_pc, year)) / lag_total,
+      c_ind = (va_ind_pc - lag_by_year(va_ind_pc, year)) / lag_total,
+      c_srv = (va_srv_pc - lag_by_year(va_srv_pc, year)) / lag_total,
+      c_total = c_agr + c_ind + c_srv
+    ) %>%
+    ungroup() %>%
+    select(-lag_total)
 }
 
 # DOSE GDP-per-capita definitions selectable through `econ_variable`. The
@@ -182,6 +232,18 @@ read_econ_source <- function(stored_source, econ_variable = NULL) {
         pop = population,
         share_ag_gdp = NA_real_,
         econ_source = "WB",
+        gadm_level = "gadm0"
+      )
+  } else if (identical(stored_source, "WB_PPP")) {
+    read_wdi_csv(raw_file, c(gdp_pc = "NY.GDP.PCAP.PP.KD", population = "SP.POP.TOTL")) %>%
+      transmute(
+        year,
+        GID_0,
+        GID_1 = GID_0,
+        grp_pc_usd = gdp_pc,          # Constant 2021 international $ (PPP).
+        pop = population,
+        share_ag_gdp = NA_real_,
+        econ_source = "WB_PPP",
         gadm_level = "gadm0"
       )
   } else {

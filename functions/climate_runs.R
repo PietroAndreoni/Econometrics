@@ -307,3 +307,49 @@ summarise_bin_association <- function(
     cramers_v = cramers_v
   )
 }
+
+# Deviation of x from its trailing moments (mu, s), held through each spell in
+# `direction` (1 warm or wet, -1 cold or dry), and the position in the spell
+# (0 outside spells). x of one unit, sorted by year. A spell starts, as a run,
+# at the year before a rise (fall), and holds that year's moments. It does not
+# end at the first reversal: it ends with a reversal larger than the held SD,
+# or with the `max_reversals`-th consecutive reversal (each within the held SD;
+# a year in the spell's direction resets the count), or with a gap. Outside
+# spells, and in a spell whose first year has no moments, the moving deviation.
+# The spells are found on the changes of `detect` (by default x itself; e.g. x
+# without its trend); the deviation is always that of x.
+fix_sigma_spells <- function(x, mu, s, year, direction, max_reversals = 3L, detect = x) {
+  n <- length(x)
+  deviation <- (x - mu) / s
+  position <- integer(n)
+  p <- 0L
+  held_mean <- held_sd <- NA_real_
+  reversals <- 0L
+  for (i in seq_len(n)[-1]) {
+    change <- if (year[i] == year[i - 1L] + 1L) {
+      direction * (detect[i] - detect[i - 1L])
+    } else {
+      NA_real_
+    }
+    if (p > 0L && is.finite(change)) {
+      reversals <- if (change < 0) reversals + 1L else 0L
+      if (change >= -held_sd && reversals < max_reversals) {
+        p <- p + 1L
+        position[i] <- p
+        deviation[i] <- (x[i] - held_mean) / held_sd
+        next
+      }
+    }
+    p <- 0L
+    if (isTRUE(change > 0) && is.finite(mu[i - 1L]) && is.finite(s[i - 1L])) {
+      held_mean <- mu[i - 1L]
+      held_sd <- s[i - 1L]
+      reversals <- 0L
+      position[i - 1L] <- 1L
+      p <- 2L
+      position[i] <- p
+      deviation[i] <- (x[i] - held_mean) / held_sd
+    }
+  }
+  list(deviation = deviation, position = position)
+}

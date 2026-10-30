@@ -54,6 +54,7 @@ ECON_SOURCE_ALIASES <- c(
   PWT = "PWT110",
   PWT110 = "PWT110",
   WB = "WB",
+  WB_PPP = "WB_PPP",
   DOSE = "DOSE_V2_14",
   DOSE_V2_14 = "DOSE_V2_14",
   KUMMU = "KUMMU2025_GRID",
@@ -62,6 +63,7 @@ ECON_SOURCE_ALIASES <- c(
 GADM_LEVEL_BY_SOURCE <- c(
   PWT110 = "gadm0",
   WB = "gadm0",
+  WB_PPP = "gadm0",
   DOSE_V2_14 = "gadm1",
   KUMMU2025_GRID = "gadm1"
 )
@@ -86,7 +88,7 @@ resolve_econ_source <- function(econ_data) {
 # to missing is returned in attr(panel, "dropped_break_years").
 build_dat <- function(
     econ_data = c("DOSE", "DOSE_V2_14", "KUMMU", "KUMMU2025_GRID",
-                  "PWT", "PWT110", "WB"),
+                  "PWT", "PWT110", "WB", "WB_PPP"),
     climate_series = NULL,
     config = panel_config(),
     econ_variable = NULL,
