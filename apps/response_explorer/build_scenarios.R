@@ -26,8 +26,8 @@
 #              share  agricultural value added, % of GDP ("Structural Change
 #                     Model (2023)" of the SSP extensions: WDI to 2024, SSP to
 #                     2050), 1998-2100
-#            The 5-year points are joined by log-linear interpolation (constant
-#            growth between them). After 2050 the share follows income with each
+#            The 5-year points are joined by a monotone cubic spline of the log
+#            (smooth growth between them). After 2050 the share follows income with each
 #            country's elasticity of the share to SSP GDP per capita over
 #            2030-2050. Downloaded from IIASA's public ixmp4 platforms ("ssp",
 #            "ssp-extensions") into data/ssp_iiasa_ixmp4.
@@ -131,17 +131,20 @@ with_iso3 <- function(d) {
   d$value <- as.numeric(d$value)
   d[!is.na(d$iso3) & is.finite(d$value), ]
 }
-# Annual values between the first and the last point of each series by
-# log-linear interpolation (constant growth between the points); no
+# Annual values between the first and the last point of each series by a
+# monotone cubic spline of the log (Fritsch-Carlson): through every point,
+# with growth changing smoothly between them rather than stepping at each
+# point, and no overshoot (monotone wherever the points are); no
 # extrapolation.
-log_linear_annual <- function(d, keys) {
+smooth_annual <- function(d, keys) {
   d %>%
     group_by(across(all_of(keys))) %>%
     group_modify(function(s, k) {
       s <- s[s$value > 0, ]
+      s <- s[order(s$year), ]
       if (nrow(s) < 2) return(tibble::tibble(year = s$year, value = s$value))
       years <- seq(min(s$year), max(s$year))
-      tibble::tibble(year = years, value = exp(stats::approx(s$year, log(s$value), xout = years)$y))
+      tibble::tibble(year = years, value = exp(stats::splinefun(s$year, log(s$value), method = "monoH.FC")(years)))
     }) %>%
     ungroup()
 }
@@ -166,13 +169,13 @@ gdppc <- bind_rows(lapply(ssps, function(s) {
     mutate(ssp = s)
 })) %>%
   distinct(ssp, iso3, year, .keep_all = TRUE) %>%
-  log_linear_annual(c("ssp", "iso3")) %>%
+  smooth_annual(c("ssp", "iso3")) %>%
   rename(gdppc = value)
 population <- population_raw %>%
   filter(scenario %in% ssps) %>%
   transmute(ssp = scenario, iso3, year, value) %>%
   distinct(ssp, iso3, year, .keep_all = TRUE) %>%
-  log_linear_annual(c("ssp", "iso3")) %>%
+  smooth_annual(c("ssp", "iso3")) %>%
   rename(population = value)
 gdp <- inner_join(gdppc, population, by = c("ssp", "iso3", "year")) %>%
   filter(year >= 2025) %>%
@@ -183,7 +186,7 @@ share_to_2050 <- share_raw %>%
   filter(scenario %in% ssps) %>%
   transmute(ssp = scenario, iso3, year, value) %>%
   distinct(ssp, iso3, year, .keep_all = TRUE) %>%
-  log_linear_annual(c("ssp", "iso3")) %>%
+  smooth_annual(c("ssp", "iso3")) %>%
   rename(share = value)
 share_after_2050 <- share_to_2050 %>%
   filter(year %in% c(2030, 2050)) %>%
