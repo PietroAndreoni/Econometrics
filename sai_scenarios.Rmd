@@ -1,0 +1,735 @@
+---
+title: "GDP Losses in the SAI Scenarios"
+author: ''
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+    code_folding: show
+params:
+  definition: "20-year"
+  form: "T quadratic, P linear arms"
+  baseline: fixed_sd
+  start_year: 2025
+  n_draws: 1000
+  draw_step: 5
+  workers: auto
+---
+
+# Question
+
+A deviation model of `weather_arms_robustness.Rmd` (PWT x ERA5) applied to the
+stratospheric aerosol injection (SAI) seed ensemble of `data/Scenarios`: the
+GDP each country, and the world, loses to the temperature and precipitation of
+each scenario, net of the growth effect of natural variability alone, with the
+uncertainty of the coefficients and of natural variability.
+
+The functions are in `functions/scenario_projection.R`; the models are those
+saved by `weather_arms_robustness.Rmd` (knit it first), and the parameters
+`definition` and `form` pick one. Choices of this notebook:
+
+- the model: `r params$form`, with `r params$definition` deviations, each
+  interacted with the horizon mean;
+- the 20-year deviations are measured against the scenario's own trailing
+  20-year mean, in a fixed SD: the country's ERA5 trailing 20-year SD (median
+  over its estimation years) with the `baseline` parameter `fixed_sd`; the
+  alternatives are the scenario's own trailing SD (`moving`), or both moments
+  held through each run of rising (falling) years (`runs`); here:
+  `r params$baseline`. The horizon deviations are measured against the ERA5
+  moments of the model, with the scenario climate as it is (no bias
+  correction);
+- the model is applied as estimated, and, as a variant, with each arm capped at
+  its largest deviation in the estimation sample;
+- losses accumulate from `r params$start_year`;
+- uncertainty: `r params$n_draws` draws of the coefficients, each applied to
+  every seed, pooled.
+
+# Setup
+
+```{r setup, message=FALSE, warning=FALSE}
+source("load_functions.R")
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+
+START <- as.integer(params$start_year)
+PROBS <- c(0.05, 0.5, 0.95)
+COUNTRY_YEARS <- c(2050L, 2100L, 2150L)
+WORKERS <- if (identical(params$workers, "auto")) {
+  max(1L, min(12L, parallel::detectCores() - 2L))
+} else {
+  as.integer(params$workers)
+}
+
+model <- load_preferred_model(params$definition, params$form)
+draws <- coefficient_draws(model, n = as.integer(params$n_draws))
+scenarios <- scenario_matrix()
+ds <- scenario_dataset()
+```
+
+Model: **`r model$form`**, **`r model$definition`** deviations, `r model$panel`,
+`r model$observations` country-years, horizon `r model$horizon[1]`-`r model$horizon[2]`;
+AIC `r sprintf("%+.1f", model$aic_vs_best)` against the best saved model (the
+preferred one of `weather_arms_robustness.Rmd` is `r model$preferred[["form"]]`,
+`r model$preferred[["definition"]]` deviations).
+
+# The scenarios
+
+`data/Scenarios/sai_seed_country_global_timeseries.parquet` (see its README):
+`r nrow(scenarios)` scenarios, annual 1990-2150, for 131 countries, the
+residual region ROW and WORLD. Each scenario is an RCP, an SAI setting and a
+seed of natural variability:
+
+```{r scenario-matrix}
+scenarios %>%
+  mutate(rcp = factor(scenario_rcp_label(rcp), levels = unname(SCENARIO_RCPS)),
+         term = factor(scenario_term_label(term), levels = scenario_term_label(SCENARIO_TERMS))) %>%
+  count(term, rcp) %>%
+  tidyr::pivot_wider(names_from = rcp, values_from = n) %>%
+  knitr::kable(caption = "Scenarios: seeds by SAI setting (rows) and RCP (columns)")
+```
+
+The SAI settings include a termination in 2040 besides 2050-2100; all are
+projected. The variables used:
+
+| Column | Here | Content |
+|:--|:--|:--|
+| `temperature_deg_c` | T | country temperature (C) |
+| `precipitation_lt_per_yr` | P | country precipitation; labelled lt/yr in the source, in metres a year (as RR of the model, see below) |
+| `DTEMP_REGION_VAR`, `DPRECIP_REGION_VAR` | TVAR, PVAR | natural-variability components of T and P, from 2015 |
+| `ykali_trillion_2005_usd_ppp` | GDP | GDP of the scenario (trillion 2005 USD PPP) |
+| `population_million` | POP | population (million) |
+| `TATM_VAR` | | variability of the global temperature (WORLD only) |
+
+## Checks
+
+```{r scenario-checks}
+exogenous <- ds %>%
+  group_by(region, year) %>%
+  summarise(gdp = max(ykali_trillion_2005_usd_ppp) / min(ykali_trillion_2005_usd_ppp) - 1,
+            pop = max(population_million) / min(population_million) - 1) %>%
+  quiet_collect()
+variability <- ds %>%
+  filter(year >= 2015L, region_type == "country") %>%
+  group_by(seed, region, year) %>%
+  summarise(T = max(DTEMP_REGION_VAR) - min(DTEMP_REGION_VAR),
+            P = max(DPRECIP_REGION_VAR) - min(DPRECIP_REGION_VAR)) %>%
+  quiet_collect()
+historical <- ds %>%
+  filter(year < 2015L, region_type == "country") %>%
+  group_by(region, year) %>%
+  summarise(T = max(temperature_deg_c) - min(temperature_deg_c),
+            P = max(precipitation_lt_per_yr) - min(precipitation_lt_per_yr),
+            variability = sum(if_else(is.na(DTEMP_REGION_VAR), 0L, 1L))) %>%
+  quiet_collect()
+forced <- ds %>%
+  filter(year %in% c(2050L, 2100L), region_type == "country") %>%
+  mutate(forced = temperature_deg_c - DTEMP_REGION_VAR) %>%
+  group_by(rcp, term, region, year) %>%
+  summarise(sd = sd(forced)) %>%
+  quiet_collect()
+negative <- ds %>%
+  filter(region_type == "country") %>%
+  group_by(region) %>%
+  summarise(rows = n(),
+            negative = sum(if_else(precipitation_lt_per_yr < 0, 1L, 0L)),
+            negative_forced = sum(if_else(precipitation_lt_per_yr - DPRECIP_REGION_VAR < 0, 1L, 0L),
+                                  na.rm = TRUE),
+            mean_P = mean(precipitation_lt_per_yr)) %>%
+  quiet_collect() %>%
+  filter(negative > 0) %>%
+  arrange(desc(negative))
+
+tibble::tribble(
+  ~check, ~result,
+  "GDP and population: largest relative difference across the scenarios",
+  sprintf("%.1e and %.1e", max(exogenous$gdp), max(exogenous$pop)),
+  "Natural variability (from 2015): largest difference across RCPs and SAI settings within a seed",
+  sprintf("%.1e C and %.1e m", max(variability$T), max(variability$P)),
+  "1990-2014 climate: largest difference across scenarios; natural variability in those years",
+  sprintf("%.1e C and %.1e m; %d rows", max(historical$T), max(historical$P), sum(historical$variability)),
+  "T without natural variability (T - TVAR): SD across the 10 seeds in 2050 and 2100, median over countries and RCPs, without SAI",
+  with(forced[forced$term == "BASE", ], sprintf("%.3f and %.3f C", stats::median(sd[year == 2050]),
+                                                 stats::median(sd[year == 2100]))),
+  "The same with SAI (never terminated or terminated in any year)",
+  with(forced[forced$term != "BASE", ], sprintf("%.3f and %.3f C", stats::median(sd[year == 2050]),
+                                                 stats::median(sd[year == 2100]))),
+  "Country-years with negative precipitation, all scenarios (countries)",
+  sprintf("%d (%d)", sum(negative$negative), nrow(negative))
+) %>%
+  knitr::kable(caption = "Checks of the scenario data")
+```
+
+GDP and population are the same in every scenario: they are the exogenous
+paths, so the per-capita growth `dlog(GDP / POP)` is the same in every
+scenario and the climate enters only through the model. The natural
+variability of a seed is the same in every RCP and SAI setting, so the
+scenarios of a seed differ only in the rest of their climate. Without SAI that
+rest (T - TVAR) also differs across the seeds (by about 0.2 C), so part of the
+seed-to-seed variation is not in TVAR and is not netted out by g(TVAR, PVAR);
+with SAI, even after termination, it is practically the same in every seed.
+Before 2015 every scenario has the same climate and no variability component.
+
+```{r negative-precipitation}
+negative %>%
+  mutate(country = countrycode::countrycode(region, "iso3c", "country.name", warn = FALSE),
+         share = round(negative / rows, 3), mean_P = round(mean_P, 3)) %>%
+  select(country, country_years = rows, negative, share, negative_forced, mean_P) %>%
+  knitr::kable(caption = paste("Country-years with negative precipitation (all scenarios; negative_forced:",
+                               "P - PVAR < 0; mean_P in m a year). They are kept as they are."))
+```
+
+## Natural variability and the historical climate against ERA5
+
+The model measures deviations in each country's ERA5 SD over
+`r model$horizon[1]`-`r model$horizon[2]` (which includes the trend). The
+natural variability of the scenarios, against ERA5:
+
+```{r variability-era5}
+era5 <- load_climate_series("gadm0", panel_config(
+  econ_year_min = model$horizon[[1]], climate_source = "ERA5",
+  climate_weight = "population density", climate_weight_year = 2000L
+)) %>%
+  filter(year >= model$horizon[[1]], year <= model$horizon[[2]]) %>%
+  transmute(region = GID_0, year, TM, RR)
+detrended_sd <- function(x, year) stats::sd(stats::resid(stats::lm(x ~ poly(year, 2))))
+observed <- era5 %>%
+  group_by(region) %>%
+  summarise(T_detrended = detrended_sd(TM, year), P_detrended = detrended_sd(RR, year),
+            .groups = "drop") %>%
+  inner_join(model$moments, by = c(region = "GID_0"))
+simulated <- ds %>%
+  filter(rcp == "RCP45", term == "BASE", year >= 2015L, region_type == "country") %>%
+  select(seed, region, year, TVAR = DTEMP_REGION_VAR, PVAR = DPRECIP_REGION_VAR) %>%
+  quiet_collect() %>%
+  arrange(region, seed, year) %>%
+  group_by(region, seed) %>%
+  mutate(T_ar1 = stats::cor(TVAR[-1], TVAR[-n()])) %>%
+  group_by(region) %>%
+  summarise(T_sd = stats::sd(TVAR), P_sd = stats::sd(PVAR), T_mean = mean(TVAR),
+            P_mean = mean(PVAR), T_ar1 = stats::median(T_ar1), .groups = "drop") %>%
+  inner_join(observed, by = "region")
+
+quartiles <- function(x) sprintf("%.2f [%.2f, %.2f]", stats::median(x), stats::quantile(x, 0.25),
+                                 stats::quantile(x, 0.75))
+tibble::tribble(
+  ~statistic, ~temperature, ~precipitation,
+  "SD of the variability / SD of ERA5 around its quadratic trend",
+  quartiles(simulated$T_sd / simulated$T_detrended), quartiles(simulated$P_sd / simulated$P_detrended),
+  "SD of the variability / ERA5 horizon SD (the SD of d_var)",
+  quartiles(simulated$T_sd / simulated$sd_TM_all), quartiles(simulated$P_sd / simulated$sd_RR_all),
+  "Mean of the variability (C, m)",
+  quartiles(simulated$T_mean), quartiles(simulated$P_mean),
+  "First-order autocorrelation of the variability",
+  quartiles(simulated$T_ar1), ""
+) %>%
+  knitr::kable(caption = paste("Natural variability of the scenarios (2015-2150, RCP4.5 without SAI,",
+                               "the 10 seeds) against ERA5: median [quartiles] over countries"))
+
+scenario_history <- ds %>%
+  filter(scenario == !!scenarios$scenario[[1]], year < 2015L, region_type == "country") %>%
+  select(region, year, T = temperature_deg_c, P = precipitation_lt_per_yr) %>%
+  quiet_collect()
+gap <- scenario_history %>%
+  inner_join(era5, by = c("region", "year")) %>%
+  group_by(region) %>%
+  summarise(T_gap = mean(T - TM), P_gap = mean(P - RR), P_ratio = mean(P) / mean(RR),
+            T_cor = stats::cor(T, TM), P_cor = stats::cor(P, RR), .groups = "drop") %>%
+  inner_join(model$moments, by = c(region = "GID_0")) %>%
+  mutate(T_gap_sd = T_gap / sd_TM_all, P_gap_sd = P_gap / sd_RR_all)
+tibble::tribble(
+  ~statistic, ~temperature, ~precipitation,
+  "Mean gap, scenario - ERA5 (C, m)", quartiles(gap$T_gap), quartiles(gap$P_gap),
+  "Mean gap in ERA5 horizon SDs", quartiles(gap$T_gap_sd), quartiles(gap$P_gap_sd),
+  "Absolute gap in SDs, 90th percentile and largest",
+  sprintf("%.2f and %.2f", stats::quantile(abs(gap$T_gap_sd), 0.9), max(abs(gap$T_gap_sd))),
+  sprintf("%.2f and %.2f", stats::quantile(abs(gap$P_gap_sd), 0.9), max(abs(gap$P_gap_sd))),
+  "Ratio of the means, scenario / ERA5", "", quartiles(gap$P_ratio),
+  "Year-to-year correlation", quartiles(gap$T_cor), quartiles(gap$P_cor)
+) %>%
+  knitr::kable(caption = paste("The 1990-2014 climate of the scenarios against ERA5 (the same in every",
+                               "scenario): median [quartiles] over countries"))
+```
+
+The precipitation of the scenarios has the level of ERA5 in metres a year, so
+it is used as RR without conversion. The 1990-2014 climate of the scenarios is
+model output (it does not follow the observed years) and differs in level
+from ERA5. With horizon deviations (against the ERA5 mean, no bias
+correction) that gap enters every deviation; the 20-year deviations are
+measured against the scenario's own trailing mean, so it does not.
+
+# From the estimated model to GDP losses
+
+**What was estimated** (PWT x ERA5, country-years `r model$horizon[1]`-`r model$horizon[2]`):
+
+```text
+dlog y_it = sum_v sum_arm (a_v,arm + b_v,arm m_v,i) f_arm(d_v,it) + controls + FE + e
+horizon:  d_v,it = (X_v,it - m_v,i) / s_v,i            m, s: the country's ERA5 mean and SD over the horizon
+20-year:  d_v,it = (X_v,it - mean20_v,it) / sd20_v,it   mean and SD of the 20 years before t
+f         temperature: (d+)^2, (d-)^2; precipitation: d+, d-   (d+ = max(d, 0), d- = max(-d, 0))
+```
+
+X_T is temperature and X_P precipitation; every interaction is with the
+horizon mean m. In the estimation, d was demeaned (each country's mean and
+quadratic trend removed) before the arms were cut; in the projections d is the
+deviation itself, as in the warming scenario of `weather_arms_robustness.Rmd`
+(demeaning would remove the warming).
+
+**Growth effect** in scenario s, country i, year t, with the scenario's T and P
+as they are (here: `r model$definition` deviations):
+
+```text
+horizon:                    d = (X_s,it - m_i) / s_i          d_var = VAR_s,it / s_i
+20-year:                    d = (X_s,it - mean20(X)) / s20    d_var = (VAR_s,it - mean20(VAR)) / s20
+20-year mean, horizon SD:   d = (X_s,it - mean20(X)) / s_i    d_var = (VAR_s,it - mean20(VAR)) / s_i
+g(T, P)       = sum (a + b m) f(d)
+g(TVAR, PVAR) = sum (a + b m) f(d_var)
+dg_s,it       = g(T, P) - g(TVAR, PVAR)
+```
+
+mean20 is the mean of the scenario's own series over t-20..t-1 (the
+1990-2014 history included); that of the natural variability alone, the
+counterfactual, which starts in 2015, comes from the years of the window with
+it, at least `r VARIABILITY_MIN_YEARS` (from 2025). s20, with the 20-year
+deviations, depends on the `baseline` parameter:
+
+- `fixed_sd` (the default): the country's ERA5 trailing 20-year SD, median
+  over its estimation years, in both terms;
+- `moving`: the SD of the scenario's own series over t-20..t-1 (of the
+  variability alone for d_var), so it moves with the scenario: a fast warming
+  widens it and shrinks the deviations;
+- `runs`: the trailing mean and SD held through each warming (cooling) run,
+  the consecutive years each warmer (cooler) than the one before, at the last
+  year before the run, as the run-fixed deviations of
+  `weather_arms_robustness.Rmd`: the run ends with the first year that is not
+  warmer (cooler) than the one before, and the warm (wet) arm is cut from the
+  warming (wetting) runs, the cold (dry) arm from the cooling (drying) ones; a
+  run whose first year has no moments yet keeps the moving ones; the
+  counterfactual alike, through its own runs;
+- `sigma_spells`: the same, held through spells that end only with a
+  reversal larger than the held SD or with the third consecutive smaller one
+  (`fix_sigma_spells()` in `functions/climate_runs.R`, as in the one-SD spell
+  section of `weather_arms_robustness.Rmd`).
+
+The coefficients are those of the model estimated with the moving 20-year
+moments (or with the horizon SD, for that definition). The fixed effects and
+controls belong to the baseline, so they do not enter dg.
+
+**From growth to GDP.** The per-capita growth of the scenario is that of its
+GDP and population, `g_t = dlog(GDP_t / POP_t)`; with the climate it is
+`g_t + dg_t` from `r START`. So, from `r START` to t,
+
+```text
+log y^cc_t - log y_t = L_t = sum_{tau = START..t} dg_tau
+GDP^cc_t = GDP_t exp(L_t)                         (population unchanged)
+loss_i,t = 1 - exp(L_i,t)                         (share of the scenario's GDP)
+loss_R,t = 1 - sum_R GDP_i,t exp(L_i,t) / sum_R GDP_i,t    for countries R (all, or a subset)
+```
+
+ROW has no observed climate and is left out of every aggregate (about 2% of
+world GDP).
+
+**Uncertainty.** L_i,t = c_i,t' beta, with c_i,t the sum over the years of the
+difference of the two design rows, is linear in the 8 weather coefficients.
+Each of `r params$n_draws` draws beta^(k) ~ N(beta, VCOV clustered by country)
+is applied to each of the 10 seeds; the bands are the
+`r 100 * PROBS[1]`-`r 100 * PROBS[3]`% quantiles of the pooled 10 x
+`r params$n_draws` values (every `r params$draw_step` years, the draws costing
+one exp() per country, year and draw), the central line their median, and the
+thin lines the point estimate of each seed (every year).
+
+**Capped variant.** Each arm's |d| is capped at its largest value in the
+estimation sample (temperature +`r round(max(model$support$TM), 2)` and
+`r round(min(model$support$TM), 2)` SD, precipitation
++`r round(max(model$support$RR), 2)` and `r round(min(model$support$RR), 2)`
+SD), in both terms of dg: beyond it the effect stays at its value at the
+largest deviation observed.
+
+```{r model-coefficients}
+tibble::tibble(term = names(model$coef), estimate = model$coef,
+               std_error = sqrt(diag(model$vcov))) %>%
+  mutate(across(c(estimate, std_error), ~ signif(.x, 3))) %>%
+  knitr::kable(caption = paste("Weather coefficients of the preferred model (errors clustered by",
+                               "country); the controls and fixed effects are not used"))
+
+# Growth effect that year of a deviation d at long-run climate m, as estimated
+# and capped, to show how far the projections extrapolate.
+effect_grid <- function(v, d, m) {
+  grid <- expand.grid(d = d, m = m)
+  zero <- rep(0, nrow(grid))
+  dev <- if (v == "TM") list(TM = grid$d, RR = zero) else list(TM = zero, RR = grid$d)
+  clim <- if (v == "TM") list(TM = grid$m, RR = zero) else list(TM = zero, RR = grid$m)
+  X <- weather_design(model, dev, clim)
+  Xc <- weather_design(model, dev, clim, capped = TRUE)
+  grid %>%
+    mutate(cell = sprintf("%+.2f (%.2f) / %+.2f", 100 * drop(X %*% model$coef),
+                          100 * sqrt(rowSums((X %*% model$vcov) * X)), 100 * drop(Xc %*% model$coef)),
+           m = paste(m, if (v == "TM") "C" else "m")) %>%
+    select(d, m, cell) %>%
+    tidyr::pivot_wider(names_from = m, values_from = cell)
+}
+effect_grid("TM", c(-3, -1, 1, 2, 3, 5, 8), c(5, 15, 25)) %>%
+  knitr::kable(caption = paste("Growth effect that year (pp) of a temperature deviation of d SD at",
+                               "long-run temperature m: estimate (SE) / capped"))
+effect_grid("RR", c(-3, -2, -1, 1, 2, 3, 5), c(0.5, 1.5, 3)) %>%
+  knitr::kable(caption = paste("Growth effect that year (pp) of a precipitation deviation of d SD at",
+                               "long-run precipitation m (m a year): estimate (SE) / capped"))
+```
+
+# All scenarios
+
+Every RCP and SAI setting (the 10 seeds of each together), uncapped and
+capped, on `r WORKERS` R processes; the result is saved in
+`results/sai_scenarios/` and reused while the model, the data, the settings and
+the functions are unchanged.
+
+```{r projections}
+BASELINE <- params$baseline
+MODEL_LABEL <- projection_label(model, BASELINE)
+PROJECTIONS_FILE <- file.path("results", "sai_scenarios", paste0(
+  "projections_", gsub("[^a-z0-9]+", "_", tolower(paste(model$definition, model$form, BASELINE))),
+  ".rds"))
+scenario_file <- file.info(data_file(SCENARIO_FILE))
+projections_spec <- list(
+  model = model[c("suffix", "coef", "vcov", "moments", "support", "form_suffixes")],
+  draws = draws, start = START, probs = PROBS, country_years = COUNTRY_YEARS,
+  draw_step = as.integer(params$draw_step), trailing = c(TRAILING_YEARS, VARIABILITY_MIN_YEARS),
+  baseline = BASELINE,
+  scenario_file = c(size = scenario_file$size, modified = as.numeric(scenario_file$mtime)),
+  code = code_fingerprint(project_all_scenarios, scenario_effects, scenario_deviations,
+                          run_held_deviation, sigma_spell_held_deviation, fix_sigma_spells,
+                          trailing_moments, grouped_trailing_moments,
+                          gdp_loss, country_loss, weather_design, arm_value, arm_caps,
+                          read_scenarios)
+)
+projections <- cached_result(PROJECTIONS_FILE, projections_spec, function() {
+  project_all_scenarios(model, draws, start = START, country_years = COUNTRY_YEARS, probs = PROBS,
+                        draw_step = as.integer(params$draw_step), scenarios = scenarios,
+                        workers = WORKERS, baseline = BASELINE)
+})
+N_COUNTRIES <- length(unique(projections$country$region))
+```
+
+## How far the scenarios leave the estimation sample
+
+```{r support}
+projections$deviations %>%
+  label_scenarios() %>%
+  arrange(rcp_label, term_label, year) %>%
+  transmute(RCP = rcp_label, SAI = term_label, year,
+            across(T_median:P_p90, ~ round(.x, 2))) %>%
+  knitr::kable(caption = paste0(
+    "Deviations less those of natural variability alone (d - d_var, SDs) over the ", N_COUNTRIES,
+    " countries and the 10 seeds: temperature median, 90th percentile and largest; precipitation ",
+    "10th percentile, median and 90th percentile. Estimation sample: temperature ",
+    round(min(model$support$TM), 2), " to ", round(max(model$support$TM), 2), ", precipitation ",
+    round(min(model$support$RR), 2), " to ", round(max(model$support$RR), 2), " (demeaned)"))
+
+projections$support %>%
+  filter(!capped) %>%
+  label_scenarios() %>%
+  arrange(rcp_label, term_label) %>%
+  transmute(RCP = rcp_label, SAI = term_label, across(c(hot, cold, wet, dry), ~ round(100 * .x, 1))) %>%
+  knitr::kable(caption = paste0(
+    "Country-years from ", START, " (%) with a deviation (with natural variability) beyond the ",
+    "largest of the estimation sample on each side: where the capped variant differs"))
+```
+
+## Global GDP loss
+
+```{r global-loss-table}
+global_loss_table <- function(cap) {
+  projections$global %>%
+    filter(capped == cap, year %in% COUNTRY_YEARS) %>%
+    label_scenarios() %>%
+    mutate(cell = sprintf("%.1f [%.1f, %.1f]", 100 * central, 100 * low, 100 * high)) %>%
+    select(rcp_label, term_label, year, cell) %>%
+    tidyr::pivot_wider(names_from = year, values_from = cell) %>%
+    arrange(rcp_label, term_label) %>%
+    rename(RCP = rcp_label, SAI = term_label) %>%
+    knitr::kable(caption = paste0(
+      "Global GDP loss (% of the scenarios' GDP, ", N_COUNTRIES, " countries; ", MODEL_LABEL,
+      "), ", if (cap) "deviations capped at the sample support" else "model as estimated",
+      ": median [", 100 * PROBS[1], "%, ", 100 * PROBS[3], "%] over the 10 seeds x ",
+      params$n_draws, " coefficient draws; losses from ", START))
+}
+global_loss_table(FALSE)
+global_loss_table(TRUE)
+```
+
+```{r global-loss-plot, fig.width=13, fig.height=9}
+for (cap in c(FALSE, TRUE)) {
+  print(plot_scenarios(global_selection(projections, capped = cap, start = START, probs = PROBS,
+                                        n_countries = N_COUNTRIES, model = model,
+                                        baseline = BASELINE),
+                       bands = c("BASE", "NOTERM")) +
+          labs(title = paste("Global GDP loss,", if (cap) "deviations capped at the sample support"
+                             else "model as estimated"),
+               caption = paste("Line: median of the 10 seeds x", params$n_draws, "coefficient draws",
+                               "(every", params$draw_step, "years); band: ", 100 * PROBS[1], "-",
+                               100 * PROBS[3], "%, without SAI and SAI never terminated only, cut at",
+                               "-100% if lower; thin lines: each seed (point estimate).")))
+}
+```
+
+```{r global-temperature, fig.width=13, fig.height=9}
+plot_scenarios(select_scenarios(rcp = names(SCENARIO_RCPS), term = SCENARIO_TERMS,
+                                what = "temperature", regions = "WORLD"))
+```
+
+## Countries
+
+```{r country-tables}
+MAJOR <- c("USA", "CHN", "IND", "JPN", "DEU", "GBR", "FRA", "BRA", "RUS", "IDN", "MEX", "TUR",
+           "SAU", "NGA", "EGY", "PAK", "BGD", "ETH", "COD", "ZAF")
+country_table <- function(cap, year_shown = 2100L) {
+  growth <- projections$country %>%
+    filter(capped == cap, year == year_shown, rcp == "RCP45", term == "BASE") %>%
+    select(region, g_base)
+  projections$country %>%
+    filter(capped == cap, year == year_shown, term %in% c("BASE", "NOTERM"), region %in% MAJOR) %>%
+    mutate(column = paste(scenario_rcp_label(rcp), ifelse(term == "BASE", "no SAI", "SAI")),
+           cell = sprintf("%.0f [%.0f, %.0f]", 100 * central, 100 * low, 100 * high)) %>%
+    select(region, column, cell) %>%
+    tidyr::pivot_wider(names_from = column, values_from = cell) %>%
+    left_join(growth, by = "region") %>%
+    mutate(country = countrycode::countrycode(region, "iso3c", "country.name", warn = FALSE),
+           growth = round(100 * g_base, 2)) %>%
+    arrange(match(region, MAJOR)) %>%
+    select(country, growth, starts_with("RCP")) %>%
+    knitr::kable(caption = paste0(
+      "GDP loss in ", year_shown, " (%, median [", 100 * PROBS[1], "%, ", 100 * PROBS[3], "%]), ",
+      if (cap) "capped" else "as estimated", ", without SAI and with SAI never terminated; growth: ",
+      "the scenarios' per-capita growth, mean ", START, "-2100 (% a year)"))
+}
+country_table(FALSE)
+country_table(TRUE)
+
+projections$country %>%
+  filter(year %in% COUNTRY_YEARS) %>%
+  group_by(rcp, term, capped, year) %>%
+  summarise(gain = sum(central < 0), .groups = "drop") %>%
+  mutate(column = paste(year, ifelse(capped, "capped", "as estimated"))) %>%
+  label_scenarios() %>%
+  select(RCP = rcp_label, SAI = term_label, column, gain) %>%
+  tidyr::pivot_wider(names_from = column, values_from = gain) %>%
+  arrange(RCP, SAI) %>%
+  knitr::kable(caption = paste("Countries whose median GDP change is a gain, of", N_COUNTRIES))
+
+projections$country %>%
+  filter(year == 2100L, term %in% c("BASE", "NOTERM")) %>%
+  group_by(rcp, term, capped) %>%
+  summarise(mean_growth_base = 100 * mean(g_base), mean_growth_climate = 100 * mean(g_cc),
+            .groups = "drop") %>%
+  label_scenarios() %>%
+  transmute(RCP = rcp_label, SAI = term_label, capped,
+            across(starts_with("mean_"), ~ round(.x, 2))) %>%
+  arrange(RCP, SAI, capped) %>%
+  knitr::kable(caption = paste0("Per-capita growth, mean over countries and ", START,
+                                "-2100 (% a year): the scenarios', and with the climate (point ",
+                                "estimate, mean over the seeds)"))
+```
+
+# Standardized or unstandardized deviations
+
+The model above measures each year in SDs of the country's own variability.
+The same model estimated on deviations in physical units (°C and metres a
+year, not divided by the SD; "The preferred model without standardization" in
+`weather_arms_robustness.Rmd`) fits the growth data as well: the difference in
+fit cannot be told apart from noise. The losses it implies can still differ,
+because the scenarios move the climate far more than a typical year does:
+
+```text
+standardized     d = (X - trailing 20-year mean) / SD       the same warming is a larger deviation where the SD is small
+unstandardized   d =  X - trailing 20-year mean             the same warming is the same deviation everywhere (°C, m a year)
+```
+
+The unstandardized counterpart of the model (same definition and form, its
+own coefficients) is projected in the same way: the same scenarios and seeds,
+the same start, `r params$n_draws` draws of its coefficients, and the cap at
+the largest deviation of its own estimation sample. With one variable
+unstandardized at a time, the difference is attributed to temperature or to
+precipitation.
+
+```{r unstandardized-projections}
+UNSTD_VARIANTS <- c("unstandardized" = paste0(params$definition, ", unstandardized"),
+                    "T unstandardized" = paste0(params$definition, ", T unstandardized"),
+                    "P unstandardized" = paste0(params$definition, ", P unstandardized"))
+stopifnot(all(UNSTD_VARIANTS %in% names(readRDS(PREFERRED_MODEL_RDS)$models)))
+# The projections of a saved model, saved and reused like the main ones.
+project_model <- function(m) {
+  m_draws <- coefficient_draws(m, n = as.integer(params$n_draws))
+  file <- file.path("results", "sai_scenarios", paste0(
+    "projections_", gsub("[^a-z0-9]+", "_", tolower(paste(m$definition, m$form, BASELINE))),
+    ".rds"))
+  spec <- utils::modifyList(projections_spec, list(
+    model = m[c("suffix", "coef", "vcov", "moments", "support", "form_suffixes")],
+    draws = m_draws))
+  cached_result(file, spec, function() {
+    project_all_scenarios(m, m_draws, start = START, country_years = COUNTRY_YEARS, probs = PROBS,
+                          draw_step = as.integer(params$draw_step), scenarios = scenarios,
+                          workers = WORKERS, baseline = BASELINE)
+  })
+}
+unstd_models <- lapply(UNSTD_VARIANTS, load_preferred_model, form = params$form)
+runs <- c(list("standardized" = projections), lapply(unstd_models, project_model))
+
+# 1. Global GDP loss, standardized and unstandardized (both variables).
+global_cells <- bind_rows(lapply(names(runs), function(k) {
+  runs[[k]]$global %>% filter(year %in% COUNTRY_YEARS) %>% mutate(model = k)
+}))
+standardization_table <- function(cap) {
+  global_cells %>%
+    filter(capped == cap, model %in% c("standardized", "unstandardized")) %>%
+    label_scenarios() %>%
+    mutate(cell = sprintf("%.1f [%.1f, %.1f]", 100 * central, 100 * low, 100 * high),
+           column = paste(year, model)) %>%
+    arrange(year, model) %>%
+    select(RCP = rcp_label, SAI = term_label, column, cell) %>%
+    tidyr::pivot_wider(names_from = column, values_from = cell) %>%
+    arrange(RCP, SAI) %>%
+    knitr::kable(caption = paste0(
+      "Global GDP loss (% of the scenarios' GDP, ", N_COUNTRIES, " countries), ",
+      params$definition, " deviations, ", params$form, ", standardized (", MODEL_LABEL,
+      ") and unstandardized, ", if (cap) "deviations capped at each model's sample support"
+      else "models as estimated", ": median [", 100 * PROBS[1], "%, ", 100 * PROBS[3],
+      "%] over the 10 seeds x ", params$n_draws, " coefficient draws; losses from ", START))
+}
+standardization_table(FALSE)
+standardization_table(TRUE)
+
+# 2. Which variable: the median loss with one variable unstandardized at a time.
+global_cells %>%
+  filter(!capped, year %in% c(2100L, 2150L)) %>%
+  label_scenarios() %>%
+  mutate(column = paste(year, model), median = round(100 * central, 1)) %>%
+  arrange(year, match(model, names(runs))) %>%
+  select(RCP = rcp_label, SAI = term_label, column, median) %>%
+  tidyr::pivot_wider(names_from = column, values_from = median) %>%
+  arrange(RCP, SAI) %>%
+  knitr::kable(caption = paste0(
+    "Global GDP loss (%, median, models as estimated) with both variables standardized, both ",
+    "unstandardized, and one unstandardized at a time"))
+```
+
+```{r unstandardized-paths, fig.width=13, fig.height=8}
+# 3. The paths of the global loss under both models.
+PATH_TERMS <- c("BASE", "NOTERM", "2040", "2070", "2100")
+bind_rows(lapply(c("standardized", "unstandardized"), function(k) {
+  runs[[k]]$global %>% filter(!capped, term %in% PATH_TERMS) %>% mutate(model = k)
+})) %>%
+  label_scenarios() %>%
+  ggplot(aes(year, 100 * central, colour = term_label, linetype = model)) +
+  geom_hline(yintercept = 0, colour = GRID_MUTED, linewidth = 0.3) +
+  geom_line(linewidth = 0.7) +
+  facet_wrap(~rcp_label, scales = "free_y") +
+  scale_colour_manual(values = scenario_term_colours(), name = NULL) +
+  scale_linetype_manual(values = c(standardized = "solid", unstandardized = "dashed"), name = NULL) +
+  labs(x = NULL, y = "Global GDP loss (%)",
+       title = "Global GDP loss with standardized and unstandardized deviations",
+       subtitle = paste0(params$definition, " deviations, ", params$form, ", models as estimated; ",
+                         "median over the 10 seeds x ", params$n_draws, " coefficient draws.")) +
+  theme_results()
+```
+
+```{r unstandardized-countries, fig.width=12, fig.height=5.5}
+# 4. Countries: the loss in 2100 without SAI under both models, by long-run
+# temperature and by the SD the standardized model divides by.
+COUNTRY_CASES <- tibble::tribble(~rcp, ~term, "RCP45", "BASE", "RCP85", "BASE", "RCP85", "2070")
+country_pairs <- bind_rows(lapply(c("standardized", "unstandardized"), function(k) {
+  runs[[k]]$country %>%
+    filter(!capped, year == 2100L) %>%
+    inner_join(COUNTRY_CASES, by = c("rcp", "term")) %>%
+    transmute(rcp, term, region, model = k, loss = 100 * central)
+})) %>%
+  tidyr::pivot_wider(names_from = model, values_from = loss) %>%
+  inner_join(select(model$moments, region = GID_0, mean_TM_all, sd_TM_lag_20), by = "region") %>%
+  label_scenarios() %>%
+  mutate(case = paste(rcp_label, term_label, sep = ", "),
+         climate = cut(mean_TM_all, stats::quantile(unique(mean_TM_all), 0:3 / 3),
+                       include.lowest = TRUE, labels = c("cold third", "mid third", "hot third")))
+
+country_pairs %>%
+  group_by(case, climate) %>%
+  summarise(countries = n(), long_run_temperature = round(stats::median(mean_TM_all), 1),
+            trailing_sd = round(stats::median(sd_TM_lag_20), 2),
+            loss_standardized = round(stats::median(standardized), 1),
+            loss_unstandardized = round(stats::median(unstandardized), 1), .groups = "drop") %>%
+  left_join(country_pairs %>%
+              group_by(case) %>%
+              summarise(rank_correlation = round(stats::cor(standardized, unstandardized,
+                                                            method = "spearman"), 2)),
+            by = "case") %>%
+  knitr::kable(caption = paste0(
+    "Countries by third of long-run temperature: median long-run temperature (°C), median ",
+    "trailing 20-year SD of temperature (°C, the SD the standardized model divides by), and ",
+    "the median GDP loss in 2100 (%, models as estimated) under each model; rank correlation ",
+    "of the two losses across the countries of the scenario"))
+
+ggplot(country_pairs, aes(standardized, unstandardized, colour = mean_TM_all)) +
+  geom_abline(slope = 1, intercept = 0, colour = GRID_MUTED, linewidth = 0.3) +
+  geom_point(size = 1.8, alpha = 0.85) +
+  facet_wrap(~case, scales = "free") +
+  scale_colour_gradient(low = "#b8d4f5", high = "#0d3f7a", name = "Long-run temperature (°C)") +
+  labs(x = "GDP loss in 2100, standardized deviations (%)",
+       y = "GDP loss in 2100, unstandardized deviations (%)",
+       title = "Country losses in 2100 with standardized and unstandardized deviations",
+       subtitle = "Median over the seeds and draws, models as estimated; line: equal losses.") +
+  theme_results() +
+  theme(panel.grid.major.x = element_line(colour = "#e6e5df", linewidth = 0.3))
+
+# 5. How far each model is taken beyond its estimation sample.
+bind_rows(lapply(c("standardized", "unstandardized"), function(k) {
+  runs[[k]]$support %>% filter(!capped) %>% mutate(model = k)
+})) %>%
+  inner_join(tibble::tibble(rcp = c("RCP45", "RCP45", "RCP85", "RCP85", "RCP85"),
+                            term = c("BASE", "NOTERM", "BASE", "NOTERM", "2070")),
+             by = c("rcp", "term")) %>%
+  label_scenarios() %>%
+  arrange(rcp_label, term_label, model) %>%
+  transmute(RCP = rcp_label, SAI = term_label, model,
+            across(c(hot, cold, wet, dry), ~ round(100 * .x, 1))) %>%
+  knitr::kable(caption = paste0(
+    "Country-years from ", START, " (%) with a deviation beyond the largest of the model's own ",
+    "estimation sample, on each side (where the capped variant differs)"))
+```
+
+# Selecting a scenario
+
+`select_scenarios()` reads the scenarios of the given RCPs and SAI settings
+(`rcp`: "RCP3PD", "RCP45", "RCP6", "RCP85"; `term`: "BASE", "NOTERM" or a
+termination year; `seed`: NULL for all ten), and returns, for the countries
+`regions` (NULL: all; ISO3 codes; "WORLD" for the model's global temperature):
+
+- `what = "gdp_loss"`: the GDP loss from `start` (pooled median and band, and
+  each seed), as estimated or `capped`;
+- `what = "temperature"` or `"precipitation"`: each seed's series
+  (population-weighted over the countries), and the seed mean without natural
+  variability.
+
+`plot_scenarios()` plots a selection, or takes the same arguments directly.
+
+```{r example-loss, fig.width=12, fig.height=5.5}
+plot_scenarios(rcp = c("RCP45", "RCP85"), term = c("BASE", "NOTERM", "2050", "2080"),
+               what = "gdp_loss", capped = TRUE, model = model, draws = draws,
+               baseline = BASELINE)
+```
+
+```{r example-subset, fig.width=12, fig.height=5.5}
+south_asia <- select_scenarios(rcp = c("RCP45", "RCP85"), term = c("BASE", "NOTERM", "2070"),
+                               regions = c("IND", "PAK", "BGD", "NPL", "LKA"), model = model,
+                               draws = draws, baseline = BASELINE)
+plot_scenarios(south_asia)
+south_asia$summary %>%
+  filter(year %in% COUNTRY_YEARS) %>%
+  transmute(RCP = rcp_label, SAI = term_label, year,
+            across(c(low, value, high), ~ round(100 * .x, 1))) %>%
+  knitr::kable(caption = "South Asia: GDP loss (%), as estimated")
+```
+
+```{r example-climate, fig.width=12, fig.height=5.5}
+plot_scenarios(rcp = c("RCP45", "RCP85"), term = c("BASE", "NOTERM", "2070"),
+               what = "temperature", regions = c("IND", "PAK", "BGD", "NPL", "LKA"))
+plot_scenarios(rcp = c("RCP45", "RCP85"), term = c("BASE", "NOTERM", "2070"),
+               what = "precipitation", regions = "IND")
+```
