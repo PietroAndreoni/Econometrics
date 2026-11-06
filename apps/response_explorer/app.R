@@ -1,6 +1,6 @@
 # Weather response explorer: the growth response to temperature and
 # precipitation deviations, and the GDP effect of a permanent shift, for up to
-# three settings (a country's characteristics and a model each), under models
+# four settings (a country's characteristics and a model each), under models
 # fitted on demand (R/fit.R) on the panels of build_models.R.
 #
 #   Rscript apps/response_explorer/build_models.R   # once, after rendering the notebook
@@ -33,6 +33,8 @@ if (!file.exists(PANELS_FILE)) {
   stop("No ", PANELS_FILE, ": run Rscript apps/response_explorer/build_models.R from the project root.")
 }
 EXPLORER <- readRDS(PANELS_FILE)
+# The default low-income thresholds of the GDP sources (R/fit.R).
+EXPLORER$low_income <- low_income_thresholds(EXPLORER)
 SCENARIOS_FILE <- sub("panels[.]rds$", "scenarios.rds", PANELS_FILE)
 if (!file.exists(SCENARIOS_FILE)) {
   stop("No ", SCENARIOS_FILE, ": run Rscript apps/response_explorer/build_scenarios.R from the project root.")
@@ -40,6 +42,13 @@ if (!file.exists(SCENARIOS_FILE)) {
 SCEN <- readRDS(SCENARIOS_FILE)
 # The maps draw the sf borders of SCEN$world.
 loadNamespace("sf")
+# Each country's area by 5-degree latitude band, for the exposure chart of the
+# termination shocks (R/projection.R).
+LATITUDE_SHARES <- latitude_shares(SCEN$world, width = 5)
+# The reference climate of the exceedances of natural variability: a trailing
+# mean (years) or the panel's horizon (NA).
+EXCEEDANCE_REFERENCES <- c("Trailing 20 years" = "20", "Trailing 30 years" = "30",
+                           "Horizon mean (fixed)" = "horizon")
 # Each forcing scenario (code ssp119, ...) gives the global warming; its
 # forcing in W/m2 from the code (ssp245: 4.5).
 FORCING <- stats::setNames(sub("^ssp[0-9]([0-9])([0-9])$", "\\1.\\2", names(SCEN$scenarios)),
@@ -51,6 +60,16 @@ SCENARIO_CHOICES <- stats::setNames(names(SCEN$scenarios),
 # forcing's own SSP, or one SSP for all.
 ECONOMY_CHOICES <- c("Follow SSP-RCP" = "follow", SSP1 = "SSP1", SSP2 = "SSP2", SSP3 = "SSP3",
                      SSP4 = "SSP4", SSP5 = "SSP5")
+# The number of noise paths with natural variability (about 5 s a setting and
+# forcing per 200 paths).
+NOISE_PATH_CHOICES <- c("100", "200", "500", "1000")
+# What the global charts of the scenarios show.
+MEASURE_CHOICES <- c("Loss against no climate change (% of GDP)" = "loss",
+                     "Growth rate of world GDP (% a year)" = "growth",
+                     "Change of the growth rate by climate change (pp a year)" = "growth_change")
+if (is.null(EXPLORER$variability)) {
+  stop("No natural variability in ", PANELS_FILE, ": rerun Rscript apps/response_explorer/build_models.R.")
+}
 economy_of <- function(scenario, economy) {
   if (economy == "follow") SCEN$ssp$of_scenario[[scenario]] else economy
 }
@@ -71,22 +90,36 @@ MAP_GAIN <- "#2a78d6"
 MAP_ZERO <- "#f0efec"
 MAP_NA <- "#d9d8d4"
 
-N_SETTINGS <- 3
-# One fixed colour per setting (categorical slots 1-3, validated for any pair).
-SETTING_COLOURS <- c("#2a78d6", "#eb6834", "#1baf7a")
-DEFAULT_COUNTRIES <- c("IND", "ITA", "USA")
+N_SETTINGS <- 4
+# One fixed colour per setting (categorical slots 1-4 in their fixed order).
+SETTING_COLOURS <- c("#2a78d6", "#eb6834", "#1baf7a", "#eda100")
+DEFAULT_COUNTRIES <- c("IND", "ITA", "USA", "BRA")
 INK <- "#0b0b0b"
 INK_MUTED <- "#52514e"
 GRID <- "#e6e5e1"
 SURFACE <- "#fcfcfb"
-FORM_SHORT <- c("Linear arms" = "linear arms", "Quadratic arms" = "quadratic arms")
+FORM_SHORT <- c("Linear arms" = "linear arms", "Quadratic arms" = "quadratic arms",
+                "Linear + quadratic arms" = "linear + quadratic arms")
+# The arms of variable v ("TM", "RR") of a model (one form: both).
+form_of <- function(m, v) if (length(m$form) == 1) m$form else m$form[[v]]
+# The short label of the arms of T and P (one when they are the same).
+form_label <- function(form, symmetric = FALSE) {
+  form <- c(TM = unname(form[[1]]), RR = unname(form[[length(form)]]))
+  out <- if (form[["TM"]] == form[["RR"]]) FORM_SHORT[[form[["TM"]]]]
+         else paste0("T ", FORM_SHORT[[form[["TM"]]]], ", P ", FORM_SHORT[[form[["RR"]]]])
+  if (isTRUE(symmetric)) paste(out, "(symmetric)") else out
+}
 # The modifiers a variable's deviation terms can be interacted with (in the
 # order of build_models.R), their names in the inputs and in the labels.
-MODIFIERS <- c("Long-run climate" = "clim", "Income" = "inc", "Agricultural share" = "agr",
-               "Capital per capita (PWT)" = "kap")
-# Ticked by default (capital is an extra).
-DEFAULT_MODIFIERS <- c("clim", "inc", "agr")
-MODIFIER_SHORT <- c(clim = "climate", inc = "income", agr = "share", kap = "capital")
+MODIFIERS <- c("Long-run climate" = "clim", "Last year's value (KW)" = "lag", "This year's value (BHM)" = "cur",
+               "Income" = "inc", "Agricultural share" = "agr",
+               "Capital per capita (PWT)" = "kap", "Low income (below the threshold)" = "low")
+# Ticked by default, by variable: the preferred specification of
+# handout_preferred_specification.Rmd (T: climate, scaled by income; P:
+# climate and share).
+DEFAULT_MODIFIERS <- list(inter_T = "clim", inter_P = c("clim", "agr"))
+MODIFIER_SHORT <- c(clim = "climate", lag = "last year's value", cur = "this year's value", inc = "income",
+                    agr = "share", kap = "capital", low = "low income")
 
 # What the paths and losses of settings `sp` are of: GDP, capital per capita,
 # GDP per worker, or "outcome" when the settings differ (each setting's label
@@ -95,9 +128,18 @@ quantity_of <- function(sp) {
   outcomes <- unique(vapply(sp, function(s) s$model$outcome %||% "log", ""))
   if (identical(outcomes, "log")) return("GDP")
   if (length(outcomes) > 1) return("outcome")
-  c(capital = "capital per capita", worker = "GDP per worker")[[outcomes]]
+  c(lgdp = "GDP", capital = "capital per capita", worker = "GDP per worker")[[outcomes]]
 }
 first_upper <- function(x) paste0(toupper(substring(x, 1, 1)), substring(x, 2))
+# A regression unit (baseline) in the labels: "level", "20-year", "horizon",
+# "NRK filter"; with first differences (style "diff", or "both" with the unit
+# itself), e.g. "level, first difference (KW)".
+baseline_label <- function(b, style = "simple") {
+  out <- switch(b, "NRK filter" = b, tolower(b))
+  switch(style, simple = out, diff = paste0(out, ", first difference", if (b == "Level") " (KW)"),
+         both = paste0(out, " and its first difference"))
+}
+model_style <- function(m) if (isTRUE(m$diff)) "diff" else if (isTRUE(m$both)) "both" else "simple"
 
 # Short description of the interactions: one list if T and P have the same.
 interaction_label <- function(inter) {
@@ -112,57 +154,96 @@ interaction_label <- function(inter) {
 stars <- function(p) ifelse(is.na(p), "", ifelse(p < 0.01, "***", ifelse(p < 0.05, "**", ifelse(p < 0.1, "*", ""))))
 # Readable names of the model's terms: "T warm arm x long-run T (spline 1)",
 # "level: log income".
-ARM_LABELS <- c(TM_pos = "T warm arm", TM_neg = "T cold arm", RR_pos = "P wet arm", RR_neg = "P dry arm")
-CHARACTERISTIC_LABELS <- c(clim_TM = "long-run T", clim_RR = "long-run P", inc = "log income",
-                           agr = "agricultural share", kap = "log capital per capita")
+ARM_LABELS <- c(TM_pos = "T warm arm", TM_neg = "T cold arm", RR_pos = "P wet arm", RR_neg = "P dry arm",
+                TM_sym = "T deviation (symmetric)", RR_sym = "P deviation (symmetric)")
+CHARACTERISTIC_LABELS <- c(clim_TM = "long-run T", clim_RR = "long-run P", lag_TM = "last year's T",
+                           lag_RR = "last year's P", cur_TM = "this year's T", cur_RR = "this year's P",
+                           inc = "log income",
+                           agr = "agricultural share", kap = "log capital per capita", low = "low income (dummy)")
 characteristic_label <- function(z) {
   base <- sub("_nl[0-9]+$", "", z)
   out <- CHARACTERISTIC_LABELS[[base]]
   if (base != z) out <- paste0(out, " (spline ", sub(".*_nl", "", z), ")")
   out
 }
+# A term's label, with ", lag k" for the terms (and levels) of lag k.
 term_label <- function(term) {
-  if (startsWith(term, "level:idol_")) {
-    return(paste0("Level: (Ybar / Y)^(1 - xi_", if (endsWith(term, "TM")) "T" else "P", ")"))
+  lag <- if (grepl("\\.l[0-9]+$", term)) sub(".*\\.l", "", term)
+  term <- gsub("\\.l[0-9]+", "", term)
+  label <- if (startsWith(term, "convergence:")) {
+    paste("Convergence:", CONVERGENCE_SHORT[[sub("^convergence:", "", term)]])
+  } else if (startsWith(term, "quad:")) {
+    # "quad:<kind>:quad_TM" or "quad:<kind>:quad_TM_sq".
+    parts <- strsplit(term, ":", fixed = TRUE)[[1]]
+    paste0("Control: ", QUAD_SHORT[[parts[[2]]]], " ", if (grepl("TM", parts[[3]])) "T" else "P",
+           if (endsWith(parts[[3]], "_sq")) " (squared)")
+  } else if (startsWith(term, "level:idol_")) {
+    paste0("Level: (Ybar / Y)^(1 - xi_", if (endsWith(term, "TM")) "T" else "P", ")")
+  } else if (startsWith(term, "level:")) {
+    paste("Level:", characteristic_label(sub("^level:", "", term)))
+  } else {
+    parts <- strsplit(term, ":", fixed = TRUE)[[1]]
+    scaled <- "idol" %in% parts
+    parts <- parts[parts != "idol"]
+    arm <- substring(parts[[1]], 4)
+    # The first-difference terms of style "both".
+    differenced <- grepl("^(TM|RR)_d_", arm)
+    arm <- sub("_d_", "_", arm)
+    out <- ARM_LABELS[[sub("2$", "", arm)]]
+    if (differenced) out <- paste(out, "of the first difference")
+    if (endsWith(arm, "2")) out <- paste(out, "(squared)")
+    if (length(parts) > 1) out <- paste(out, "×", characteristic_label(parts[[2]]))
+    if (scaled) out <- paste0(out, " × (Ybar / Y)^(1 - xi_", if (startsWith(arm, "TM")) "T" else "P", ")")
+    out
   }
-  if (startsWith(term, "level:")) return(paste("Level:", characteristic_label(sub("^level:", "", term))))
-  parts <- strsplit(term, ":", fixed = TRUE)[[1]]
-  scaled <- "idol" %in% parts
-  parts <- parts[parts != "idol"]
-  arm <- substring(parts[[1]], 4)
-  label <- ARM_LABELS[[sub("2$", "", arm)]]
-  if (endsWith(arm, "2")) label <- paste(label, "(squared)")
-  if (length(parts) > 1) label <- paste(label, "×", characteristic_label(parts[[2]]))
-  if (scaled) label <- paste0(label, " × (Ybar / Y)^(1 - xi_", if (startsWith(arm, "TM")) "T" else "P", ")")
-  label
+  if (is.null(lag)) label else paste0(label, ", lag ", lag)
 }
 
 # The specification of a model in LaTeX (MathJax): the equation, and the
 # definitions of its terms (HTML with inline maths).
 spec_symbols <- function(m) {
   trailing <- identical(m$moderators, "trailing")
-  clim_t <- trailing && m$window != "all"
+  clim_t <- trailing && trailing_window(m$window)
   list(
     clim = function(v) paste0("c_{", v, if (clim_t) ",it" else ",i", "}"),
     inc = if (trailing) "y_{it}" else "y_{i}",
     agr = if (isTRUE(m$share_trailing)) "s_{it}" else "s_{i}",
     kap = if (trailing) "k_{it}" else "k_{i}",
+    low = if (trailing) "L_{it}" else "L_{i}",
     clim_t = clim_t, inc_t = trailing, agr_t = isTRUE(m$share_trailing)
   )
 }
 spec_equation <- function(m) {
   sym <- spec_symbols(m)
-  power <- if (m$form == "Quadratic arms") "^{2}" else ""
+  # The powers of the arms of a variable: linear, squared, or both.
+  powers_of <- function(column) {
+    switch(form_of(m, column), "Quadratic arms" = "^{2}", "Linear + quadratic arms" = c("", "^{2}"), "")
+  }
   splines <- identical(m$shape, "splines")
-  z_of <- function(v, z) if (z == "clim") sym$clim(v) else sym[[z]]
-  letter <- c(clim = "c", inc = "y", agr = "s", kap = "k")
+  symmetric <- isTRUE(m$symmetric)
+  # The own-climate modifiers of v (T, P): long-run climate, last year's and
+  # this year's value (centred).
+  own <- list(clim = sym$clim, lag = function(v) paste0(v, "_{i,t-1}"), cur = function(v) paste0(v, "_{it}"))
+  z_of <- function(v, z) if (z %in% names(own)) own[[z]](v) else sym[[z]]
+  letter <- c(clim = "c", lag = "\\ell", cur = "v", inc = "y", agr = "s", kap = "k", low = "L")
   # The arm's coefficient and interactions; with a tilde, those of the terms
-  # times Ybar / Y (equal dollars).
-  inner_of <- function(v, tilde) {
-    t <- function(s) if (tilde) paste0("\\tilde{", s, "}") else s
-    paste0(t("\\beta"), "^{a}_{", v, "}", paste0(vapply(m$inter[[if (v == "T") "TM" else "RR"]], function(z) {
-      if (splines) paste0(" + ", t("g"), "^{a}_{", v, ",", letter[[z]], "}\\!\\left(", z_of(v, z), "\\right)")
-      else paste0(" + ", t("\\gamma"), "^{a}_{", v, ",", letter[[z]], "}\\, ", z_of(v, z))
+  # times Ybar / Y (equal dollars); with `sq`, those of the squared arm when
+  # both enter (superscript a,2). Symmetric: one coefficient for both sides
+  # (superscript 2 for the squared term when both enter).
+  # With lags, every coefficient has its lag k (a left superscript).
+  lags <- m$lags %||% 0L
+  # With style "both", the coefficients of the first-difference terms (`d`)
+  # wear a breve.
+  inner_of <- function(v, tilde, sq = FALSE, d = FALSE) {
+    t <- function(s) {
+      if (d) s <- paste0("\\breve{", s, "}")
+      paste0(if (lags > 0) "{}^{k}", if (tilde) paste0("\\tilde{", s, "}") else s)
+    }
+    a <- if (symmetric) (if (sq) "2" else "") else if (sq) "a,2" else "a"
+    sup <- if (nzchar(a)) paste0("^{", a, "}") else ""
+    paste0(t("\\beta"), sup, "_{", v, "}", paste0(vapply(m$inter[[if (v == "T") "TM" else "RR"]], function(z) {
+      if (splines) paste0(" + ", t("g"), sup, "_{", v, ",", letter[[z]], "}\\!\\left(", z_of(v, z), "\\right)")
+      else paste0(" + ", t("\\gamma"), sup, "_{", v, ",", letter[[z]], "}\\, ", z_of(v, z))
     }, ""), collapse = ""))
   }
   forms <- model_income_forms(m)
@@ -171,33 +252,84 @@ spec_equation <- function(m) {
     base <- paste0("\\frac{\\bar Y}{Y_{", if (identical(m$moderators, "trailing")) "it" else "i", "}}")
     if (power == 1) base else paste0("\\left(", base, "\\right)^{", format(power), "}")
   }
-  block <- function(v) {
+  # d: the block of the first differences (style "both": \Delta x, and the
+  # arms D of \Delta x).
+  block <- function(v, d = FALSE) {
     column <- if (v == "T") "TM" else "RR"
     ratio <- ratio_of(column)
-    inner <- switch(forms$form[[column]],
-                    standard = paste0("\\Big(", inner_of(v, FALSE), "\\Big)"),
-                    dollars = paste0("\\Big(", inner_of(v, TRUE), "\\Big) ", ratio),
-                    both = paste0("\\Big[\\Big(", inner_of(v, FALSE), "\\Big) + \\Big(", inner_of(v, TRUE),
-                                  "\\Big) ", ratio, "\\Big]"))
-    paste0("\\sum_{a \\in \\{+,-\\}} ", inner, " \\big(D^{a}_{", v, ",it}\\big)", power)
-  }
-  levels <- unique(sub("_nl[0-9]+$", "", m$levels$term))
-  level_terms <- vapply(levels, function(z) {
-    if (startsWith(z, "idol_")) {
-      return(paste0(" + \\phi_{r,", if (z == "idol_TM") "T" else "P", "}\\, ", ratio_of(sub("^idol_", "", z))))
+    powers <- powers_of(column)
+    delta <- if (d) "\\Delta " else ""
+    one <- function(power) {
+      sq <- length(powers) > 1 && power != ""
+      inner <- switch(forms$form[[column]],
+                      standard = paste0("\\Big(", inner_of(v, FALSE, sq, d), "\\Big)"),
+                      dollars = paste0("\\Big(", inner_of(v, TRUE, sq, d), "\\Big) ", ratio),
+                      both = paste0("\\Big[\\Big(", inner_of(v, FALSE, sq, d), "\\Big) + \\Big(", inner_of(v, TRUE, sq, d),
+                                    "\\Big) ", ratio, "\\Big]"))
+      paste0(inner, if (symmetric) paste0(" \\, ", delta, "x_{", v, ",it}")
+             else paste0(" \\big(D^{a}_{", delta, v, ",it}\\big)"), power)
     }
-    x <- switch(z, clim_TM = sym$clim("T"), clim_RR = sym$clim("P"), inc = sym$inc, agr = sym$agr, kap = sym$kap)
-    name <- switch(z, clim_TM = "c_T", clim_RR = "c_P", inc = "y", agr = "s", kap = "k")
-    if (splines) paste0(" + h_{", name, "}\\!\\left(", x, "\\right)") else paste0(" + \\phi_{", name, "}\\, ", x)
-  }, "")
-  fe <- switch(m$fe, unit = "\\lambda_t + \\alpha_i", linear = "\\lambda_t + \\alpha_i + \\delta_i t",
-               quadratic = "\\lambda_t + \\alpha_i + \\delta_i t + \\eta_i t^{2}")
+    terms <- vapply(powers, one, "")
+    out <- if (symmetric) paste(terms, collapse = " + ") else {
+      paste0("\\sum_{a \\in \\{+,-\\}} ",
+             if (length(terms) > 1) paste0("\\Big\\{", paste(terms, collapse = " + "), "\\Big\\}") else terms)
+    }
+    over_lags(out)
+  }
+  # With lags: the sum over k = 0..L of the terms of year t - k.
+  at_lag <- function(x) gsub("{i,t-1}", "{i,t-k-1}", gsub("{it}", "{i,t-k}", gsub(",it}", ",i,t-k}", x, fixed = TRUE),
+                                                     fixed = TRUE), fixed = TRUE)
+  over_lags <- function(x) {
+    if (lags == 0 || !nzchar(x)) return(x)
+    paste0("\\sum_{k=0}^{", lags, "} \\Big[", at_lag(x), "\\Big]")
+  }
+  levels <- unique(sub("_nl[0-9]+$", "", gsub("\\.l[0-9]+", "", m$levels$term)))
+  # The levels with lags (the time-varying ones), and the constant ones (no
+  # unit effects), outside the sum over the lags.
+  lagged <- unique(sub("_nl[0-9]+$", "", sub("\\.l[0-9]+$", "", grep("\\.l[0-9]+$", m$levels$term, value = TRUE))))
+  level_term <- function(z, k_of) {
+    if (startsWith(z, "idol_")) {
+      return(paste0(" + ", k_of, "\\phi_{r,", if (z == "idol_TM") "T" else "P", "}\\, ", ratio_of(sub("^idol_", "", z))))
+    }
+    if (grepl("^(clim|lag|cur)_", z)) {
+      kind <- sub("_.*", "", z)
+      v <- if (endsWith(z, "TM")) "T" else "P"
+      x <- own[[kind]](v)
+      name <- paste0(letter[[kind]], "_", v)
+    } else {
+      x <- switch(z, inc = sym$inc, agr = sym$agr, kap = sym$kap, low = sym$low)
+      name <- switch(z, inc = "y", agr = "s", kap = "k", low = "L")
+    }
+    if (splines) paste0(" + ", k_of, "h_{", name, "}\\!\\left(", x, "\\right)") else paste0(" + ", k_of, "\\phi_{", name, "}\\, ", x)
+  }
+  with_lags <- if (lags > 0) intersect(levels, lagged) else levels
+  level_terms <- vapply(with_lags, level_term, "", if (lags > 0) "{}^{k}" else "")
+  constant_terms <- paste(vapply(setdiff(levels, with_lags), level_term, "", ""), collapse = "")
+  effects <- m$effects %||% "both"
+  unit_fe <- switch(m$fe, unit = "\\alpha_i", linear = "\\alpha_i + \\delta_i t",
+                    quadratic = "\\alpha_i + \\delta_i t + \\eta_i t^{2}")
+  fe <- switch(effects, both = paste("\\lambda_t +", unit_fe), unit = unit_fe, year = "\\lambda_t")
+  convergence <- switch(m$convergence %||% "none", none = "",
+                        lag1 = " + \\rho \\ln \\mathrm{GDPpc}_{i,t-1}",
+                        growth1 = " + \\rho\\, \\Delta \\ln \\mathrm{GDPpc}_{i,t-1}",
+                        growth2 = " + \\rho\\, \\Delta \\ln \\mathrm{GDPpc}_{i,t-2}",
+                        mean5 = " + \\rho \\ln\\big(\\tfrac{1}{5}\\textstyle\\sum_{k=1}^{5} \\mathrm{GDPpc}_{i,t-k}\\big)")
   lhs <- switch(m$outcome %||% "log",
                 log = "\\Delta \\ln \\mathrm{GDPpc}_{it}",
+                lgdp = "\\ln \\mathrm{GDPpc}_{it}",
                 capital = "\\Delta \\ln \\mathrm{Kpc}_{it}",
                 worker = "\\Delta \\ln \\big(\\mathrm{GDP}_{it} / L_{it}\\big)")
-  paste0("\\begin{aligned} ", lhs, " = {} & ", block("T"), " \\\\ & + ", block("P"),
-         " \\\\ & ", paste(level_terms, collapse = ""), " + \\kappa' C_{it} + ", fe, " + \\varepsilon_{it}",
+  both <- isTRUE(m$both)
+  paste0("\\begin{aligned} ", lhs, " = {} & ", block("T"), if (both) paste0(" \\\\ & + ", block("T", TRUE)),
+         " \\\\ & + ", block("P"), if (both) paste0(" \\\\ & + ", block("P", TRUE)),
+         " \\\\ & ", if (length(level_terms)) paste0(" + ", over_lags(sub("^ \\+ ", "", paste(level_terms, collapse = "")))),
+         constant_terms, convergence,
+         paste(vapply(names(m$quad %||% character(0))[(m$quad %||% character(0)) != "none"], function(v) {
+           s <- if (v == "TM") "T" else "P"
+           sprintf(" + \\theta_{%s,1} Z_{%s,it} + \\theta_{%s,2} Z_{%s,it}^{2}", s, s, s, s)
+         }, ""), collapse = ""),
+         if (length(m$controls %||% CONTROL_CHOICES)) " + \\kappa' C_{it}",
+         " + ", fe, " + \\varepsilon_{it}",
          " \\end{aligned}")
 }
 spec_definitions <- function(m) {
@@ -205,8 +337,15 @@ spec_definitions <- function(m) {
   used <- unique(unlist(m$inter))
   start <- m$horizon[[1]]
   end <- m$horizon[[2]]
-  w <- if (m$window == "all") NA else sub("lag_", "", m$window)
+  w <- if (!trailing_window(m$window)) NA else sub("lag_", "", m$window)
   absolute <- identical(m$units, "absolute")
+  nrk <- identical(m$window, "nrk")
+  symmetric <- isTRUE(m$symmetric)
+  level <- identical(m$window, "level")
+  effects <- m$effects %||% "both"
+  no_unit <- effects == "year"
+  # How a constant characteristic enters on its own.
+  constant_text <- if (no_unit) "with its level term (no country effects)" else "absorbed by \\(\\alpha_i\\) on its own"
   baseline <- if (is.na(w)) {
     sprintf(paste0("\\(\\mu_{v,i}\\) and \\(\\sigma_{v,i}\\): the mean and SD of \\(v_{it}\\) over %d-%d ",
                    "(horizon baseline)"), start, end)
@@ -216,7 +355,24 @@ spec_definitions <- function(m) {
   }
   mu <- if (is.na(w)) "\\mu_{v,i}" else "\\mu_{v,it}"
   sigma <- if (is.na(w)) "\\sigma_{v,i}" else "\\sigma_{v,it}"
-  deviation <- if (absolute) {
+  deviation <- if (level) {
+    sprintf("Regression unit of \\(v \\in \\{T, P\\}\\): the level, %s.",
+            if (absolute) "\\(x_{v,it} = v_{it}\\) (C, m)"
+            else sprintf("\\(x_{v,it} = v_{it} / \\sigma_{v,i}\\), \\(\\sigma_{v,i}\\) the SD of \\(v_{it}\\) over %d-%d", start, end))
+  } else if (nrk) {
+    f <- m$filter
+    sprintf(paste0(
+      "Deviation of \\(v \\in \\{T, P\\}\\): the innovation \\(\\tau_{v,it}\\) of the nonlinear autoregressive ",
+      "filter of Nath, Ramey and Klenow (Eq. 4), pooled over the countries, ",
+      "\\(v_{it} = \\sum_{j=1}^{3} g_j v_{i,t-j} + \\sum_{j=1}^{3} h_j v_{i,t-j} \\bar v_i + \\mu_i + \\tau_{v,it}\\) ",
+      "(\\(\\bar v_i\\) the country's mean over %d-%d; country effects, no year effects), fitted on the annual ",
+      "climate from 1950; %s. The lags weigh \\(\\phi_j = g_j + h_j \\bar v_i\\): ",
+      "T \\(g\\) = (%s), \\(h\\) = (%s); P \\(g\\) = (%s), \\(h\\) = (%s)."),
+      start, end, if (absolute) "\\(x_{v,it} = \\tau_{v,it}\\) in absolute units (C, m)"
+      else "\\(x_{v,it} = \\tau_{v,it} / \\sigma^{\\tau}_{v,i}\\), with \\(\\sigma^{\\tau}_{v,i}\\) its SD in the country over the horizon",
+      paste(sprintf("%.3f", f$TM$g), collapse = ", "), paste(sprintf("%.4f", f$TM$h), collapse = ", "),
+      paste(sprintf("%.3f", f$RR$g), collapse = ", "), paste(sprintf("%.3f", f$RR$h), collapse = ", "))
+  } else if (absolute) {
     sprintf("Deviation of \\(v \\in \\{T, P\\}\\) in absolute units (C, m): \\(x_{v,it} = v_{it} - %s\\), with %s.",
             mu, baseline)
   } else {
@@ -227,6 +383,9 @@ spec_definitions <- function(m) {
                   quadratic = "\\hat a_i + \\hat b_i t + \\hat c_i t^{2}")
   outcome <- switch(m$outcome %||% "log",
     log = NULL,
+    lgdp = paste0(
+      "Outcome: the log of GDP per capita itself (a level, not its growth). The effect of a year is on that year's ",
+      "log GDP: in the paths and scenarios the effects are not summed over the years."),
     capital = paste0(
       "Outcome: the growth of the capital stock per capita, \\(\\mathrm{Kpc}_{it}\\) = PWT rnna / pop (constant ",
       "national prices, as GDP). Responses and losses are of capital per capita."),
@@ -234,23 +393,70 @@ spec_definitions <- function(m) {
       "Outcome: the growth of GDP per worker, \\(\\mathrm{GDP}_{it} / L_{it}\\) = PWT rgdpna / emp (persons ",
       "engaged): the growth of GDP per capita less that of employment per head. Responses and losses are of ",
       "GDP per worker."))
+  # How the terms of T and P enter: one phrase when they are the same,
+  # otherwise one for each, e.g. "; T: entering linearly; P: entering squared".
+  per_form <- function(phrases) {
+    p <- vapply(c("TM", "RR"), function(v) phrases[[form_of(m, v)]], "")
+    if (p[["TM"]] == p[["RR"]]) p[["TM"]] else paste0("; T", sub("^[,:]", ":", p[["TM"]]), "; P", sub("^[,:]", ":", p[["RR"]]))
+  }
+  powers_text <- per_form(c("Linear arms" = ", entering linearly", "Quadratic arms" = ", entering squared",
+                            "Linear + quadratic arms" = ", entering linearly and squared"))
   out <- c(
     outcome,
     deviation,
-    sprintf(paste0("Demeaned before the arms are cut: \\(d_{v,it} = x_{v,it} - (%s)\\), fitted by OLS for each ",
-                   "country over %d-%d; arms \\(D^{+}_{v,it} = \\max(d_{v,it}, 0)\\), ",
-                   "\\(D^{-}_{v,it} = \\max(-d_{v,it}, 0)\\)%s."),
-            trend, start - 10L, end, if (m$form == "Quadratic arms") ", entering squared" else "")
+    if (isTRUE(m$diff)) {
+      paste0("First order difference: below \\(x_{v,it}\\) stands for \\(x_{v,it} - x_{v,i,t-1}\\) of the unit above",
+             if (level) " (with the level, as Kalkuhl and Wenz: this year's value less last year's)", ".")
+    } else if (isTRUE(m$both)) {
+      paste0("Both: the unit \\(x_{v,it}\\) and its first difference \\(\\Delta x_{v,it} = x_{v,it} - x_{v,i,t-1}\\) ",
+             "enter, each with arms and interactions of its own (the coefficients of the first-difference terms ",
+             "with a breve, \\(\\breve\\beta\\)); \\(\\Delta x\\) is demeaned and cut into arms \\(D^{a}_{\\Delta v,it}\\) ",
+             "as \\(x\\) below. In the ",
+             "responses a year at \\(x\\) follows a year at zero (\\(\\Delta x = x\\)); in the paths and scenarios both ",
+             "follow the anomalies.",
+             if (level && (symmetric || no_unit)) " The level as it is enters as the long-run level plus the anomaly, less the long-run level.")
+    } else if (level && (symmetric || no_unit)) {
+      paste0("The level as it is: in the responses, paths and scenarios the effect of an anomaly is that of the ",
+             "country's long-run level plus the anomaly less that of the long-run level.")
+    } else if (level) {
+      "Demeaned like the deviations, the level is the same as the deviation from the horizon mean."
+    },
+    if (symmetric) {
+      sprintf(paste0("Symmetric: the deviation \\(x_{v,it}\\) enters unsplit and %s (one coefficient for both ",
+                     "sides%s)."),
+              if (nrk) "as it is" else "not demeaned",
+              per_form(c("Quadratic arms" = ": only its square, so years of the same size above and below the baseline have the same effect",
+                         "Linear + quadratic arms" = ", linearly and squared",
+                         "Linear arms" = ": a year \\(x\\) below the baseline has minus the effect of one \\(x\\) above")))
+    } else if (nrk || no_unit) {
+      sprintf(paste0("Not demeaned before the arms are cut (%s): arms ",
+                     "\\(D^{+}_{v,it} = \\max(x_{v,it}, 0)\\), \\(D^{-}_{v,it} = \\max(-x_{v,it}, 0)\\)%s."),
+              if (nrk) "the filter has country effects" else "no country effects", powers_text)
+    } else {
+      sprintf(paste0("Demeaned before the arms are cut: \\(d_{v,it} = x_{v,it} - (%s)\\), fitted by OLS for each ",
+                     "country over %d-%d; arms \\(D^{+}_{v,it} = \\max(d_{v,it}, 0)\\), ",
+                     "\\(D^{-}_{v,it} = \\max(-d_{v,it}, 0)\\)%s."),
+              trend, start - 10L, end, powers_text)
+    }
   )
+  if (any(c("lag", "cur") %in% used)) {
+    out <- c(out, sprintf(paste0(
+      "%s: \\(v \\in \\{T, P\\}\\) (C, m a year) less the median over the countries of their %d-%d means; ",
+      "time-varying, so with its level term%s. In the responses this year's value is the country's long-run ",
+      "climate plus the anomaly (last year's at the long-run climate); in the paths and scenarios both follow ",
+      "the anomalies."),
+      paste(c(if ("lag" %in% used) "Last year's value \\(v_{i,t-1}\\) (as Kalkuhl and Wenz)",
+              if ("cur" %in% used) "this year's value \\(v_{it}\\) (as Burke, Hsiang and Miguel)"), collapse = " and "),
+      start, end, if (all(c("lag", "cur") %in% used)) "s" else ""))
+  }
   if ("clim" %in% used) {
     out <- c(out, if (sym$clim_t) {
-      sprintf(paste0("Climate: \\(c_{v,it} = \\mu_{v,it} - \\operatorname{med}_j \\bar v_j\\), the trailing ",
-                     "%s-year mean (the deviation's own baseline) less the median over the countries of their ",
-                     "%d-%d means."), w, start, end)
+      sprintf(paste0("Climate: \\(c_{v,it} = \\mu_{v,it} - \\operatorname{med}_j \\bar v_j\\), %s (the deviation's ",
+                     "own baseline) less the median over the countries of their %d-%d means."),
+              sprintf("the trailing %s-year mean", w), start, end)
     } else {
       sprintf(paste0("Climate: \\(c_{v,i} = \\bar v_i - \\operatorname{med}_j \\bar v_j\\), the country's mean ",
-                     "over %d-%d less the median over the countries (constant: absorbed by \\(\\alpha_i\\) on ",
-                     "its own)."), start, end)
+                     "over %d-%d less the median over the countries (constant: %s)."), start, end, constant_text)
     })
   }
   if ("inc" %in% used) {
@@ -281,6 +487,17 @@ spec_definitions <- function(m) {
               start, end)
     })
   }
+  if ("low" %in% used) {
+    y_low <- if (sym$inc_t) "Y_{it}" else "Y_{i}"
+    out <- c(out, sprintf(paste0(
+      "Low income: \\(%s = 1\\) when \\(%s\\) (the income of the interactions: %s) is below %s %s, otherwise 0. ",
+      "The default threshold is the World Bank's low-income line (FY2017, US$1,025 of 2015 GNI per capita), ",
+      "converted for PWT to 2021 PPP with the median PWT / WB income ratio of the country-years under it. ",
+      "Entered as one more interaction of each arm%s."),
+      sym$low, y_low, if (sym$inc_t) "the trailing mean of the 5 years before" else "the mean over the sample",
+      format(round(m$low_threshold), big.mark = ","), EXPLORER$income_units[[m$gdp]],
+      if (sym$inc_t) ", with its level term" else paste0(" (constant: ", constant_text, ")")))
+  }
   forms <- model_income_forms(m)
   scaled_v <- c(TM = "T", RR = "P")[forms$form != "standard"]
   if (length(scaled_v)) {
@@ -309,21 +526,84 @@ spec_definitions <- function(m) {
         "), the model nests equal % (\\(\\tilde\\beta = \\tilde\\gamma = 0\\)) and the scaled form ",
         "(\\(\\beta = \\gamma = 0\\)), tested in the table"), "."))
   }
+  if ((m$lags %||% 0L) > 0) {
+    out <- c(out, sprintf(paste0(
+      "Lags: every deviation term also enters at \\(t-k\\), \\(k = 1, \\dots, %d\\), with coefficients of its own ",
+      "(\\({}^{k}\\beta\\), \\({}^{k}\\gamma\\)) and the characteristics of year \\(t-k\\) (the interactions lagged with ",
+      "it; the time-varying characteristics with their lagged level terms). The lags of the first years and after ",
+      "a gap come from the years without a row (from %d). Responses: the cumulative effect of one year's anomaly on ",
+      "that year's growth and the next %d years' (the sum over \\(k\\)); paths and scenarios: each year's growth ",
+      "sums the effects of the deviations of that year and the %d before."),
+      m$lags, start - 10L, m$lags, m$lags))
+  }
   if (identical(m$shape, "splines")) {
-    out <- c(out, paste0("Splines: \\(g(z) = \\gamma z + \\sum_{j=1}^{2} \\gamma_j [r_j(z) - r_j(0)]\\), ",
+    out <- c(out, paste0("Splines:\\(g(z) = \\gamma z + \\sum_{j=1}^{2} \\gamma_j [r_j(z) - r_j(0)]\\), ",
                          "restricted cubic spline with knots at the 5, 35, 65 and 95th percentiles of the ",
                          "countries' values (linear beyond the outer knots); one set of coefficients per arm."))
   }
   if (nrow(m$levels)) {
     out <- c(out, paste0("Level terms (\\(\\phi\\)", if (identical(m$shape, "splines")) ", \\(h\\)", "): the ",
-                         "time-varying characteristics that enter an interaction also enter on their own."))
+                         if (no_unit) "characteristics" else "time-varying characteristics",
+                         " that enter an interaction also enter on their own",
+                         if (no_unit) " (without country effects the constant ones too, unlagged)", "."))
+  }
+  if (!identical(m$convergence %||% "none", "none")) {
+    growth <- m$convergence %in% c("growth1", "growth2")
+    out <- c(out, sprintf(paste0(
+      "Convergence: \\(\\rho\\) on %s (%s, the GDP source's), a control whatever the interactions, not in the ",
+      "responses, paths or scenarios; %s %s"),
+      switch(m$convergence, lag1 = "\\(\\ln \\mathrm{GDPpc}_{i,t-1}\\)",
+             mean5 = "\\(\\ln\\big(\\frac{1}{5}\\sum_{k=1}^{5} \\mathrm{GDPpc}_{i,t-k}\\big)\\)",
+             growth1 = "\\(\\Delta \\ln \\mathrm{GDPpc}_{i,t-1}\\)",
+             growth2 = "\\(\\Delta \\ln \\mathrm{GDPpc}_{i,t-2}\\)"),
+      CONVERGENCE_SHORT[[m$convergence]],
+      if (growth) paste0(if (m$convergence == "growth1") "the lagged dependent variable" else
+                           "the dependent variable's second lag, which leaves out year t−1 and its shared shocks",
+                         " (for the outcomes other than GDP per capita, still GDP per capita's growth): ",
+                         "\\(\\rho\\) is the persistence of growth, and \\(\\rho < 0\\) means part of a shock to ",
+                         "growth is reversed ", if (m$convergence == "growth1") "the next year." else "two years later.")
+      else "\\(\\rho < 0\\): conditional convergence.",
+      if (no_unit) {
+        if (growth) "Without country effects, it also picks up differences in mean growth across countries."
+        else "Without country effects, it compares income levels across countries."
+      } else paste0("With country effects it is a within-country ", if (growth) "coefficient" else "rate",
+                    ", with a Nickell bias of order 1/T (T about 50 years).")))
+  }
+  quad <- m$quad %||% c(TM = "none", RR = "none")
+  for (v in names(quad)[quad != "none"]) {
+    s <- if (v == "TM") "T" else "P"
+    z <- switch(quad[[v]], cur = sprintf("%s_{it}", s), lag1 = sprintf("%s_{i,t-1}", s),
+                mean20 = sprintf("\\frac{1}{20}\\sum_{k=1}^{20} %s_{i,t-k}", s),
+                mean30 = sprintf("\\frac{1}{30}\\sum_{k=1}^{30} %s_{i,t-k}", s))
+    out <- c(out, sprintf(paste0(
+      "Quadratic control of %s: \\(Z_{%s,it} = %s - \\operatorname{med}_j \\bar %s_j\\) (%s, %s, less the ",
+      "median over the countries of their %d-%d means) and its square, a control whatever the interactions, not ",
+      "in the responses, paths or scenarios%s."),
+      s, s, z, s, if (startsWith(quad[[v]], "mean")) paste0(QUAD_SHORT[[quad[[v]]]], ", without year \\(t\\)")
+      else paste(QUAD_SHORT[[quad[[v]]]], "value"),
+      if (v == "TM") "C" else "m a year", start, end,
+      if (quad[[v]] == "cur") "; with this year's value it shares the variation of the deviation itself" else ""))
   }
   c(out, paste0(
-    "\\(\\lambda_t\\): year effects; \\(\\alpha_i\\): country effects",
-    switch(m$fe, unit = "", linear = "; \\(\\delta_i t\\): country linear trends",
-           quadratic = "; \\(\\delta_i t + \\eta_i t^{2}\\): country linear and quadratic trends"),
-    if (m$fe != "unit") " (\\(t\\) = year - 1990)", "; \\(C_{it}\\): conflict (minor, war) and Soviet and ",
-    "Yugoslav collapse-year dummies; \\(\\varepsilon_{it}\\) clustered by country."))
+    switch(effects, both = "\\(\\lambda_t\\): year effects; \\(\\alpha_i\\): country effects",
+           unit = "No year effects; \\(\\alpha_i\\): country effects",
+           year = "\\(\\lambda_t\\): year effects; no country effects or trends"),
+    if (!no_unit) switch(m$fe, unit = "", linear = "; \\(\\delta_i t\\): country linear trends",
+                         quadratic = "; \\(\\delta_i t + \\eta_i t^{2}\\): country linear and quadratic trends"),
+    if (!no_unit && m$fe != "unit") " (\\(t\\) = year - 1990)", control_text(m$controls %||% CONTROL_CHOICES),
+    "; \\(\\varepsilon_{it}\\) clustered by country. Sample: ", outlier_text(m$outliers %||% DEFAULT_OUTLIERS, m$gdp), "."))
+}
+# The controls and the outliers of a model, in words.
+control_text <- function(controls) {
+  parts <- c(conflict = "conflict (minor, war)", soviet = "post-Soviet collapse years",
+             yugoslav = "post-Yugoslav collapse years")[controls]
+  if (!length(parts)) return("; no controls")
+  paste0("; \\(C_{it}\\): ", paste(parts, collapse = ", "), " dummies")
+}
+outlier_text <- function(outliers, gdp = NULL) {
+  if (outliers == "none") return("every growth outlier kept")
+  sprintf(paste("the growth outliers whose cause does not involve weather dropped (those in %s",
+                "of %s x ERA5 from 1970)"), outlier_rule_words(outliers), gdp %||% "the GDP source's")
 }
 
 # Legend labels wrapped so that long setting labels stay inside the chart.
@@ -363,16 +643,65 @@ setting_ui <- function(id, n) {
     radioButtons(ns("units"), "Deviations in",
                  c("SD of the country's variability" = "SD", "Absolute units (C, m)" = "absolute"),
                  selected = "SD", inline = TRUE),
-    selectInput(ns("baseline"), "Long-run baseline of the deviations",
-                c("Horizon (sample period)" = "Horizon", "Trailing 20 years" = "20-year",
-                  "Trailing 30 years" = "30-year")),
-    selectInput(ns("fe"), "Fixed effects (the deviations are demeaned in the same way)",
-                FE_CHOICES, selected = "quadratic"),
-    selectInput(ns("form"), "Arms", c("Linear arms", "Quadratic arms")),
+    selectInput(ns("baseline"), "Regression unit", BASELINE_CHOICES, selected = "20-year"),
+    conditionalPanel(
+      "input.baseline == 'Level'", ns = ns,
+      helpText("T and P themselves (in SD units over the country's horizon SD). Demeaned like the deviations,",
+               "the level is the same as the horizon deviation: it differs as it is (symmetric, or without",
+               "unit effects) and in first differences (Kalkuhl and Wenz).")
+    ),
+    conditionalPanel(
+      "input.baseline == 'NRK filter'", ns = ns,
+      helpText("The deviation is the innovation of the pooled AR(3) filter with lags times the country's",
+               "mean climate (country effects, no year effects, fitted from 1950), not demeaned. The",
+               "country SDs below are those of the innovation.")
+    ),
+    checkboxInput(ns("use_lags"), paste("Lags: every deviation term also at t-1, ..., t-L, each interacted with the",
+                                        "characteristics of its own year"), value = FALSE),
+    conditionalPanel(
+      "input.use_lags", ns = ns,
+      numericInput(ns("lags"), sprintf("Number of lags L (1-%d)", EXPLORER$max_lags %||% 10), 5,
+                   min = 1, max = EXPLORER$max_lags %||% 10, step = 1)
+    ),
+    radioButtons(ns("style"), "Regression style (first difference of the level: Kalkuhl and Wenz)",
+                 STYLE_CHOICES, selected = "simple"),
+    radioButtons(ns("effects"), "Fixed effects", EFFECTS_CHOICES, selected = "both"),
+    conditionalPanel(
+      "input.effects != 'year'", ns = ns,
+      selectInput(ns("fe"), "Unit trends (the deviations are demeaned in the same way)",
+                  FE_CHOICES, selected = "quadratic")
+    ),
+    radioButtons(ns("convergence"), "Convergence control (on its own, whatever the interactions)",
+                 CONVERGENCE_CHOICES, selected = "none"),
+    selectInput(ns("quad_T"), "Quadratic control of T (Z + Z², on its own)", QUAD_CHOICES, selected = "none"),
+    selectInput(ns("quad_P"), "Quadratic control of P (Z + Z², on its own)", QUAD_CHOICES, selected = "none"),
+    checkboxGroupInput(ns("controls"), "Controls", CONTROL_CHOICES, selected = CONTROL_CHOICES, inline = TRUE),
+    checkboxInput(ns("drop_outliers"), paste("Drop the growth outliers whose cause is not weather (annotated",
+                                             "country-years in the tails of the GDP source's growth reversals",
+                                             "or growth from 1970)"),
+                  value = TRUE),
+    conditionalPanel(
+      "input.drop_outliers", ns = ns,
+      radioButtons(ns("outlier_tail"), paste("Rule and tails (reversal: the change of growth from the year",
+                                             "before, flagged in the second year)"), OUTLIER_CHOICES,
+                   selected = DEFAULT_OUTLIERS)
+    ),
+    selectInput(ns("form_T"), "Arms of temperature", names(ARM_SUFFIXES), selected = "Quadratic arms"),
+    selectInput(ns("form_P"), "Arms of precipitation", names(ARM_SUFFIXES), selected = "Quadratic arms"),
+    checkboxInput(ns("symmetric"), paste("Symmetric: one coefficient for both sides (the deviations unsplit:",
+                                         "x, x^2 or both; not demeaned)"), value = FALSE),
     checkboxGroupInput(ns("inter_T"), "Interactions of the temperature terms", MODIFIERS,
-                       selected = DEFAULT_MODIFIERS, inline = TRUE),
+                       selected = DEFAULT_MODIFIERS$inter_T, inline = TRUE),
     checkboxGroupInput(ns("inter_P"), "Interactions of the precipitation terms", MODIFIERS,
-                       selected = DEFAULT_MODIFIERS, inline = TRUE),
+                       selected = DEFAULT_MODIFIERS$inter_P, inline = TRUE),
+    # The low-income threshold, in the GDP source's units (default: the World
+    # Bank's line, set for the source when it changes).
+    conditionalPanel(
+      "(input.inter_T || []).indexOf('low') > -1 || (input.inter_P || []).indexOf('low') > -1", ns = ns,
+      numericInput(ns("low_threshold"), "Low-income threshold (GDP per capita)",
+                   round(EXPLORER$low_income[["PWT"]]), min = 1, step = 50),
+      uiOutput(ns("low_threshold_note"))
+    ),
     tagList(
       helpText("Income scaling of the deviation terms (each arm and its ticked interactions), by variable:",
                "the dollar loss per person of a scaled term is proportional to Y^xi (xi = 0: equal dollars;",
@@ -380,12 +709,13 @@ setting_ui <- function(id, n) {
       lapply(c(T = "temperature", P = "precipitation"), function(name) {
         v <- if (name == "temperature") "T" else "P"
         tagList(
+          # Default: T scaled with xi = 0.6 (the preferred specification), P standard.
           radioButtons(ns(paste0("income_form_", v)), paste("Income scaling of the", name, "terms"),
-                       INCOME_FORMS, selected = "standard"),
+                       INCOME_FORMS, selected = if (v == "T") "dollars" else "standard"),
           conditionalPanel(
             sprintf("input.income_form_%s != 'standard'", v), ns = ns,
             sliderInput(ns(paste0("xi_", v)), paste0("Elasticity xi of the scaled ", name, " terms"),
-                        min = XI_RANGE[1], max = XI_RANGE[2], value = 0, step = 0.1)
+                        min = XI_RANGE[1], max = XI_RANGE[2], value = if (v == "T") 0.6 else 0, step = 0.1)
           )
         )
       })
@@ -393,7 +723,7 @@ setting_ui <- function(id, n) {
     radioButtons(ns("moderators"), "Characteristics in the interactions (estimation)",
                  c("Fixed: sample means" = "fixed",
                    "Trailing: climate of the deviation's baseline, income of the 5 years before, with level terms" =
-                     "trailing"), selected = "fixed"),
+                     "trailing"), selected = "trailing"),
     conditionalPanel(
       "input.moderators == 'trailing' && input.gdp == 'WB'", ns = ns,
       checkboxInput(ns("share_trailing"), "Trailing agricultural share too (5 years before)", value = FALSE),
@@ -407,18 +737,18 @@ setting_ui <- function(id, n) {
                                    "non-climate response to zero but never create a benefit"),
                   value = FALSE),
     conditionalPanel(
-      "input.baseline != 'Horizon' && input.units == 'SD'", ns = ns,
+      "['20-year', '30-year'].indexOf(input.baseline) > -1 && input.units == 'SD'", ns = ns,
       radioButtons(ns("sd_mode"), "SD of the trailing baseline in the GDP path",
                    c("Fixed at the country's SD" = "fixed",
                      "Moving (widened by the shift)" = "moving"), selected = "fixed")
     ),
     conditionalPanel(
-      "input.baseline != 'Horizon' || input.moderators == 'trailing'", ns = ns,
+      "['20-year', '30-year'].indexOf(input.baseline) > -1 || input.moderators == 'trailing'", ns = ns,
       radioButtons(ns("clim_mode"),
                    "Long-run characteristics of the interactions (GDP paths and climate scenarios)",
                    c("Fixed at the sample mean" = "fixed",
                      "Follow the trailing baseline (climate; in the scenarios also income and share along the SSP)" =
-                       "baseline"), selected = "fixed")
+                       "baseline"), selected = "baseline")
     ),
     tags$h6("Country", class = "mt-3"),
     selectInput(ns("preset"), "Start from a country", choices = NULL),
@@ -478,20 +808,38 @@ setting_server <- function(id, n, default_country, first = NULL) {
       modifiers <- if (pwt) MODIFIERS else MODIFIERS[!MODIFIERS %in% PWT_MODIFIERS]
       for (k in c("inter_T", "inter_P")) {
         updateCheckboxGroupInput(session, k, choices = modifiers, inline = TRUE,
-                                 selected = intersect(isolate(input[[k]]) %||% DEFAULT_MODIFIERS, modifiers))
+                                 selected = intersect(isolate(input[[k]]) %||% DEFAULT_MODIFIERS[[k]], modifiers))
       }
       outcomes <- if (pwt) OUTCOME_CHOICES else OUTCOME_CHOICES[!OUTCOME_CHOICES %in% PWT_OUTCOMES]
       current <- isolate(input$outcome) %||% "log"
       updateSelectInput(session, "outcome", choices = outcomes,
                         selected = if (current %in% outcomes) current else "log")
+      # The low-income threshold of the source (its units differ).
+      updateNumericInput(session, "low_threshold", value = round(EXPLORER$low_income[[input$gdp]]))
+    })
+    output$low_threshold_note <- renderUI({
+      req(input$gdp)
+      helpText(sprintf(paste0("In %s. Default: the World Bank's low-income line, US$%s (2015 US$)%s. The dummy ",
+                              "uses the income of the interactions (trailing or long-run)."),
+                       EXPLORER$income_units[[input$gdp]], format(LOW_INCOME_LINE, big.mark = ","),
+                       if (input$gdp == "PWT") sprintf(", times the median PWT / WB ratio under it: %s PPP US$",
+                                                       format(round(EXPLORER$low_income[["PWT"]]), big.mark = ","))
+                       else ""))
     })
     if (!is.null(first)) {
       observeEvent(input$copy, {
         m <- first$model_inputs()
-        for (k in c("gdp", "climate", "outcome", "baseline", "form", "fe")) {
+        for (k in c("gdp", "climate", "outcome", "baseline", "form_T", "form_P", "fe")) {
           updateSelectInput(session, k, selected = m[[k]])
         }
         updateRadioButtons(session, "moderators", selected = m$moderators)
+        updateRadioButtons(session, "effects", selected = m$effects)
+        updateRadioButtons(session, "convergence", selected = m$convergence)
+        updateRadioButtons(session, "style", selected = m$style %||% "simple")
+        for (k in c("quad_T", "quad_P")) updateSelectInput(session, k, selected = m[[k]] %||% "none")
+        updateCheckboxInput(session, "symmetric", value = isTRUE(m$symmetric))
+        updateCheckboxInput(session, "use_lags", value = isTRUE(m$use_lags))
+        if (is.finite(m$lags %||% NA)) updateNumericInput(session, "lags", value = m$lags)
         for (v in c("T", "P")) {
           updateRadioButtons(session, paste0("income_form_", v), selected = m[[paste0("income_form_", v)]])
           updateSliderInput(session, paste0("xi_", v), value = m[[paste0("xi_", v)]])
@@ -500,12 +848,16 @@ setting_server <- function(id, n, default_country, first = NULL) {
         for (k in c("inter_T", "inter_P")) {
           updateCheckboxGroupInput(session, k, selected = m[[k]] %||% character(0))
         }
+        if (is.finite(m$low_threshold %||% NA)) updateNumericInput(session, "low_threshold", value = m$low_threshold)
         updateRadioButtons(session, "weight", selected = m$weight)
         updateRadioButtons(session, "units", selected = m$units)
         updateRadioButtons(session, "sd_mode", selected = m$sd_mode)
         updateRadioButtons(session, "clim_mode", selected = m$clim_mode)
         updateCheckboxInput(session, "cap", value = isTRUE(m$cap))
         updateRadioButtons(session, "shape", selected = m$shape)
+        updateCheckboxGroupInput(session, "controls", selected = m$controls %||% character(0))
+        updateCheckboxInput(session, "drop_outliers", value = isTRUE(m$drop_outliers))
+        updateRadioButtons(session, "outlier_tail", selected = m$outlier_tail)
       })
     }
     output$income_units <- renderUI({
@@ -520,7 +872,8 @@ setting_server <- function(id, n, default_country, first = NULL) {
     # The sample of the trailing share against the trailing income alone.
     output$share_warning <- renderUI({
       req(input$gdp == "WB")
-      r <- trailing_rows(input$gdp, input$climate, input$weight %||% "population", EXPLORER)
+      r <- trailing_rows(input$gdp, input$climate, input$weight %||% "population", EXPLORER,
+                         if (isTRUE(input$drop_outliers)) input$outlier_tail %||% DEFAULT_OUTLIERS else "none")
       div(class = "alert alert-warning small py-1 px-2",
           sprintf(paste("The trailing share needs all 5 years of WDI value added before each year:",
                         "%s rows and %d countries, against %s rows and %d countries without it (-%.0f%%),",
@@ -531,17 +884,24 @@ setting_server <- function(id, n, default_country, first = NULL) {
     })
 
     model_inputs <- reactive(list(gdp = input$gdp, climate = input$climate, outcome = input$outcome,
-                                  baseline = input$baseline,
+                                  baseline = input$baseline, style = input$style,
                                   weight = input$weight, units = input$units, fe = input$fe,
-                                  form = input$form, inter_T = input$inter_T, inter_P = input$inter_P,
+                                  effects = input$effects, convergence = input$convergence,
+                                  quad_T = input$quad_T, quad_P = input$quad_P,
+                                  form_T = input$form_T, form_P = input$form_P, symmetric = input$symmetric,
+                                  use_lags = input$use_lags, lags = input$lags,
+                                  inter_T = input$inter_T, inter_P = input$inter_P,
+                                  low_threshold = input$low_threshold,
                                   moderators = input$moderators, share_trailing = input$share_trailing,
                                   income_form_T = input$income_form_T, income_form_P = input$income_form_P,
                                   xi_T = input$xi_T, xi_P = input$xi_P,
                                   sd_mode = input$sd_mode, clim_mode = input$clim_mode,
-                                  cap = input$cap, shape = input$shape))
+                                  cap = input$cap, shape = input$shape, controls = input$controls,
+                                  drop_outliers = input$drop_outliers, outlier_tail = input$outlier_tail))
     active <- reactive(n == 1 || isTRUE(input$active))
     spec <- reactive({
-      req(input$gdp, input$climate, input$baseline, input$form)
+      req(input$gdp, input$climate, input$baseline, input$form_T, input$form_P)
+      form <- c(TM = input$form_T, RR = input$form_P)
       req(is.finite(input$mean_T), isTRUE(input$sd_T > 0), is.finite(input$mean_P),
           isTRUE(input$sd_P > 0), isTRUE(input$income > 0), isTRUE(input$share >= 0))
       # The PWT outcomes and capital only with PWT (model_options()); an
@@ -557,7 +917,14 @@ setting_server <- function(id, n, default_country, first = NULL) {
       income <- checked
       uses_kap <- "kap" %in% unlist(inter)
       req(!uses_kap || isTRUE(input$capital > 0))
-      fe <- input$fe %||% "quadratic"
+      uses_low <- "low" %in% unlist(inter)
+      req(!uses_low || isTRUE(input$low_threshold > 0))
+      low_threshold <- if (uses_low) input$low_threshold
+      effects <- input$effects %||% "both"
+      # No unit trends without unit effects.
+      fe <- if (effects == "year") "unit" else input$fe %||% "quadratic"
+      convergence <- input$convergence %||% "none"
+      quad <- c(TM = input$quad_T %||% "none", RR = input$quad_P %||% "none")
       u <- units()
       # The country's capital only with the capital interaction.
       values <- c(mean_T = input$mean_T, sd_T = input$sd_T, mean_P = input$mean_P,
@@ -568,7 +935,13 @@ setting_server <- function(id, n, default_country, first = NULL) {
         if (isTRUE(all.equal(unname(values), unname(preset_values(row)[names(values)])))) row$country
         else paste(row$country, "(edited)")
       } else "Custom country"
-      trailing <- input$baseline != "Horizon"
+      trailing <- input$baseline %in% c("20-year", "30-year")
+      symmetric <- isTRUE(input$symmetric)
+      # The lags of the regressors (none unless ticked; 1 to the build's maximum).
+      lags <- if (isTRUE(input$use_lags)) {
+        req(is.finite(input$lags))
+        as.integer(min(max(round(input$lags), 1), EXPLORER$max_lags %||% 10))
+      } else 0L
       weight <- input$weight %||% "population"
       absolute <- identical(input$units, "absolute")
       moderators <- input$moderators %||% "fixed"
@@ -579,17 +952,26 @@ setting_server <- function(id, n, default_country, first = NULL) {
       # trailing income and share can still follow the SSP.
       clim_mode <- if (trailing || moderators == "trailing") input$clim_mode %||% "fixed" else "fixed"
       # The cap matters only with an income, share or capital interaction.
-      cap <- isTRUE(input$cap) && any(c("inc", "agr", "kap") %in% unlist(inter))
+      cap <- isTRUE(input$cap) && any(c("inc", "agr", "kap", "low") %in% unlist(inter))
       # Splines matter only with an interaction.
       shape <- if (length(unlist(inter))) input$shape %||% "linear" else "linear"
+      # Controls (none ticked: none) and the growth outliers dropped.
+      controls <- intersect(CONTROL_CHOICES, input$controls %||% character(0))
+      outliers <- if (isTRUE(input$drop_outliers)) input$outlier_tail %||% DEFAULT_OUTLIERS else "none"
       # The label names the options only where they differ from the default.
-      auto <- paste0(name, " · ", input$gdp, " × ", input$climate, " · ", tolower(input$baseline),
-                     " · ", FORM_SHORT[[input$form]], " · ", interaction_label(inter),
+      auto <- paste0(name, " · ", input$gdp, " × ", input$climate, " · ", baseline_label(input$baseline, input$style %||% "simple"),
+                     " · ", form_label(form, symmetric), if (lags > 0) sprintf(" · %d lag%s", lags, if (lags > 1) "s" else ""),
+                     " · ", interaction_label(inter),
+                     if (uses_low) paste0(" (below ", format(round(low_threshold), big.mark = ","), ")"),
                      if (outcome != "log") paste0(" · outcome: ", OUTCOME_SHORT[[outcome]]),
                      if (!is.null(income_form_label(income$income_form, income$xi))) {
                        paste0(" · ", income_form_label(income$income_form, income$xi))
                      },
-                     if (fe != "quadratic") paste0(" · ", FE_SHORT[[fe]]),
+                     if (effects != "both") paste0(" · ", EFFECTS_SHORT[[effects]]),
+                     if (effects != "year" && fe != "quadratic") paste0(" · ", FE_SHORT[[fe]]),
+                     if (convergence != "none") paste0(" · convergence: ", CONVERGENCE_SHORT[[convergence]]),
+                     if (any(quad != "none")) paste0(" · quadratic control: ", paste(QUAD_SHORT[quad[quad != "none"]],
+                                                    c("T", "P")[quad != "none"], collapse = ", ")),
                      if (moderators == "trailing") " · trailing characteristics",
                      if (share_trailing) " (with share)",
                      if (weight == "area") " · area weights",
@@ -597,19 +979,27 @@ setting_server <- function(id, n, default_country, first = NULL) {
                      if (shape == "splines") " · splines",
                      if (cap) " · capped",
                      if (sd_mode == "moving") " · moving SD",
-                     if (clim_mode == "baseline") " · characteristics follow baseline")
+                     if (clim_mode == "baseline") " · characteristics follow baseline",
+                     if (!is.null(sample_label(controls, outliers))) paste0(" · ", sample_label(controls, outliers)))
       list(n = n, label = if (nzchar(trimws(input$label))) trimws(input$label) else auto,
            model = explorer_model(list(gdp = input$gdp, climate = input$climate, weight = weight,
                                        units = input$units %||% "SD", baseline = input$baseline,
-                                       form = input$form, inter = inter, shape = shape, fe = fe,
+                                       style = input$style %||% "simple",
+                                       form = form, symmetric = symmetric, lags = lags, inter = inter, shape = shape, fe = fe,
+                                       effects = effects, convergence = convergence, quad = quad,
                                        moderators = moderators, share_trailing = share_trailing,
-                                       outcome = outcome, income_form = income$income_form, xi = income$xi),
+                                       outcome = outcome, income_form = income$income_form, xi = income$xi,
+                                       controls = controls, outliers = outliers, low_threshold = low_threshold),
                                   EXPLORER),
            country = list(mean_T = input$mean_T, sd_T = input$sd_T, mean_P = input$mean_P / 1000,
                           sd_P = input$sd_P / 1000, income = input$income, share = input$share / 100,
                           capital = if (uses_kap) input$capital),
            sd_mode = sd_mode, clim_mode = clim_mode, cap = cap,
-           support = EXPLORER$support[[paste(panel_key(), fe, sep = " | ")]], units = u, gdp = input$gdp)
+           # The support of the deviations the model uses (symmetric or without
+           # unit effects: as they are).
+           support = EXPLORER$support[[paste(panel_key(), deviation_fe(fe, symmetric, effects),
+                                             if (identical(input$style, "diff")) "diff", sep = " | ")]],
+           units = u, gdp = input$gdp)
     })
     list(active = active, spec = spec, model_inputs = model_inputs)
   })
@@ -632,6 +1022,10 @@ ui <- page_sidebar(
   theme = bs_theme(version = 5, bg = SURFACE, fg = INK, primary = SETTING_COLOURS[1]),
   sidebar = sidebar(
     width = 360,
+    downloadButton("save_page", "Save the page as HTML", class = "btn-sm btn-outline-secondary"),
+    helpText("The shown settings, charts, tables and notes; the climate scenarios and the termination",
+             "shocks only if run (their last run)."),
+    tags$hr(),
     tags$h6("Permanent shift (common to all settings)"),
     numericInput("shock_T", "Temperature (°C)", 1, step = 0.5),
     numericInput("shock_P", "Precipitation (mm a year)", 100, step = 25),
@@ -640,8 +1034,9 @@ ui <- page_sidebar(
                                      "the sudden late one starts (dotted)"), 50, min = 1, step = 5),
     checkboxGroupInput("gdp_lines", "Shifts shown in the GDP paths",
                        c("Immediate (solid)" = "permanent", "Gradual until year X (dashed)" = "gradual",
-                         "Sudden in year X (dotted)" = "delayed"),
-                       selected = c("permanent", "gradual", "delayed")),
+                         "Sudden in year X (dotted)" = "delayed",
+                         "Transitory: year 0 only (dot-dash; the response over the lags)" = "one-off"),
+                       selected = "gradual"),
     tags$hr(),
     do.call(navset_pill, c(lapply(seq_len(N_SETTINGS), setting_tab), list(id = "setting_tabs")))
   ),
@@ -679,6 +1074,12 @@ ui <- page_sidebar(
                    ECONOMY_CHOICES, selected = "follow", inline = TRUE)
     ),
     layout_columns(
+      col_widths = c(6, 3),
+      selectInput("scen_noise", "Natural variability (each country's detrended historical T and P)",
+                  VARIABILITY_CHOICES, selected = "none"),
+      selectInput("scen_noise_n", "Noise paths", NOISE_PATH_CHOICES, selected = "200")
+    ),
+    layout_columns(
       col_widths = c(4, 3, 5),
       selectInput("map_setting", "Maps: setting", choices = NULL),
       selectInput("map_scenario", "Maps: forcing", choices = NULL),
@@ -689,6 +1090,7 @@ ui <- page_sidebar(
     div(class = "d-flex align-items-center gap-3 mb-2",
         actionButton("run_scenarios", "Run the climate scenarios", class = "btn-primary"),
         uiOutput("scenario_status")),
+    radioButtons("global_measure", "Global chart", MEASURE_CHOICES, selected = "loss", inline = TRUE),
     layout_columns(
       col_widths = c(4, 8),
       plotOutput("gmt_plot", height = 380),
@@ -731,21 +1133,40 @@ ui <- page_sidebar(
       radioButtons("ts_econ", "Economic development (Follow SSP-RCP: the forcing's own SSP)",
                    ECONOMY_CHOICES, selected = "follow", inline = TRUE)
     ),
+    layout_columns(
+      col_widths = c(6, 3),
+      selectInput("ts_noise", "Natural variability (each country's detrended historical T and P)",
+                  VARIABILITY_CHOICES, selected = "none"),
+      selectInput("ts_noise_n", "Noise paths", NOISE_PATH_CHOICES, selected = "200")
+    ),
     div(class = "d-flex align-items-center gap-3 mb-2",
         actionButton("run_termination", "Run the termination scenarios", class = "btn-primary"),
         uiOutput("ts_status")),
+    radioButtons("ts_measure", "Global chart", MEASURE_CHOICES, selected = "loss", inline = TRUE),
+    layout_columns(
+      col_widths = c(3, 3, 3, 3),
+      selectInput("ts_ref", "Exceedances: reference climate", EXCEEDANCE_REFERENCES, selected = "20"),
+      numericInput("ts_k_gmt", "Warming chart: band above k SD, k =", 3, min = 0.5, step = 0.5),
+      numericInput("ts_k_lat", "Latitude chart: events beyond k SD, k =", 2.5, min = 0.5, step = 0.5),
+      radioButtons("ts_sign", "Latitude chart: events", c("Warm (above +k SD)" = "warm",
+                                                          "Either sign (beyond +-k SD)" = "both"),
+                   selected = "warm")
+    ),
     layout_columns(
       col_widths = c(4, 8),
-      plotOutput("ts_gmt_plot", height = 380),
-      plotOutput("ts_global_plot", height = 380, hover = hoverOpts("hover_ts", delay = 80))
+      plotOutput("ts_gmt_plot", height = 460),
+      plotOutput("ts_global_plot", height = 460, hover = hoverOpts("hover_ts", delay = 80))
     ),
     uiOutput("readout_ts"),
     layout_columns(
       col_widths = c(6, 6),
-      selectInput("ts_map_setting", "Map: setting", choices = NULL),
+      selectInput("ts_map_setting", "Map and exceedances: setting (its panel's climate data)", choices = NULL),
       selectInput("ts_map_year", "Map: termination year", choices = NULL)
     ),
     plotOutput("ts_map", height = 380),
+    selectInput("ts_lat_paths", "Latitude chart: warming paths", choices = NULL, multiple = TRUE,
+                width = "100%"),
+    plotOutput("ts_lat_plot", height = 420),
     tableOutput("ts_table"),
     uiOutput("ts_notes")
   ),
@@ -817,14 +1238,15 @@ server <- function(input, output, session) {
   scenarios <- reactive({
     all <- c(permanent = "immediate",
              gradual = sprintf("gradual until year %d", as.integer(input$ramp_years)),
-             delayed = sprintf("sudden in year %d", as.integer(input$ramp_years)))
+             delayed = sprintf("sudden in year %d", as.integer(input$ramp_years)),
+             "one-off" = "transitory (year 0 only)")
     shown <- all[names(all) %in% input$gdp_lines]
-    validate(need(length(shown) > 0, "Tick at least one shift (immediate, gradual or sudden) to draw."))
+    validate(need(length(shown) > 0, "Tick at least one shift (immediate, gradual, sudden or transitory) to draw."))
     shown
   })
   # The line type and band transparency of each scenario, by its type.
-  SCENARIO_LINETYPE <- c(permanent = "solid", gradual = "42", delayed = "13")
-  SCENARIO_ALPHA <- c(permanent = 0.15, gradual = 0.07, delayed = 0.07)
+  SCENARIO_LINETYPE <- c(permanent = "solid", gradual = "42", delayed = "13", "one-off" = "4212")
+  SCENARIO_ALPHA <- c(permanent = 0.15, gradual = 0.07, delayed = 0.07, "one-off" = 0.07)
   paths <- function(v) {
     reactive({
       delta <- shift(v)
@@ -855,8 +1277,10 @@ server <- function(input, output, session) {
       geom_point(data = points, size = 3.2, shape = 21, fill = SURFACE, stroke = 1.4) +
       scale_colour_manual(values = colours(), name = NULL, labels = wrap_label) +
       scale_fill_manual(values = colours(), guide = "none") +
-      labs(x = paste0("Annual anomaly against the long-run baseline (", unit, ")"),
-           y = "Effect on growth that year (pp)",
+      labs(x = paste0("Annual anomaly against the baseline (", unit, ")"),
+           y = if (any(vapply(specs(), function(s) (s$model$lags %||% 0L) > 0, TRUE))) {
+             "Effect on growth (pp; lags summed)"
+           } else "Effect on growth that year (pp)",
            subtitle = paste0("Bands: 95% CI. Dashed: beyond the 1st-99th percentile of the ",
                              "deviations in the data. Points: the shift.")) +
       theme_explorer()
@@ -877,12 +1301,13 @@ server <- function(input, output, session) {
   output$readout_response_T <- renderUI(response_readout(responses_T(), input$hover_response_T, "TM"))
   output$readout_response_P <- renderUI(response_readout(responses_P(), input$hover_response_P, "RR"))
 
-  output$gdp_header_T <- renderText(sprintf(
-    "Effect on %s of a permanent %+g °C shift in temperature: immediate, gradual or sudden in year %d",
-    quantity_of(specs()), input$shock_T, as.integer(input$ramp_years)))
-  output$gdp_header_P <- renderText(sprintf(
-    "Effect on %s of a permanent %+g mm shift in precipitation: immediate, gradual or sudden in year %d",
-    quantity_of(specs()), input$shock_P, as.integer(input$ramp_years)))
+  gdp_header <- function(v) {
+    sprintf("Effect on %s of a %+g %s shift in %s: immediate, gradual or sudden in year %d, or for one year",
+            quantity_of(specs()), if (v == "TM") input$shock_T else input$shock_P, if (v == "TM") "°C" else "mm",
+            if (v == "TM") "temperature" else "precipitation", as.integer(input$ramp_years))
+  }
+  output$gdp_header_T <- renderText(gdp_header("TM"))
+  output$gdp_header_P <- renderText(gdp_header("RR"))
 
   gdp_plot <- function(d) {
     d$setting <- as_setting(d$setting)
@@ -890,7 +1315,8 @@ server <- function(input, output, session) {
     x <- as.integer(input$ramp_years)
     captions <- c(permanent = "Solid: the full shift from year 0 on.",
                   gradual = sprintf("Dashed: rising linearly to the full shift in year %d.", x),
-                  delayed = sprintf("Dotted: nothing until year %d, the full shift from then on.", x))
+                  delayed = sprintf("Dotted: nothing until year %d, the full shift from then on.", x),
+                  "one-off" = "Dot-dash: the shift in year 0 only (without lags a step; with lags it moves for L years).")
     ggplot(d, aes(year, pct, colour = setting, fill = setting, linetype = scenario,
                   group = interaction(setting, scenario))) +
       geom_hline(yintercept = 0, colour = INK_MUTED, linewidth = 0.4) +
@@ -928,7 +1354,9 @@ server <- function(input, output, session) {
   output$readout_gdp_P <- renderUI(gdp_readout(paths_P(), input$hover_gdp_P))
 
   # The equation of each shown setting's model and the definitions of its terms.
-  output$spec_math <- renderUI({
+  # The parts of the page that are more than a call are functions, used by
+  # their outputs and by the saved page (save_page below).
+  spec_math <- function() {
     blocks <- lapply(specs(), function(s) {
       tags$div(
         class = "mb-3",
@@ -938,13 +1366,14 @@ server <- function(input, output, session) {
         tags$ul(class = "small", lapply(spec_definitions(s$model), function(x) tags$li(HTML(x))))
       )
     })
-    withMathJax(tagList(blocks))
-  })
+    tagList(blocks)
+  }
+  output$spec_math <- renderUI(withMathJax(spec_math()))
 
   # The coefficients of each shown setting's model (rows: every term of any of
   # them; deviation terms, then the level terms of trailing characteristics),
   # its fit, the verdict against setting 1, and the joint Wald tests.
-  output$coef_table <- renderTable({
+  coef_table <- function() {
     sp <- specs()
     models <- lapply(sp, `[[`, "model")
     cell <- function(est, se, p) {
@@ -955,11 +1384,23 @@ server <- function(input, output, session) {
       out <- stats::setNames(cell(m$coef, se, m$p), names(m$coef))
       if (nrow(m$levels)) out <- c(out, stats::setNames(cell(m$levels$estimate, m$levels$se, m$levels$p),
                                                         paste0("level:", m$levels$term)))
+      if (!is.null(m$convergence_coef)) {
+        k <- m$convergence_coef
+        out <- c(out, stats::setNames(cell(k[["estimate"]], k[["se"]], k[["p"]]), paste0("convergence:", m$convergence)))
+      }
+      # The quadratic climate controls ("quad:<kind>:<column>").
+      if (!is.null(m$quad_coef)) {
+        q <- m$quad_coef
+        kind <- m$quad[ifelse(grepl("TM", q$term), "TM", "RR")]
+        out <- c(out, stats::setNames(cell(q$estimate, q$se, q$p), paste0("quad:", kind, ":", q$term)))
+      }
       out
     })
     outcome_label <- function(m) paste0("growth of ", OUTCOME_SHORT[[m$outcome %||% "log"]], " (log points)")
     terms <- unique(unlist(lapply(coef_cells, names)))
-    terms <- c(terms[!startsWith(terms, "level:")], terms[startsWith(terms, "level:")])
+    extra <- startsWith(terms, "level:") | startsWith(terms, "convergence:") | startsWith(terms, "quad:")
+    terms <- c(terms[!extra], terms[startsWith(terms, "level:")], terms[startsWith(terms, "convergence:")],
+               terms[startsWith(terms, "quad:")])
     test_names <- unique(unlist(lapply(models, function(m) m$tests$test)))
     rows <- c("Setting", "Outcome", terms, "Observations", "Countries", "Within adj. R2", "AIC", "BIC",
               "Against setting 1 (AIC / BIC / R2)", test_names)
@@ -984,8 +1425,10 @@ server <- function(input, output, session) {
     labels[rows %in% terms] <- vapply(rows[rows %in% terms], term_label, "")
     labels[rows %in% test_names] <- paste("Joint test,", rows[rows %in% test_names])
     data.frame(Term = labels, columns, check.names = FALSE)
-  }, striped = TRUE, spacing = "s", align = "l", sanitize.text.function = function(x) x)
-  output$coef_notes <- renderUI(tags$ul(
+  }
+  output$coef_table <- renderTable(coef_table(), striped = TRUE, spacing = "s", align = "l",
+                                   sanitize.text.function = function(x) x)
+  coef_notes <- function() tags$ul(
     class = "small",
     tags$li(paste(
       "Coefficients: effect on the outcome (growth of GDP per capita, capital per capita or GDP per",
@@ -1000,17 +1443,20 @@ server <- function(input, output, session) {
     tags$li(paste(
       "Joint tests: clustered Wald tests (F) that the terms are all zero: all the deviation terms",
       "of T (P), the terms interacted with each characteristic (both arms, with their spline",
-      "terms), each pair of characteristics when there are three, and all the interactions.")),
+      "terms), each pair of characteristics when there are three or more, and all the interactions;",
+      "with linear + quadratic arms, the squared arms (zero: linear arms suffice) and the linear arms",
+      "(zero: quadratic arms suffice), for T, P and both.")),
     tags$li(paste(
       "AIC and BIC compare only models on the same rows. Against setting 1: better, worse, or",
       "indifferent when the difference cannot be told apart from noise (Vuong test clustered by",
       "country, 5%), for each criterion; on other rows (another panel, or trailing values that",
       "drop rows) or with another outcome the models are not compared."))
-  ))
+  )
+  output$coef_notes <- renderUI(coef_notes())
 
   # Warnings for each setting: characteristics outside the countries of its
   # sample, and a shift beyond the deviations in the data.
-  output$warnings <- renderUI({
+  warnings_ui <- function() {
     msgs <- character(0)
     for (s in specs()) {
       cn <- s$country
@@ -1025,9 +1471,9 @@ server <- function(input, output, session) {
         }
       }
       used <- unique(unlist(m$inter))
-      if ("clim" %in% m$inter$TM) check(cn$mean_T, u$mean_T, "mean temperature", "%.1f °C")
-      if ("clim" %in% m$inter$RR) check(1000 * cn$mean_P, 1000 * u$mean_P, "mean precipitation", "%.0f mm")
-      if ("inc" %in% used) check(cn$income, u$income, "GDP per capita", "%.0f")
+      if (any(OWN_MODIFIERS %in% m$inter$TM)) check(cn$mean_T, u$mean_T, "mean temperature", "%.1f °C")
+      if (any(OWN_MODIFIERS %in% m$inter$RR)) check(1000 * cn$mean_P, 1000 * u$mean_P, "mean precipitation", "%.0f mm")
+      if (any(c("inc", "low") %in% used)) check(cn$income, u$income, "GDP per capita", "%.0f")
       if ("agr" %in% used) check(100 * cn$share, 100 * u$share, "agricultural share", "%.1f%%")
       if ("kap" %in% used) check(cn$capital, u$capital[is.finite(u$capital)], "capital per capita", "%.0f")
       for (v in c("TM", "RR")) {
@@ -1042,12 +1488,23 @@ server <- function(input, output, session) {
             prefix, if (v == "TM") "temperature" else "precipitation", x, unit, q$q01, q$q99, unit))
         }
       }
-      if (m$baseline == "Horizon") {
-        msgs <- c(msgs, paste0(prefix, "with the horizon baseline the permanent shift stays a ",
-                               "deviation every year, so its GDP effect grows without limit."))
+      # (First differences and a level outcome: the effect of a permanent
+      # shift is bounded.)
+      grows <- !isTRUE(m$diff) && !level_outcome(m)
+      if (grows && m$baseline %in% c("Horizon", "Level")) {
+        msgs <- c(msgs, paste0(prefix, "with the ", tolower(m$baseline), " as the regression unit the permanent ",
+                               "shift stays a deviation every year, so its GDP effect grows without limit."))
+      }
+      if (grows && identical(m$window, "nrk")) {
+        # A permanent shift a leaves the innovation (1 - sum phi) a every year.
+        left <- vapply(c("TM", "RR"), function(v) 1 - sum(filter_lags(m, cn, v)), 0)
+        msgs <- c(msgs, sprintf(paste0(
+          "%swith the NRK filter a permanent shift leaves an innovation of %.2f (T) and %.2f (P) times its ",
+          "size every year after the first three (one minus the filter's persistence at the country's climate), ",
+          "so its GDP effect grows without limit unless that is zero."), prefix, left[["TM"]], left[["RR"]]))
       }
       if (isTRUE(m$share_trailing)) {
-        r <- trailing_rows(m$gdp, m$climate, m$weight, EXPLORER)
+        r <- trailing_rows(m$gdp, m$climate, m$weight, EXPLORER, m$outliers)
         msgs <- c(msgs, sprintf(paste(
           "%sthe trailing agricultural share needs all 5 years of WDI value added before each year:",
           "the model runs on %s rows (%d countries), %.0f%% fewer than with the trailing income alone",
@@ -1059,44 +1516,125 @@ server <- function(input, output, session) {
     if (!length(msgs)) return(NULL)
     div(class = "alert alert-warning", style = "margin-bottom: 0.5rem;",
         tags$ul(style = "margin-bottom: 0;", lapply(msgs, tags$li)))
-  })
+  }
+  output$warnings <- renderUI(warnings_ui())
 
   # Climate scenarios --------------------------------------------------------
   # The projections of a setting depend on its model and options only (every
   # country enters with its own characteristics), so they are cached by those.
   projection_cache <- new.env()
-  projection_of <- function(s, scenario, ssp) {
-    key <- paste(s$model$key, s$sd_mode, s$clim_mode, s$cap, scenario, ssp, sep = " | ")
+  # The natural variability of a run: its type (VARIABILITY_CHOICES) and number
+  # of noise paths.
+  noise_of <- function(type, n) {
+    list(type = type %||% "none", n = if ((type %||% "none") == "none") 0L else as.integer(n %||% 200))
+  }
+  noise_key <- function(noise) paste(noise$type, noise$n)
+  # The bands of the global charts, their dotted lines with noise (the range of
+  # the noise paths at the estimated coefficients), and the values of rows of a
+  # global loss as text.
+  band_label <- function(noise) {
+    if (noise$type == "none") return("bands: 95% CI of the coefficients")
+    "bands: 95% of the coefficient draws, each with its noise path; dotted: 95% of the noise paths alone"
+  }
+  noise_lines <- function(d) {
+    if (!"noise_low" %in% names(d)) return(NULL)
+    list(geom_line(aes(y = noise_low), linetype = "dotted", linewidth = 0.5),
+         geom_line(aes(y = noise_high), linetype = "dotted", linewidth = 0.5))
+  }
+  loss_text <- function(rows, measure = "loss") {
+    unit <- if (measure == "growth_change") " pp" else "%"
+    out <- sprintf("%+.2f%s [%+.2f, %+.2f]", rows$estimate, unit, rows$low, rows$high)
+    if ("noise_low" %in% names(rows)) {
+      out <- paste0(out, sprintf(", variability [%+.2f, %+.2f]", rows$noise_low, rows$noise_high))
+    }
+    if (measure == "growth") out <- paste0(out, sprintf("; without climate change %.2f%%", rows$baseline_growth))
+    out
+  }
+  # The global series of the chosen measure: the loss (% of GDP against no
+  # climate change), the growth of world GDP (% a year, from the second year),
+  # or its change by climate change (pp a year: with less without climate
+  # change), the estimate and bands in the loss's columns.
+  GROWTH_NOTE <- "Growth of world GDP (the GDP-weighted countries') needs a GDP outcome, not capital."
+  as_measure <- function(d, measure) {
+    if (measure != "loss") {
+      d <- d[d$year > PROJECTION_FROM, ]
+      less <- if (measure == "growth_change") d$baseline_growth else 0
+      d$estimate <- d$growth - less
+      d$low <- d$growth_low - less
+      d$high <- d$growth_high - less
+      if ("noise_low" %in% names(d)) {
+        d$noise_low <- d$growth_noise_low - less
+        d$noise_high <- d$growth_noise_high - less
+      }
+    }
+    d
+  }
+  measure_axis <- function(measure, sp) {
+    switch(measure, growth = "Growth of world GDP (% a year)",
+           growth_change = "Change of world GDP growth by climate change (pp a year)",
+           paste("World", quantity_of(sp), "against no climate change (%)"))
+  }
+  growth_allowed <- function(sp) !any(vapply(sp, function(s) identical(s$model$outcome, "capital"), TRUE))
+  # Growth of world GDP of global series `g` of setting n of `sp` for the
+  # tables: the compound mean over the years after the first, without and with
+  # climate change, or (`largest_drop`) with climate change and the largest
+  # fall of the growth rate by climate change (pp) and its year.
+  growth_text <- function(g, sp, n, largest_drop) {
+    if (!growth_allowed(Filter(function(s) s$n == n, sp))) return("-")
+    g <- g[g$year > PROJECTION_FROM, ]
+    mean_of <- function(x) 100 * (prod(1 + x / 100)^(1 / length(x)) - 1)
+    if (!largest_drop) return(sprintf("%.2f, %.2f", mean_of(g$baseline_growth), mean_of(g$growth)))
+    change <- g$growth - g$baseline_growth
+    i <- which.min(change)
+    sprintf("%.2f; %+.2f (%d)", mean_of(g$growth), change[i], g$year[i])
+  }
+  noise_label <- function(noise) {
+    if (noise$type == "none") "no natural variability"
+    else sprintf("%s, %d noise paths", tolower(names(VARIABILITY_CHOICES)[VARIABILITY_CHOICES == noise$type]), noise$n)
+  }
+  # A setting's projection with the natural variability of its panel.
+  project_with <- function(s, scenario, ssp, noise, gmt = NULL) {
+    m <- s$model
+    variability <- EXPLORER$variability[[paste(m$gdp, m$climate, m$weight %||% "population", sep = " | ")]]
+    project_setting(s, SCEN, scenario, ssp, gmt = gmt, variability = variability, noise = noise$type,
+                    n_paths = noise$n)
+  }
+  projection_of <- function(s, scenario, ssp, noise) {
+    key <- paste(s$model$key, s$sd_mode, s$clim_mode, s$cap, scenario, ssp, noise_key(noise), sep = " | ")
     if (is.null(projection_cache[[key]])) {
-      projection_cache[[key]] <- project_setting(s, SCEN, scenario, ssp)
+      projection_cache[[key]] <- project_with(s, scenario, ssp, noise)
     }
     projection_cache[[key]]
   }
   # The projections run only when asked: the shown settings, the selected
-  # forcings and the economic development at the moment of the click.
+  # forcings, the economic development and the variability at the moment of
+  # the click.
   NOT_RUN <- "Press \"Run the climate scenarios\" to project the global losses and the maps."
   run <- eventReactive(input$run_scenarios, {
     validate(need(length(input$scen_sel) > 0, "Select at least one forcing."))
-    list(specs = specs(), scenarios = input$scen_sel, economy = input$econ_ssp %||% "follow")
+    list(specs = specs(), scenarios = input$scen_sel, economy = input$econ_ssp %||% "follow",
+         noise = noise_of(input$scen_noise, input$scen_noise_n))
   })
-  run_key <- function(sp, scenarios, economy) {
+  run_key <- function(sp, scenarios, economy, noise) {
     paste(c(vapply(sp, function(s) paste(s$label, s$model$key, s$sd_mode, s$clim_mode, s$cap), ""),
-            scenarios, economy), collapse = " || ")
+            scenarios, economy, noise_key(noise)), collapse = " || ")
   }
   # The label of a forcing of the last run, with its economy.
   run_label <- function(scenario) scenario_label(scenario, run()$economy)
-  output$scenario_status <- renderUI({
+  scenario_status <- function() {
     if (input$run_scenarios == 0) return(helpText(class = "mb-0", "Not run yet."))
     r <- run()
-    current <- run_key(specs(), input$scen_sel, input$econ_ssp %||% "follow")
-    if (!identical(current, run_key(r$specs, r$scenarios, r$economy))) {
+    current <- run_key(specs(), input$scen_sel, input$econ_ssp %||% "follow",
+                       noise_of(input$scen_noise, input$scen_noise_n))
+    if (!identical(current, run_key(r$specs, r$scenarios, r$economy, r$noise))) {
       return(helpText(class = "mb-0 text-warning-emphasis",
                       "Settings or scenarios changed since the last run: press Run to update."))
     }
-    helpText(class = "mb-0", sprintf("Up to date: %d setting(s) x %d forcing(s), economy: %s.",
+    helpText(class = "mb-0", sprintf("Up to date: %d setting(s) x %d forcing(s), economy: %s; %s.",
                                      length(r$specs), length(r$scenarios),
-                                     names(ECONOMY_CHOICES)[ECONOMY_CHOICES == r$economy]))
-  })
+                                     names(ECONOMY_CHOICES)[ECONOMY_CHOICES == r$economy], noise_label(r$noise)))
+  }
+  output$scenario_status <- renderUI(scenario_status())
   # The colours of the settings of the last run (in setting order).
   run_colours <- reactive({
     sp <- run()$specs
@@ -1114,7 +1652,7 @@ server <- function(input, output, session) {
         incProgress(1 / nrow(jobs), detail = paste(s$label, "-", scenario_label(scenario, r$economy)))
         list(setting = s$label, n = s$n, scenario = scenario,
              label = scenario_label(scenario, r$economy),
-             result = projection_of(s, scenario, economy_of(scenario, r$economy)))
+             result = projection_of(s, scenario, economy_of(scenario, r$economy), r$noise))
       })
     })
   })
@@ -1140,7 +1678,7 @@ server <- function(input, output, session) {
     updateSelectInput(session, "map_scenario", choices = scenario_choices, selected = selected)
   })
 
-  output$gmt_plot <- renderPlot({
+  gmt_plot <- function() {
     req(length(input$scen_sel) > 0)
     g <- SCEN$gmt[SCEN$gmt$scenario %in% input$scen_sel & SCEN$gmt$year >= 1970, ]
     g$scenario <- factor(g$scenario, levels = names(SCEN$scenarios))
@@ -1154,41 +1692,55 @@ server <- function(input, output, session) {
       labs(x = NULL, y = "Global warming above 1850-1900 (°C)",
            subtitle = "FaIR (AR6-calibrated): median and 5-95% range") +
       theme_explorer()
-  }, bg = SURFACE)
+  }
+  output$gmt_plot <- renderPlot(gmt_plot(), bg = SURFACE)
 
-  output$global_plot <- renderPlot({
+  global_plot <- function() {
     validate(need(input$run_scenarios > 0, NOT_RUN))
-    d <- global_losses()
+    measure <- input$global_measure %||% "loss"
+    validate(need(measure == "loss" || growth_allowed(run()$specs), GROWTH_NOTE))
+    d <- as_measure(global_losses(), measure)
     d$setting <- as_run_setting(d$setting)
     d$scenario <- factor(d$scenario, levels = names(SCEN$scenarios))
     labels <- vapply(names(SCEN$scenarios), run_label, "")
+    # Growth: each scenario's growth without climate change, dashed.
+    baseline <- if (measure == "growth") {
+      geom_line(aes(y = baseline_growth), linetype = "22", linewidth = 0.5)
+    }
     ggplot(d, aes(year, estimate, colour = scenario, fill = scenario)) +
       geom_hline(yintercept = 0, colour = INK_MUTED, linewidth = 0.4) +
       geom_ribbon(aes(ymin = low, ymax = high), alpha = 0.10, colour = NA) +
+      noise_lines(d) +
+      baseline +
       geom_line(linewidth = 0.9) +
       facet_wrap(~setting, ncol = min(3, nlevels(d$setting)), scales = "free_y",
                  labeller = labeller(setting = function(x) wrap_label(x, 50))) +
       scale_colour_manual(values = SCENARIO_COLOURS, labels = labels, name = NULL,
                           guide = guide_legend(direction = "horizontal", nrow = 1)) +
       scale_fill_manual(values = SCENARIO_COLOURS, guide = "none") +
-      labs(x = NULL, y = paste("World", quantity_of(run()$specs), "against no climate change (%)"),
-           subtitle = paste("Best guess (median warming, CMIP6-median pattern, estimated coefficients);",
-                            "bands: 95% CI of the coefficients")) +
+      labs(x = NULL, y = measure_axis(measure, run()$specs),
+           subtitle = wrap_label(paste0(
+             "Best guess (median warming, CMIP6-median pattern, estimated coefficients",
+             if (run()$noise$type != "none") ", mean over the noise paths", "); ",
+             band_label(run()$noise),
+             if (measure == "growth") "; dashed: the SSP's growth without climate change"), 110)) +
       theme_explorer() +
       theme(strip.text = element_text(colour = INK_MUTED, size = 9.5, hjust = 0))
-  }, bg = SURFACE)
+  }
+  output$global_plot <- renderPlot(global_plot(), bg = SURFACE)
 
   output$readout_global <- renderUI({
     hover <- input$hover_global
     if (input$run_scenarios == 0) return(NULL)
     if (is.null(hover)) return(helpText("Hover over the global chart to read the values."))
-    d <- global_losses()
-    year <- max(PROJECTION_FROM, min(round(hover$x), PROJECTION_TO))
+    measure <- input$global_measure %||% "loss"
+    if (measure != "loss" && !growth_allowed(run()$specs)) return(NULL)
+    d <- as_measure(global_losses(), measure)
+    year <- max(min(d$year), min(round(hover$x), PROJECTION_TO))
     rows <- d[d$year == year, ]
     rows <- rows[order(as_run_setting(rows$setting), match(rows$scenario, names(SCEN$scenarios))), ]
     tagList(tags$div(class = "small", paste("Year", year)),
-            readout_list(sprintf("%s, %s: %+.2f%% [%+.2f, %+.2f]", rows$setting, rows$label,
-                                 rows$estimate, rows$low, rows$high)))
+            readout_list(paste0(rows$setting, ", ", rows$label, ": ", loss_text(rows, measure))))
   })
 
   # Best-guess country losses of the map setting and scenario in `year`, with
@@ -1198,7 +1750,7 @@ server <- function(input, output, session) {
     req(input$map_setting, input$map_scenario)
     s <- Filter(function(x) as.character(x$n) == input$map_setting, run()$specs)
     req(length(s) == 1)
-    r <- projection_of(s[[1]], input$map_scenario, economy_of(input$map_scenario, run()$economy))
+    r <- projection_of(s[[1]], input$map_scenario, economy_of(input$map_scenario, run()$economy), run()$noise)
     list(setting = s[[1]]$label, label = run_label(input$map_scenario),
          countries = r$countries[r$countries$year %in% c(2050, 2100), ])
   })
@@ -1292,14 +1844,11 @@ server <- function(input, output, session) {
   output$driver_P_2050 <- renderPlot(driver_map("dP", 2050), bg = SURFACE)
   output$driver_P_2100 <- renderPlot(driver_map("dP", 2100), bg = SURFACE)
 
-  output$global_table <- renderTable({
+  global_table <- function() {
     if (input$run_scenarios == 0) return(NULL)
     out <- do.call(rbind, lapply(projections(), function(p) {
       g <- p$result$global
-      cell <- function(y) {
-        r <- g[g$year == y, ]
-        sprintf("%+.2f [%+.2f, %+.2f]", r$estimate, r$low, r$high)
-      }
+      cell <- function(y) loss_text(g[g$year == y, ])
       followed <- if (p$result$follow) {
         sprintf("%d / %d", p$result$followed[["income"]], p$result$followed[["share"]])
       } else "fixed"
@@ -1311,25 +1860,42 @@ server <- function(input, output, session) {
                  Countries = p$result$n,
                  `Following the SSP (income / share)` = followed,
                  `Share of the SSP's world GDP covered` = sprintf("%.0f%%", 100 * p$result$coverage),
+                 `Mean growth of world GDP 2026-2100 (% a year): without, with climate change` =
+                   growth_text(g, run()$specs, p$n, FALSE),
                  check.names = FALSE)
     }))
     names(out) <- sub("^World GDP", paste("World", quantity_of(run()$specs)), names(out))
     out[order(match(out$Setting, names(run_colours())),
               match(out$`Forcing (warming of)`, sprintf("%s (%s)", FORCING_LABELS, SCEN$scenarios))), ]
-  }, striped = TRUE, spacing = "s", align = "l")
+  }
+  output$global_table <- renderTable(global_table(), striped = TRUE, spacing = "s", align = "l")
 
-  output$scenario_notes <- renderUI({
+  scenario_notes <- function() {
     tags$ul(
       class = "small",
       tags$li(paste0(
         "Global warming: ", SCEN$source, "; temperature above 1850-1900, median and 5-95% over the ",
         "ensemble. The projections use the median path.")),
       tags$li(paste(
-        "Country climate: the forced signal only, no year-to-year variability. The anomaly is the",
-        "global warming above its mean over the panel's horizon, times the country's CMIP6 pattern",
+        "Country climate: the forced signal, with or without natural variability. The forced anomaly",
+        "is the global warming above its mean over the panel's horizon, times the country's CMIP6 pattern",
         "(median over the models of the best-fit linear relationship with global temperature; T:",
         "the slope, C per C; P: the slope relative to each model's own mean P, times the country's",
         "long-run P).")),
+      tags$li(paste(
+        "Natural variability (optional): each country's annual T and P of the panel's climate data",
+        "over its horizon less the country's own quadratic trend over it, resampled by year and added",
+        "to the forced anomaly from 1994 (the history the trailing baselines need) to 2100, and on its",
+        "own to the counterfactual (no warming); the loss is the difference, so the noise enters only",
+        "through the non-linearity of the response (the arms' kink, the squared arms, the trailing",
+        "climate of the interactions). Years are drawn independently for each country, jointly (the",
+        "same calendar year for every country: the spatial correlation of T and P kept), or jointly",
+        "in blocks of 5 consecutive years (also their persistence). The noise paths are the same for",
+        "every setting and forcing. The estimate is the mean over the paths at the estimated",
+        "coefficients (the maps too); the band pairs each path with a draw of the coefficients, the",
+        "dotted lines are the 2.5-97.5% range of the paths alone. The moving SD widens with the forced",
+        "signal only (the noise is the variability the SD already measures). Only the countries with",
+        "the whole historical climate enter.")),
       tags$li(paste(
         "Damages: each setting's model and options (baseline, arms, interactions, shape, cap, SD and",
         "long-run characteristics) applied to every country of its panel with the country's own",
@@ -1349,16 +1915,25 @@ server <- function(input, output, session) {
         "definitions (GDP per capita of the panel's GDP source; agriculture over the three sectors' ",
         "value added) continued with the SSP's relative change from their last year. SSP GDP per ",
         "capita and population (5-year points) and the SSP share (5-year points 2030-2050) are joined ",
-        "by log-linear interpolation; after 2050 the share follows SSP income with the country's ",
+        "by a monotone cubic spline of the log (smooth growth through every point, no overshoot); ",
+        "after 2050 the share follows SSP income with the country's ",
         "2030-2050 elasticity. Fixed: the sample means, as in estimation. The table counts the ",
         "countries that follow the SSP in income and in share (the others keep their sample means).")),
+      tags$li(paste(
+        "Growth of world GDP (the chart's other option, and the table): the yearly change of the",
+        "summed GDP of the countries covered, from 2026 (the SSP's GDP starts in 2025). Without",
+        "climate change it is the SSP's; with it, the SSP's GDP times one plus the global loss",
+        "(the GDP-weighted average of the countries' losses), and its band is that of the draws of",
+        "the coefficients, draw by draw; the third option is their difference, the change of the",
+        "growth rate by climate change. Not available for the capital outcome.")),
       tags$li(paste(
         "Global loss: the average of the countries' losses weighted by the SSP's GDP of each year",
         "(PPP), over the countries with a pattern and SSP GDP; the share of the SSP's world GDP they",
         "cover in 2025 is in the table. 95% CI: 1,000 draws of the coefficients, the same for every",
         "country. Not included: the uncertainty of the warming and of the CMIP6 pattern."))
     )
-  })
+  }
+  output$scenario_notes <- renderUI(scenario_notes())
 
   # Termination shocks ---------------------------------------------------------
   # Global warming paths with perfect geoengineering: none (the background),
@@ -1370,25 +1945,27 @@ server <- function(input, output, session) {
              need(isTRUE(input$ts_tau > 0), "The catch-up time must be positive."))
     list(specs = specs(), forcing = input$ts_forcing, held = as.numeric(input$ts_held),
          years = sort(as.integer(input$ts_years)), tau = input$ts_tau,
-         economy = input$ts_econ %||% "follow")
+         economy = input$ts_econ %||% "follow", noise = noise_of(input$ts_noise, input$ts_noise_n))
   })
-  ts_key <- function(sp, forcing, held, years, tau, economy) {
+  ts_key <- function(sp, forcing, held, years, tau, economy, noise) {
     paste(c(vapply(sp, function(s) paste(s$label, s$model$key, s$sd_mode, s$clim_mode, s$cap), ""),
-            forcing, held, years, tau, economy), collapse = " || ")
+            forcing, held, years, tau, economy, noise_key(noise)), collapse = " || ")
   }
-  output$ts_status <- renderUI({
+  ts_status <- function() {
     if (input$run_termination == 0) return(helpText(class = "mb-0", "Not run yet."))
     r <- ts_run()
     current <- ts_key(specs(), input$ts_forcing, as.numeric(input$ts_held),
-                      sort(as.integer(input$ts_years)), input$ts_tau, input$ts_econ %||% "follow")
-    if (!identical(current, ts_key(r$specs, r$forcing, r$held, r$years, r$tau, r$economy))) {
+                      sort(as.integer(input$ts_years)), input$ts_tau, input$ts_econ %||% "follow",
+                      noise_of(input$ts_noise, input$ts_noise_n))
+    if (!identical(current, ts_key(r$specs, r$forcing, r$held, r$years, r$tau, r$economy, r$noise))) {
       return(helpText(class = "mb-0 text-warning-emphasis",
                       "Settings or options changed since the last run: press Run to update."))
     }
-    helpText(class = "mb-0", sprintf("Up to date: %d setting(s), %s, held at %.1f C, %d termination year(s).",
+    helpText(class = "mb-0", sprintf("Up to date: %d setting(s), %s, held at %.1f C, %d termination year(s); %s.",
                                      length(r$specs), scenario_label(r$forcing, r$economy), r$held,
-                                     length(r$years)))
-  })
+                                     length(r$years), noise_label(r$noise)))
+  }
+  output$ts_status <- renderUI(ts_status())
   # The paths of the last run: name -> global warming (named by year).
   ts_paths <- reactive({
     r <- ts_run()
@@ -1423,9 +2000,9 @@ server <- function(input, output, session) {
         path <- jobs$path[j]
         incProgress(1 / nrow(jobs), detail = paste(s$label, "-", path))
         key <- paste(s$model$key, s$sd_mode, s$clim_mode, s$cap, r$forcing, ssp, r$held, r$tau, path,
-                     sep = " | ")
+                     noise_key(r$noise), sep = " | ")
         if (is.null(projection_cache[[key]])) {
-          projection_cache[[key]] <- project_setting(s, SCEN, r$forcing, ssp, gmt = paths[[path]])
+          projection_cache[[key]] <- project_with(s, r$forcing, ssp, r$noise, gmt = paths[[path]])
         }
         list(setting = s$label, n = s$n, path = path, result = projection_cache[[key]])
       })
@@ -1443,10 +2020,73 @@ server <- function(input, output, session) {
     updateSelectInput(session, "ts_map_setting", choices = choices, selected = choices[[1]])
     updateSelectInput(session, "ts_map_year", choices = as.character(r$years),
                       selected = as.character(r$years[[1]]))
+    p <- names(ts_paths())
+    updateSelectInput(session, "ts_lat_paths", choices = p, selected = p[c(2, 3)])
   })
   ts_run_colours <- function(x) factor(x, levels = names(ts_colours()))
 
-  output$ts_gmt_plot <- renderPlot({
+  # Exceedances of natural variability: the setting of the map (its panel's
+  # climate data and pattern weight), the SSP population of the run, each
+  # country's natural SD of T and the global one (natural_sigma()).
+  ts_sigma_setting <- reactive({
+    sp <- ts_run()$specs
+    s <- Filter(function(s) as.character(s$n) == input$ts_map_setting, sp)
+    if (length(s)) s[[1]] else sp[[1]]
+  })
+  ts_population <- reactive({
+    r <- ts_run()
+    ssp <- economy_of(r$forcing, r$economy)
+    years <- seq(PROJECTION_FROM, PROJECTION_TO)
+    gdp <- SCEN$ssp$gdp[SCEN$ssp$gdp$ssp == ssp & SCEN$ssp$gdp$year %in% years, ]
+    pc <- SCEN$ssp$gdppc[SCEN$ssp$gdppc$ssp == ssp & SCEN$ssp$gdppc$year %in% years, ]
+    gdp <- tapply(gdp$gdp, list(gdp$iso3, gdp$year), sum)
+    pc <- tapply(pc$gdppc, list(pc$iso3, pc$year), sum)
+    iso <- intersect(rownames(gdp), rownames(pc))
+    pop <- gdp[iso, as.character(years), drop = FALSE] / pc[iso, as.character(years), drop = FALSE]
+    pop[stats::complete.cases(pop), , drop = FALSE]
+  })
+  ts_sigma <- reactive({
+    m <- ts_sigma_setting()$model
+    weight <- m$weight %||% "population"
+    variability <- EXPLORER$variability[[paste(m$gdp, m$climate, weight, sep = " | ")]]
+    pop <- ts_population()
+    natural_sigma(variability, SCEN$pattern[[weight]], pop[, as.character(PROJECTION_FROM)])
+  })
+  ts_reference <- reactive({
+    ref <- input$ts_ref %||% "20"
+    list(window = if (ref == "horizon") NA_real_ else as.numeric(ref),
+         horizon = ts_sigma_setting()$model$horizon %||% c(1970L, 2023L),
+         label = if (ref == "horizon") {
+           h <- ts_sigma_setting()$model$horizon %||% c(1970L, 2023L)
+           sprintf("the %d-%d mean", h[[1]], h[[2]])
+         } else sprintf("the trailing %s-year mean", ref))
+  })
+  # For each terminated path, by year: warming, its reference plus k SD, and
+  # whether the warming exceeds it.
+  ts_exceedance <- reactive({
+    paths <- ts_paths()
+    k <- input$ts_k_gmt
+    validate(need(isTRUE(k > 0), "k must be positive."))
+    sg <- ts_sigma()
+    ref <- ts_reference()
+    years <- seq(PROJECTION_FROM, PROJECTION_TO)
+    do.call(rbind, lapply(grep("^terminated in", names(paths), value = TRUE), function(p) {
+      d <- gmt_deviation(paths[[p]], years, ref$window, ref$horizon)
+      data.frame(path = p, termination = as.integer(sub("^terminated in ", "", p)), year = years,
+                 warming = d$warming, threshold = d$reference + k * sg$gmt,
+                 above = d$deviation > k * sg$gmt)
+    }))
+  })
+  # "2040: 12 years (2041-2052)", the years from the termination on.
+  exceedance_text <- function(ex) {
+    vapply(split(ex, ex$termination), function(e) {
+      y <- e$year[e$above & e$year >= e$termination]
+      if (!length(y)) return(sprintf("%d: never", e$termination[1]))
+      sprintf("%d: %d years (%d-%d)", e$termination[1], length(y), min(y), max(y))
+    }, "")
+  }
+
+  ts_gmt_plot <- function() {
     validate(need(input$run_termination > 0, TS_NOT_RUN))
     paths <- ts_paths()
     d <- do.call(rbind, lapply(names(paths), function(k) {
@@ -1454,56 +2094,89 @@ server <- function(input, output, session) {
     }))
     d <- d[d$year >= 2000, ]
     d$path <- ts_run_colours(d$path)
+    # The bands: the warming above the reference climate plus k SD, in the
+    # years it exceeds it from the termination on (one ribbon per run of
+    # consecutive years).
+    ex <- ts_exceedance()
+    ex$above <- ex$above & ex$year >= ex$termination
+    ex$segment <- paste(ex$path, cumsum(c(TRUE, diff(ex$above) != 0 | ex$path[-1] != ex$path[-nrow(ex)])))
+    ex <- ex[ex$above, ]
+    ex$path <- ts_run_colours(ex$path)
+    sg <- ts_sigma()
     ggplot(d, aes(year, warming, colour = path)) +
       geom_vline(xintercept = PROJECTION_FROM, colour = GRID, linewidth = 0.5) +
+      geom_ribbon(data = ex, aes(x = year, ymin = threshold, ymax = warming, fill = path, group = segment),
+                  inherit.aes = FALSE, alpha = 0.3, colour = NA) +
       geom_line(aes(linetype = path == "no geoengineering"), linewidth = 0.9) +
       scale_colour_manual(values = ts_colours(), name = NULL,
                           guide = guide_legend(ncol = 2)) +
+      scale_fill_manual(values = ts_colours(), guide = "none") +
       scale_linetype_manual(values = c(`FALSE` = "solid", `TRUE` = "22"), guide = "none") +
       labs(x = NULL, y = "Global warming above 1850-1900 (C)",
            subtitle = sprintf("Background: %s (FaIR median); catch-up time %.1f years",
-                              FORCING_LABELS[[ts_run()$forcing]], ts_run()$tau)) +
-      theme_explorer()
-  }, bg = SURFACE)
+                              FORCING_LABELS[[ts_run()$forcing]], ts_run()$tau),
+           caption = paste0(wrap_label(sprintf(
+             "Bands: warming above %s + %g SD of natural variability (1 SD = %.2f C of global warming). Years above it:",
+             ts_reference()$label, input$ts_k_gmt, sg$gmt), 70), "\n",
+             paste(exceedance_text(ts_exceedance()), collapse = "\n"))) +
+      theme_explorer() +
+      theme(plot.caption = element_text(colour = INK_MUTED, size = 9, hjust = 0))
+  }
+  output$ts_gmt_plot <- renderPlot(ts_gmt_plot(), bg = SURFACE)
 
-  output$ts_global_plot <- renderPlot({
+  ts_global_plot <- function() {
     validate(need(input$run_termination > 0, TS_NOT_RUN))
-    d <- ts_global()
     sp <- ts_run()$specs
+    measure <- input$ts_measure %||% "loss"
+    validate(need(measure == "loss" || growth_allowed(sp), GROWTH_NOTE))
+    d <- as_measure(ts_global(), measure)
     d$setting <- factor(d$setting, levels = vapply(sp, `[[`, "", "label"))
     d$path <- ts_run_colours(d$path)
+    # Growth: the SSP's growth without climate change (the same for every
+    # path), thin grey.
+    baseline <- if (measure == "growth") {
+      geom_line(data = d[d$path == levels(d$path)[1], ], mapping = aes(year, baseline_growth), inherit.aes = FALSE,
+                colour = INK_MUTED, linetype = "dotted", linewidth = 0.6)
+    }
     ggplot(d, aes(year, estimate, colour = path, fill = path)) +
       geom_hline(yintercept = 0, colour = INK_MUTED, linewidth = 0.4) +
       geom_ribbon(aes(ymin = low, ymax = high), alpha = 0.06, colour = NA) +
+      noise_lines(d) +
+      baseline +
       geom_line(aes(linetype = path == "no geoengineering"), linewidth = 0.9) +
       facet_wrap(~setting, ncol = min(3, nlevels(d$setting)), scales = "free_y",
                  labeller = labeller(setting = function(x) wrap_label(x, 50))) +
       scale_colour_manual(values = ts_colours(), name = NULL, guide = guide_legend(ncol = 3)) +
       scale_fill_manual(values = ts_colours(), guide = "none") +
       scale_linetype_manual(values = c(`FALSE` = "solid", `TRUE` = "22"), guide = "none") +
-      labs(x = NULL, y = paste("World", quantity_of(sp), "against no climate change (%)"),
-           subtitle = sprintf("%s; bands: 95%% CI of the coefficients",
-                              scenario_label(ts_run()$forcing, ts_run()$economy))) +
+      labs(x = NULL, y = measure_axis(measure, sp),
+           subtitle = wrap_label(sprintf("%s; %s%s%s", scenario_label(ts_run()$forcing, ts_run()$economy),
+                                         if (ts_run()$noise$type != "none") "mean over the noise paths; " else "",
+                                         band_label(ts_run()$noise),
+                                         if (measure == "growth") "; grey dotted: the SSP's growth without climate change" else ""),
+                                 110)) +
       theme_explorer() +
       theme(strip.text = element_text(colour = INK_MUTED, size = 9.5, hjust = 0))
-  }, bg = SURFACE)
+  }
+  output$ts_global_plot <- renderPlot(ts_global_plot(), bg = SURFACE)
 
   output$readout_ts <- renderUI({
     if (input$run_termination == 0) return(NULL)
     hover <- input$hover_ts
     if (is.null(hover)) return(helpText("Hover over the global chart to read the values."))
-    d <- ts_global()
-    year <- max(PROJECTION_FROM, min(round(hover$x), PROJECTION_TO))
+    measure <- input$ts_measure %||% "loss"
+    if (measure != "loss" && !growth_allowed(ts_run()$specs)) return(NULL)
+    d <- as_measure(ts_global(), measure)
+    year <- max(min(d$year), min(round(hover$x), PROJECTION_TO))
     rows <- d[d$year == year, ]
     rows <- rows[order(match(rows$path, names(ts_colours()))), ]
     tagList(tags$div(class = "small", paste("Year", year)),
-            readout_list(sprintf("%s, %s: %+.2f%% [%+.2f, %+.2f]", rows$setting, rows$path,
-                                 rows$estimate, rows$low, rows$high)))
+            readout_list(paste0(rows$setting, ", ", rows$path, ": ", loss_text(rows, measure))))
   })
 
   # Map: the extra loss from terminating in the chosen year against sustained
   # geoengineering, by country in 2100 (pp of GDP; negative: a larger loss).
-  output$ts_map <- renderPlot({
+  ts_map <- function() {
     validate(need(input$run_termination > 0, TS_NOT_RUN))
     req(input$ts_map_setting, input$ts_map_year)
     pr <- Filter(function(p) as.character(p$n) == input$ts_map_setting, ts_projections())
@@ -1525,15 +2198,51 @@ server <- function(input, output, session) {
            subtitle = wrap_label(paste0(pr[[1]]$setting, "; ",
                                         scenario_label(ts_run()$forcing, ts_run()$economy)))) +
       theme_map()
-  }, bg = SURFACE)
+  }
+  output$ts_map <- renderPlot(ts_map(), bg = SURFACE)
 
-  output$ts_table <- renderTable({
+  # Latitude chart: the share of the population exposed to years beyond k SD of
+  # natural variability, by 5-degree latitude band and year, for each chosen path.
+  ts_lat_plot <- function() {
+    validate(need(input$run_termination > 0, TS_NOT_RUN))
+    validate(need(length(input$ts_lat_paths) > 0, "Select at least one warming path."),
+             need(isTRUE(input$ts_k_lat > 0), "k must be positive."))
+    paths <- ts_paths()
+    chosen <- intersect(names(paths), input$ts_lat_paths)
+    req(length(chosen) > 0)
+    sg <- ts_sigma()
+    ref <- ts_reference()
+    sign <- input$ts_sign %||% "warm"
+    years <- seq(PROJECTION_FROM, PROJECTION_TO)
+    d <- do.call(rbind, lapply(chosen, function(p) {
+      cbind(path = p, exposure_by_latitude(paths[[p]], years, ref$window, ref$horizon, sg,
+                                           ts_population(), LATITUDE_SHARES, input$ts_k_lat, sign))
+    }))
+    d$path <- factor(d$path, levels = chosen)
+    baseline <- 100 * if (sign == "both") 2 * stats::pnorm(-input$ts_k_lat) else stats::pnorm(-input$ts_k_lat)
+    events <- if (sign == "both") sprintf("beyond +-%g SD", input$ts_k_lat) else sprintf("above +%g SD", input$ts_k_lat)
+    ggplot(d, aes(year, lat, fill = exposed)) +
+      geom_tile(width = 1, height = 5) +
+      facet_wrap(~path, ncol = min(3, length(chosen))) +
+      scale_fill_gradientn(colours = SCEN$palettes$temp_seq, limits = c(0, max(d$exposed, na.rm = TRUE)),
+                           name = "Population\nexposed (%)") +
+      scale_x_continuous(expand = c(0, 0)) +
+      scale_y_continuous(breaks = seq(-60, 90, by = 30), expand = c(0, 0)) +
+      labs(x = NULL, y = "Latitude (degrees)",
+           title = sprintf("Share of the population with a year of T %s of natural variability", events),
+           subtitle = wrap_label(sprintf(
+             "%s; deviation from %s; each country's normal with its SD of detrended historical T (%s), population (%s) spread over its area; %.1f%% with no forced deviation",
+             scenario_label(ts_run()$forcing, ts_run()$economy), ref$label,
+             ts_sigma_setting()$label, economy_of(ts_run()$forcing, ts_run()$economy), baseline), 140)) +
+      theme_explorer() +
+      theme(strip.text = element_text(colour = INK_MUTED, size = 9.5, hjust = 0), legend.position = "right")
+  }
+  output$ts_lat_plot <- renderPlot(ts_lat_plot(), bg = SURFACE)
+
+  ts_table <- function() {
     if (input$run_termination == 0) return(NULL)
     pr <- ts_projections()
-    cell <- function(g, y) {
-      r <- g[g$year == y, ]
-      sprintf("%+.2f [%+.2f, %+.2f]", r$estimate, r$low, r$high)
-    }
+    cell <- function(g, y) loss_text(g[g$year == y, ])
     out <- do.call(rbind, lapply(pr, function(p) {
       g <- p$result$global
       sustained <- Filter(function(q) q$setting == p$setting && startsWith(q$path, "sustained"), pr)[[1]]
@@ -1541,14 +2250,17 @@ server <- function(input, output, session) {
       data.frame(Setting = p$setting, Path = p$path,
                  `World GDP 2050 (%)` = cell(g, 2050), `World GDP 2100 (%)` = cell(g, PROJECTION_TO),
                  `2100 against sustained (pp)` = sprintf("%+.2f", g$estimate[g$year == PROJECTION_TO] - s100),
+                 `Growth of world GDP 2026-2100 (% a year): mean; largest change by climate change (pp, year)` =
+                   growth_text(g, ts_run()$specs, p$n, TRUE),
                  check.names = FALSE)
     }))
     names(out) <- sub("^World GDP", paste("World", quantity_of(ts_run()$specs)), names(out))
     out[order(match(out$Setting, vapply(ts_run()$specs, `[[`, "", "label")),
               match(out$Path, names(ts_colours()))), ]
-  }, striped = TRUE, spacing = "s", align = "l")
+  }
+  output$ts_table <- renderTable(ts_table(), striped = TRUE, spacing = "s", align = "l")
 
-  output$ts_notes <- renderUI({
+  ts_notes <- function() {
     tags$ul(
       class = "small",
       tags$li(paste(
@@ -1563,12 +2275,25 @@ server <- function(input, output, session) {
       tags$li(paste(
         "Damages: each setting's model and options, every country of its panel, losses accumulating",
         "from 2025 against no climate change, and the global loss weighted by the SSP's GDP, as in the",
-        "climate scenarios. The map and the last column compare termination with sustained",
-        "geoengineering in 2100 (negative: termination costs more)."))
+        "climate scenarios, with the same options of natural variability (the same noise paths for",
+        "every warming path). The map and the last column compare termination with sustained",
+        "geoengineering in 2100 (negative: termination costs more).")),
+      tags$li(paste(
+        "Exceedances of natural variability (climate only, no damage model): the deviation of global",
+        "warming from the reference climate (the trailing mean of the years before, or the horizon",
+        "mean), times each country's CMIP6 slope, against the SD of the country's detrended",
+        "historical T in the climate data of the map's setting. Warming chart: one SD of global",
+        "warming is the SD of the population-weighted (SSP, 2025) mean of the countries' detrended T",
+        "over their weighted mean slope; the bands shade the warming above the reference plus k SD,",
+        "and the subtitle counts those years from each termination on. Latitude chart: each",
+        "country's probability of a year beyond k SD, a normal with its SD around its forced",
+        "deviation, weighted by its SSP population spread uniformly over its area in each 5-degree",
+        "band (Natural Earth borders; countries without borders at 1:110m left out)."))
     )
-  })
+  }
+  output$ts_notes <- renderUI(ts_notes())
 
-  output$notes <- renderUI({
+  notes_ui <- function() {
     model_lines <- lapply(specs(), function(s) {
       m <- s$model
       # The splines against the linear interactions (same rows): the Wald test
@@ -1588,24 +2313,53 @@ server <- function(input, output, session) {
       } else ""
       moderators <- if (m$moderators == "trailing") {
         paste0("trailing characteristics (climate: ",
-               if (m$window == "all") "horizon mean" else paste0("trailing ", sub("lag_", "", m$window), "-year mean"),
+               if (!trailing_window(m$window)) "horizon mean"
+               else paste0("trailing ", sub("lag_", "", m$window), "-year mean"),
                "; income: 5 years before; share: ", if (m$share_trailing) "5 years before" else "sample mean", ")")
       } else "fixed characteristics (sample means)"
+      effects <- m$effects %||% "both"
+      effects_text <- if (effects == "year") "year effects only (no unit effects or trends)" else {
+        paste(if (effects == "unit") "unit effects only (no year effects)" else "year and unit effects", "with", FE_SHORT[[m$fe]])
+      }
+      convergence <- if (!is.null(m$convergence_coef)) {
+        sprintf(" Convergence control, %s: %+.4f (SE %.4f, p = %.3g).", CONVERGENCE_SHORT[[m$convergence]],
+                m$convergence_coef[["estimate"]], m$convergence_coef[["se"]], m$convergence_coef[["p"]])
+      } else ""
+      if (!is.null(m$quad_coef)) {
+        q <- m$quad_coef
+        convergence <- paste0(convergence, sprintf(" Quadratic climate controls: %s.", paste(sprintf(
+          "%s %+.4f (SE %.4f, p = %.3g)", vapply(paste0("quad:", m$quad[ifelse(grepl("TM", q$term), "TM", "RR")], ":", q$term),
+                                                  term_label, ""), q$estimate, q$se, q$p), collapse = "; ")))
+      }
       tags$li(tags$span("●", style = paste0("color:", SETTING_COLOURS[s$n], ";")),
-              sprintf(paste("%s: %s x %s, %s baseline, %s, year and unit effects with %s, interactions: %s",
-                            "(%s) on %s; %s rows, %s countries from %d.%s%s"), s$label, m$gdp, m$climate,
-                      tolower(m$baseline), tolower(m$form), FE_SHORT[[m$fe]], interaction_label(m$inter),
+              sprintf(paste("%s: %s x %s, regression unit: %s, %s, %s, interactions: %s",
+                            "(%s) on %s; %s rows, %s countries from %d; controls: %s; %s.%s%s%s"), s$label, m$gdp, m$climate,
+                      baseline_label(m$baseline, model_style(m)), form_label(m$form, m$symmetric),
+                      effects_text, interaction_label(m$inter),
                       m$shape %||% "linear", moderators, format(m$nobs, big.mark = ","), m$countries,
-                      EXPLORER$start_year, test, levels))
+                      EXPLORER$start_year,
+                      if (length(m$controls)) paste(CONTROL_SHORT[m$controls], collapse = ", ") else "none",
+                      outlier_text(m$outliers, m$gdp), test, levels, convergence))
     })
     tags$div(
       tags$ul(model_lines),
       tags$p(paste(
-        "Every model: year and unit effects, with no unit trends, unit linear trends, or unit linear",
+        "Every model: year and unit effects (or only one of them), with no unit trends, unit linear trends, or unit linear",
         "and quadratic trends (the notebook's); the deviations are demeaned in the same way before",
         "their arms are cut (each unit's mean, mean and linear trend, or mean and linear and",
-        "quadratic trend, fitted from 1960); conflict and",
-        "collapse controls; errors clustered by country. Characteristics in the interactions: fixed",
+        "quadratic trend, fitted from 1960), except the innovations of the NRK filter and the",
+        "deviations of symmetric models and of models without unit effects, which enter as they are;",
+        "optionally a convergence control (last year's or the 5 years' log GDP per capita, or its",
+        "growth last year or two years before, not in the responses or projections); the ticked controls (by default all: conflict, minor",
+        "and war, and the post-Soviet, with Albania, and post-Yugoslav collapse years); errors",
+        "clustered by country. Growth outliers: by default those whose annotated cause does not",
+        "involve weather among the lowest and highest 5% of the growth reversals of the GDP source's",
+        "own ERA5 panel from 1970 (the change of growth from the year before, g(t) - g(t-1), flagged",
+        "in year t; PWT x ERA5: the notebook's sample) are dropped; optionally those of the 1% tails",
+        "only, those of the tails of growth itself (the rule until November 2026), or none. The",
+        "causes are annotated in data/growth_outlier_causes*.csv. They are events of a country and",
+        "year, dropped from every panel of that source; the weather-driven ones (droughts,",
+        "storms, floods, harvests) always stay. Characteristics in the interactions: fixed",
         "(the sample means: long-run climate, log income and share, constant within a country) or",
         "trailing (the mean climate of the deviation's own baseline, the trailing 20 or 30 years, or",
         "the horizon mean with the horizon baseline; log of the mean GDP per capita of the 5 years",
@@ -1630,7 +2384,41 @@ server <- function(input, output, session) {
         tags$li(paste(
           "Response: the effect on that year's growth of a year whose temperature (precipitation) is",
           "the given anomaly away from the baseline, in SDs of the country's variability, at its",
-          "long-run climate, income and share. Estimated on deviations demeaned as the fixed effects.")),
+          "long-run climate, income and share. Estimated on deviations demeaned as the fixed effects.",
+          "Symmetric models: the arms are replaced by the unsplit deviation (linear arms), its square",
+          "(quadratic arms) or both, with one coefficient (and one set of interactions) for both sides,",
+          "on the deviations as they are: with linear terms the fixed effects absorb what demeaning",
+          "would remove, up to the interactions with trailing characteristics.")),
+        tags$li(paste(
+          "NRK filter (Nath, Ramey and Klenow, Eq. 4; option (c) of shock_filters.R): the deviation",
+          "is the innovation of a pooled regression of T (P) on its three lags and the lags times the",
+          "country's mean over the horizon, with country effects and no year effects, fitted on the",
+          "annual climate of the panel's countries from 1950; in SDs of the innovation in the country",
+          "over the horizon (or in C and m). The climate of the interactions is the horizon mean, also",
+          "with trailing characteristics. In the GDP paths and the scenarios the deviation is the",
+          "innovation the anomaly adds, a_t - sum_j phi_j a_t-j with phi_j = g_j + h_j times the",
+          "country's long-run climate (the lags before the shift, or the history before 2025, included):",
+          "a one-off year is a deviation that year only, while a permanent shift leaves (1 - sum_j phi_j)",
+          "of itself every year.")),
+        tags$li(paste(
+          "Lags (optional, L = 5 by default when ticked, up to 10): every deviation term, with its interactions and",
+          "income scaling, also enters at t-1, ..., t-L with coefficients of its own, each lag interacted with the",
+          "characteristics of its own year (and the time-varying ones with their lagged level terms). The lags of",
+          "the first years come from the climate of the 10 years before the start (deviations demeaned from 1960, as",
+          "in the notebook), and those after a gap in the rows from the climate of the missing years; a model uses",
+          "the rows with every lagged value it needs (trailing income before 1970 is often missing). The response",
+          "is the cumulative effect of one year's anomaly over that year and the L after; in the paths and",
+          "scenarios each year's growth sums the effects of its own deviation and of the L before (none before the",
+          "shift, or before 2025 in the scenarios: the counterfactual shares that history). The cap applies lag by",
+          "lag, and the table tests the lagged terms jointly.")),
+        tags$li(paste(
+          "Last year's value (as Kalkuhl and Wenz) and this year's value (as Burke, Hsiang and Miguel): the",
+          "deviation terms of T (P) interacted with the level of T (P) the year before or the same year, in C",
+          "(m a year) less the median of the countries' long-run means, with their level terms (they vary",
+          "every year). This year's value makes the response to a deviation x depend on the level it brings",
+          "(the country's climate plus the anomaly), so the response bends even with linear arms. In the GDP",
+          "paths and scenarios both levels are the country's climate plus the anomaly of that year (and the",
+          "noise, with natural variability); they are climate terms, never capped.")),
         tags$li(paste(
           "Outcome, in log points: the growth of GDP per capita; with PWT also the growth of the capital",
           "stock per capita (rnna / pop) or of GDP per worker (rgdpna / emp, persons engaged), on the rows",
@@ -1656,8 +2444,11 @@ server <- function(input, output, session) {
         tags$li(paste(
           "GDP path: growth effects accumulate in log GDP. The shift is immediate (solid: its full",
           "size from year 0 on), gradual (dashed: rising linearly from zero in year 0 to its full",
-          "size in year X, then constant) or sudden and late (dotted: nothing until year X, the full",
-          "shift from then on). Horizon baseline: the shift is a",
+          "size in year X, then constant), sudden and late (dotted: nothing until year X, the full",
+          "shift from then on) or transitory (dot-dash: the shift in year 0 only; without lags its GDP effect",
+          "is a one-off step, with lags it moves for L years as the lagged effects come in, showing the",
+          "dynamics of the distributed lags; with a trailing baseline the year also enters the trailing mean).",
+          "Horizon baseline: the shift is a",
           "deviation every year, so growth is lower (or higher) every year. Trailing baselines: the",
           "shift enters the trailing mean, so an immediate shift fades out over 20 (30) years and a",
           "gradual one stays a deviation of about the warming of the last 10 (15) years while it",
@@ -1685,13 +2476,125 @@ server <- function(input, output, session) {
           "income), the long-run climate unless it follows the baseline, and the absence of lags",
           "(no recovery).")),
         tags$li(paste0(
-          "Country SDs: horizon SD of the annual series, or for the trailing baselines the median of ",
-          "the trailing SD over the country's years. Agricultural share: World Bank agriculture value ",
+          "Country SDs: horizon SD of the annual series (also of the level), or for the trailing baselines the ",
+          "median of the trailing SD over the country's years, or for the NRK filter the SD of its innovation ",
+          "over the horizon; first differences are those of the unit in these units (with the level: Kalkuhl ",
+          "and Wenz, this year's value less last year's, over the horizon SD). Agricultural share: World Bank agriculture value ",
           "added over that of the three sectors (constant 2015 US$), mean over the sample years. ",
           "Built ", format(EXPLORER$built, "%Y-%m-%d %H:%M"), "."))
       )
     )
-  })
+  }
+  output$notes <- renderUI(notes_ui())
+
+  # The saved page ---------------------------------------------------------------
+  # The page as it is shown, as one self-contained HTML file: the settings, the
+  # charts (PNG, embedded), the tables and the notes. The climate scenarios and
+  # the termination shocks enter only if they were run (their last run, with its
+  # status). The equations need MathJax from the web to render.
+  output$save_page <- downloadHandler(
+    filename = function() paste0("response_explorer_", format(Sys.time(), "%Y%m%d_%H%M"), ".html"),
+    content = function(file) {
+      withProgress(message = "Saving the page", value = 0, {
+        htmltools::save_html(saved_page(), file)
+      })
+    }
+  )
+  saved_page <- function() {
+    # A chart as an embedded PNG drawn `width` px wide (about the app's on a
+    # wide window) and `height` px high, shown at the width of its column; a
+    # chart that cannot be drawn (e.g. growth with the capital outcome) is the
+    # reason why.
+    chart <- function(make, height, width = 760) {
+      incProgress(1 / 24)
+      p <- tryCatch(make(), error = function(e) conditionMessage(e))
+      if (is.character(p)) return(tags$p(class = "muted", p))
+      png <- tempfile(fileext = ".png")
+      on.exit(unlink(png))
+      ggsave(png, p, width = width / 96, height = height / 96, dpi = 192, bg = SURFACE)
+      tags$img(src = knitr::image_uri(png), style = "width: 100%;")
+    }
+    # Two columns, of equal width or as `columns` (CSS grid columns).
+    pair <- function(a, b, columns = "1fr 1fr") {
+      tags$div(class = "pair", style = paste0("grid-template-columns: ", columns, ";"), tags$div(a), tags$div(b))
+    }
+    table_of <- function(df, html = FALSE) {
+      if (is.null(df) || !nrow(df)) return(NULL)
+      cell <- function(x) if (html) HTML(as.character(x)) else as.character(x)
+      tags$table(class = "tbl",
+                 tags$thead(tags$tr(lapply(names(df), function(x) tags$th(cell(x))))),
+                 tags$tbody(lapply(seq_len(nrow(df)), function(i) {
+                   tags$tr(lapply(df[i, ], function(x) tags$td(cell(x))))
+                 })))
+    }
+    card <- function(title, ...) tags$section(class = "card", tags$h2(title), ...)
+    # The common shift and, for each shown setting, its label.
+    sp <- specs()
+    settings <- tags$ul(lapply(sp, function(s) {
+      tags$li(tags$span("●", style = paste0("color:", SETTING_COLOURS[s$n], ";")),
+              tags$strong(paste0(" Setting ", s$n, ": ")), s$label)
+    }))
+    shift_text <- sprintf(paste("Permanent shift: %+g °C in temperature, %+g mm a year in precipitation; GDP paths",
+                                "over %d years; year X = %d; shifts shown: %s."),
+                          input$shock_T, input$shock_P, as.integer(input$horizon), as.integer(input$ramp_years),
+                          paste(unname(scenarios()), collapse = ", "))
+    measure_text <- function(measure) names(MEASURE_CHOICES)[MEASURE_CHOICES == (measure %||% "loss")]
+    scenarios_part <- if (input$run_scenarios > 0) {
+      component <- input$map_component %||% "loss"
+      card("Climate scenarios: GDP losses under each setting's model, 2025-2100",
+           tags$div(class = "muted", scenario_status()),
+           tags$p(class = "muted", paste0("Global chart: ", measure_text(input$global_measure), ". Maps: ",
+                                          COMPONENT_TITLES[[component]], ".")),
+           pair(chart(gmt_plot, 380, 520), chart(global_plot, 380, 1040), "1fr 2fr"),
+           pair(chart(function() country_map(2050), 340), chart(function() country_map(2100), 340)),
+           tags$h3("Physical drivers: the change of each country's climate in the scenario"),
+           pair(chart(function() driver_map("dT", 2050), 320), chart(function() driver_map("dT", 2100), 320)),
+           pair(chart(function() driver_map("dP", 2050), 320), chart(function() driver_map("dP", 2100), 320)),
+           table_of(global_table()), scenario_notes())
+    }
+    termination_part <- if (input$run_termination > 0) {
+      card("Termination shocks: perfect geoengineering, 2025-2100",
+           tags$div(class = "muted", ts_status()),
+           tags$p(class = "muted", paste0("Global chart: ", measure_text(input$ts_measure), ".")),
+           pair(chart(ts_gmt_plot, 460, 520), chart(ts_global_plot, 460, 1040), "1fr 2fr"),
+           chart(ts_map, 380, 1180),
+           if (length(input$ts_lat_paths)) chart(ts_lat_plot, 420, 1180),
+           table_of(ts_table()), ts_notes())
+    }
+    tagList(
+      tags$head(
+        tags$title("Weather response explorer"),
+        tags$script(src = "https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.9/MathJax.js?config=TeX-AMS-MML_HTMLorMML"),
+        tags$style(HTML(sprintf(paste(
+          "body { background: %s; color: %s; font-family: system-ui, sans-serif; max-width: 1220px;",
+          "margin: 0 auto; padding: 16px; font-size: 14px; }",
+          "h1 { font-size: 22px; } h2 { font-size: 17px; margin-top: 0; } h3 { font-size: 15px; }",
+          ".card { border: 1px solid %s; border-radius: 8px; padding: 14px; margin: 14px 0; background: #fff; }",
+          ".pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }",
+          "@media (max-width: 800px) { .pair { grid-template-columns: 1fr !important; } }",
+          ".muted { color: %s; } .small { font-size: 12.5px; }",
+          ".alert { background: #fff6e0; border: 1px solid #eda100; border-radius: 6px; padding: 8px 12px; }",
+          ".tbl { border-collapse: collapse; font-size: 12.5px; display: block; overflow-x: auto; margin: 10px 0; }",
+          ".tbl th, .tbl td { border-bottom: 1px solid %s; padding: 4px 8px; text-align: left; vertical-align: top; }",
+          ".tbl tbody tr:nth-child(odd) { background: #f5f4f1; }"), SURFACE, INK, GRID, INK_MUTED, GRID)))
+      ),
+      tags$h1("Weather response explorer"),
+      tags$p(class = "muted", paste("Saved", format(Sys.time(), "%Y-%m-%d %H:%M"), "· panels built",
+                                    format(EXPLORER$built, "%Y-%m-%d %H:%M"))),
+      settings, tags$p(shift_text),
+      warnings_ui(),
+      pair(card("Temperature: growth response to an annual anomaly",
+                chart(function() response_plot(responses_T(), "TM"), 380)),
+           card("Precipitation: growth response to an annual anomaly",
+                chart(function() response_plot(responses_P(), "RR"), 380))),
+      pair(card(gdp_header("TM"), chart(function() gdp_plot(paths_T()), 430)),
+           card(gdp_header("RR"), chart(function() gdp_plot(paths_P()), 430))),
+      card("Each setting's model: specification, coefficients, fit and joint tests",
+           spec_math(), table_of(coef_table(), html = TRUE), coef_notes()),
+      scenarios_part, termination_part,
+      card("Models and assumptions", notes_ui())
+    )
+  }
 }
 
 app <- shinyApp(ui, server)
