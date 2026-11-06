@@ -1,0 +1,1540 @@
+---
+title: "Income and Climate Interactions: Deviation Forms"
+author: ''
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+    code_folding: hide
+  pdf_document:
+    toc: true
+    toc_depth: '2'
+params:
+  start_year: 1970
+  income_baseline: horizon
+---
+
+# Purpose
+
+`weather_arms_robustness.Rmd` ("Long-run income in the interaction") interacts
+every deviation term with the unit's long-run climate and its long-run income.
+This notebook keeps that model and varies only two things:
+
+- the **deviation definition**: the horizon baseline, the trailing 20 years
+  and the trailing 30 years;
+- the **form** of each variable's deviation, the same for temperature and
+  precipitation, each with one coefficient per arm (no arm has a linear and a
+  higher-power term together):
+
+```text
+symmetric        dm                              one slope for both signs
+linear arms      dT+, dT-
+quadratic arms   (dT+)^2, (dT-)^2
+cubic arms       (dT+)^3, (dT-)^3
+```
+
+The models are fitted on two GDP series (PWT; the World Bank's GDP per capita
+at constant 2021 PPP) and three climate datasets (ERA5, CRU TS, UDelaware):
+3 definitions x 4 forms x 6 panels = 72 models.
+
+Before that, a check: does the model already estimated (horizon deviations,
+linear arms, income = the unit's mean over the horizon) change when income is
+the mean of the 20 years before the current year?
+
+Effects are in percentage points (pp) of the annual growth of GDP per capita
+for one year at +3 or -3 SD against a year at the unit's trend; `dT+`, `dT-`
+(`dP+`, `dP-`) are the positive and negative arms, both positive numbers;
+stars are \*\*\* p < 0.01, \*\* p < 0.05, \* p < 0.1.
+
+# Data and specification
+
+The data, the sample, the deviations and the regression are those of
+`weather_arms_robustness.Rmd` ("Data and methods"), with the same code; this
+notebook repeats only what it needs.
+
+**Data.** GDP per capita from the Penn World Table 11.0 (`rgdpna / pop`,
+constant national prices at the 2021 PPP level) and from the World
+Development Indicators (`NY.GDP.PCAP.PP.KD`, constant 2021 international
+dollars, October 2026; from 1990, so its growth rates start in 1991). The
+outcome is the growth of GDP per capita, the difference of its logarithm
+between consecutive calendar years (a gap gives a missing growth rate; nothing
+is interpolated, extrapolated or converted). Annual temperature `TM` (°C) and
+precipitation `RR` (m) from ERA5, CRU TS or UDelaware in the Weighted Climate
+Dataset, with population-density weights at base year 2000. Controls: the
+UCDP/PRIO conflict indicators (minor conflict, war) and the post-Soviet and
+post-Yugoslav collapse-year dummies.
+
+**Regression.** Year effects, unit effects and unit linear and quadratic
+trends (t = year - 1990), as in Burke, Hsiang and Miguel (2015); OLS with the
+fixed effects absorbed; errors clustered by country:
+
+```text
+g(i,t) = sum over terms a of  dev_a(i,t) x (c_a + b_a clim(i) + h_a inc(i))
+         + c1 minor conflict + c2 war + collapse-year dummies
+         + unit effect(i) + unit trend(i) x t + unit quadratic trend(i) x t^2 + year effect(t) + error
+clim(i) = the unit's mean of the variable over the horizon (°C for T, m a year for P)
+inc(i)  = log of the unit's mean GDP per capita over the horizon (every year with
+          GDP), minus its mean over the sample rows
+```
+
+Income is centred, so `c_a + b_a clim` is the response at the sample's average
+income. The long-run climate of the interaction is the horizon mean under
+every definition (as the "20-year" definition of the main notebook; not the
+"matched" interaction).
+
+**Deviations.** Against the baseline (the horizon: the unit's mean and SD of
+the variable from `r params$start_year` to the last year of the panel; or the
+mean and SD of the 20 or 30 years before the current one), demeaned (the
+unit's mean and linear and quadratic trend removed, fitted on the years from
+`r params$start_year` minus ten to the last year, where the baseline exists),
+then cut into arms:
+
+```text
+dT = (TM - mean) / SD       dm = dT - (unit mean + linear and quadratic trend)
+dT+ = max(dm, 0)            dT- = max(-dm, 0)                      (the same for P)
+```
+
+**Growth outliers.** The 5% lowest and 5% highest growth rates of PWT x ERA5
+from the start year, each annotated with its likely cause; those whose cause
+does not involve weather are dropped, from every panel.
+
+**Comparing models.** Where models are compared by AIC, BIC or the within
+adjusted R2, the verdict is "indifferent" when the difference cannot be told
+apart from noise (clustered Vuong test, or the Wald test of the added terms
+for nested models, 5%).
+
+```{r setup, message=FALSE, warning=FALSE, cache=FALSE}
+required_packages <- c("arrow", "countrycode", "dplyr", "fixest", "ggplot2", "knitr",
+                       "readxl", "tibble", "tidyr", "zoo")
+missing_packages <- required_packages[
+  !vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)
+]
+if (length(missing_packages)) {
+  stop(
+    "Install missing packages before running this notebook: ",
+    paste(missing_packages, collapse = ", ")
+  )
+}
+
+source("load_functions.R")
+
+# The chunks are cached in results/knitr_cache/, so a render re-runs only the
+# chunks whose code changed and those that use their objects (autodep); the
+# rest is read back. Every cache is rebuilt when the functions, the data files
+# or the parameters change (cache.extra). To rebuild everything, delete the
+# cache folder.
+CACHE_DIR <- file.path("results", "knitr_cache", "income_forms_sensitivity")
+cache_inputs <- c("load_functions.R", list.files("functions", full.names = TRUE),
+                  list.files("data", pattern = "[.](csv|xlsx|parquet)$", full.names = TRUE,
+                             recursive = TRUE))
+knitr::opts_chunk$set(
+  message = FALSE, warning = FALSE, cache = TRUE, autodep = TRUE,
+  cache.path = paste0(CACHE_DIR, "/"), fig.path = paste0(CACHE_DIR, "/figures/"),
+  cache.extra = list(inputs = file.info(cache_inputs)[, c("size", "mtime")], params = params)
+)
+```
+
+```{r shared-specification}
+# As in weather_arms_robustness.Rmd (shared-specification).
+START_YEAR <- as.integer(params$start_year)
+CLIMATE_WEIGHT <- "population density"
+CLIMATE_WEIGHT_YEAR <- 2000L
+
+OUTCOME <- "dlgrp_pc_usd"
+# Year effects, unit effects and unit linear and quadratic trends (t = year -
+# 1990, t2 = t^2), as in BHM (2015), in every model.
+FIXED_EFFECTS <- "year + GID_1[t, t2]"
+
+# The panels keep MAX_LAGS earlier climate years and the demeaning covers them
+# (as in weather_arms_robustness.Rmd, so the deviations are the same).
+MAX_LAGS <- 10L
+
+# The UCDP/PRIO conflict indicators by the highest intensity of the country's
+# conflicts that year (functions/conflict.R): conflict_low, minor (25-999
+# battle deaths), and conflict_high, war (1,000 or more); and the post-Soviet
+# (with Albania) and post-Yugoslav collapse-year dummies
+# (functions/transition_collapse.R).
+CONFLICT_TERMS <- c("conflict_low", "conflict_high")
+CONTROLS <- c(
+  CONFLICT_TERMS,
+  "i(fsu_collapse_year, ref = 'none')",
+  "i(yug_collapse_year, ref = 'none')"
+)
+
+# Growth outliers: the 5% lowest and the 5% highest growth rates of GDP per
+# capita of PWT x ERA5 from the start year (found in the panel-builder chunk),
+# each with its likely cause, annotated by hand in
+# data/growth_outlier_causes.csv and data/growth_outlier_causes_1970_additions.csv;
+# every country-year of the tails must have one. Dropped: those whose cause does
+# not involve weather (including those with no identified cause), from every
+# panel.
+OUTLIER_SHARE <- 0.10
+OUTLIER_CAUSES <- bind_rows(
+  utils::read.csv(data_file("growth_outlier_causes.csv"), stringsAsFactors = FALSE),
+  utils::read.csv(data_file("growth_outlier_causes_1970_additions.csv"), stringsAsFactors = FALSE)
+)
+stopifnot(!anyDuplicated(OUTLIER_CAUSES[, c("GID_0", "year")]))
+
+# Moments of the two deviation definitions of the main notebook: over the
+# horizon of the panel (*_all, replaced below) and over the 20 years before the
+# current one. The sample of the main notebook requires both; the 30-year
+# moments are required on top of them in the sensitivity (SENS_MOMENTS).
+MOMENTS <- c(
+  "mean_TM_all", "sd_TM_all", "mean_RR_all", "sd_RR_all",
+  "mean_TM_lag_20", "sd_TM_lag_20", "mean_RR_lag_20", "sd_RR_lag_20"
+)
+# The demeaned deviations of each variable and baseline (built by
+# prepare_panel()); the sample of the main notebook requires those of the
+# horizon and 20-year baselines.
+BASELINES <- c("all", "lag_20", "lag_30")
+DEMEANED <- as.vector(outer(c("TM", "RR"), c("all", "lag_20"), function(v, b) paste0("dm_", v, "_", b)))
+
+fit_model <- function(terms, model_data, fixed_effects = FIXED_EFFECTS, outcome = OUTCOME) {
+  m <- fit_panel_model(
+    paste(terms, collapse = " + "),
+    model_data,
+    outcome = outcome,
+    fixed_effects = fixed_effects,
+    cluster = ~GID_0
+  )
+  # The country of each estimation row, for the noise tests of differences in fit.
+  m$country <- model_data$GID_0[fixest::obs(m)]
+  m
+}
+
+# Labels for the coefficient tables; the collapse dummies are left out of them.
+DICT <- c(
+  conflict_low = "Conflict, minor", conflict_high = "Conflict, war",
+  clim_TM = "mean T", clim_RR = "mean P", inc = "income",
+  devTM = "dT", devTM_pos = "dT+", devTM_neg = "dT-",
+  devTM_pos2 = "(dT+)^2", devTM_neg2 = "(dT-)^2", devTM_pos3 = "(dT+)^3", devTM_neg3 = "(dT-)^3",
+  devRR = "dP", devRR_pos = "dP+", devRR_neg = "dP-",
+  devRR_pos2 = "(dP+)^2", devRR_neg2 = "(dP-)^2", devRR_pos3 = "(dP+)^3", devRR_neg3 = "(dP-)^3"
+)
+DROP <- "collapse_year"
+# Temperature terms, then precipitation terms, then the controls (original names).
+ORDER <- c("%^devTM", "%^devRR", "%^conflict")
+FITSTAT <- ~n + wr2 + aic + bic
+```
+
+The panels: PWT and World Bank PPP, each with ERA5, CRU TS and UDelaware. The
+sample is the unit-years with growth, both weather variables, the conflict
+indicators and the moments of the horizon and 20-year deviations (positive
+SDs), without the non-weather growth outliers: the sample of the main
+notebook. For the World Bank PPP panels the horizon of the climate baseline is
+the same as PWT's (`r params$start_year` to the last year), so a country-year
+has the same deviation in both; their rows start in 1991.
+
+```{r panel-builder}
+# As in weather_arms_robustness.Rmd (panel-builder), with the demeaned 30-year
+# deviations added (BASELINES).
+# Panel `econ` x `source` from `start_year`, with the horizon moments, the
+# controls, the sample with and without the country-years `drop`, the rows
+# dropped, and every unit-year of the panel (`data`).
+prepare_panel <- function(econ, source, econ_variable = NULL, drop = OUTLIERS_DROPPED,
+                          start_year = START_YEAR) {
+  cfg <- panel_config(
+    econ_year_min = start_year,
+    climate_source = source,
+    climate_weight = CLIMATE_WEIGHT,
+    climate_weight_year = CLIMATE_WEIGHT_YEAR,
+    # Eleven earlier climate years: up to ten carry the lags of the deviations
+    # into the first years, one the lagged trailing moments. The sample starts
+    # at start_year regardless.
+    clim_history_years = 11L
+  )
+  data <- suppressMessages(build_dat(econ_data = econ, config = cfg,
+                                     econ_variable = econ_variable))
+  level <- unique(data$gadm_level)
+  end_year <- max(data$year[est_row(data) & !is.na(data$TM) & !is.na(data$RR)])
+
+  horizon <- load_climate_panel(level, cfg) %>%
+    filter(gadm_level == level, year >= start_year, year <= end_year) %>%
+    group_by(GID_1) %>%
+    summarise(
+      mean_TM_all = mean(TM, na.rm = TRUE), sd_TM_all = sd(TM, na.rm = TRUE),
+      mean_RR_all = mean(RR, na.rm = TRUE), sd_RR_all = sd(RR, na.rm = TRUE),
+      .groups = "drop"
+    )
+  data <- data %>%
+    select(-c(mean_TM_all, sd_TM_all, mean_RR_all, sd_RR_all)) %>%
+    left_join(horizon, by = "GID_1")
+  data <- add_yugoslav_collapse(add_soviet_collapse(add_conflict(data)))
+  data$t <- data$year - 1990L
+  data$t2 <- data$t^2
+
+  # Demeaned deviations: each unit's mean and quadratic trend removed.
+  window <- data$year >= start_year - MAX_LAGS & data$year <= end_year
+  for (v in c("TM", "RR")) for (b in BASELINES) {
+    raw <- (data[[v]] - data[[paste0("mean_", v, "_", b)]]) / data[[paste0("sd_", v, "_", b)]]
+    ok <- which(window & is.finite(raw))
+    sub <- data.frame(GID_1 = data$GID_1[ok], t = data$t[ok], t2 = data$t2[ok], x = raw[ok])
+    m <- fixest::feols(x ~ 1 | GID_1[t, t2], sub, notes = FALSE)
+    demeaned <- rep(NA_real_, nrow(data))
+    demeaned[ok[fixest::obs(m)]] <- stats::resid(m)
+    data[[paste0("dm_", v, "_", b)]] <- demeaned
+  }
+
+  complete <- stats::complete.cases(
+    as.data.frame(data)[, c(OUTCOME, "TM", "RR", CONFLICT_TERMS, MOMENTS, DEMEANED)]
+  )
+  positive_sd <- Reduce(`&`, lapply(grep("^sd_", MOMENTS, value = TRUE), function(x) {
+    !is.na(data[[x]]) & data[[x]] > 0
+  }))
+  sample_all <- data[est_row(data) & data$year >= start_year & complete & positive_sd, ]
+  apply_exclusions(list(
+    label = paste(sub("_", " ", econ), "x", source), econ = econ, source = source, level = level,
+    start_year = start_year, end_year = end_year, all = sample_all, data = data
+  ), drop)
+}
+
+# The sample of panel `p` without the country-years `drop` (clean), and the
+# rows dropped (outliers).
+apply_exclusions <- function(p, drop) {
+  dropped <- paste(p$all$GID_0, p$all$year) %in% paste(drop$GID_0, drop$year)
+  p$clean <- p$all[!dropped, ]
+  p$outliers <- p$all[dropped, c("GID_0", "GID_1", "year", OUTCOME)]
+  p
+}
+
+# The outliers are the growth tails of the main panel (PWT x ERA5) from the
+# start year, so it is built first, without exclusions. Every country-year of
+# the tails must have an annotated cause.
+main <- prepare_panel("PWT", "ERA5", drop = OUTLIER_CAUSES[0, c("GID_0", "year")])
+cutoffs <- stats::quantile(main$all[[OUTCOME]], c(OUTLIER_SHARE / 2, 1 - OUTLIER_SHARE / 2),
+                           names = FALSE)
+tails <- main$all[main$all[[OUTCOME]] < cutoffs[[1]] | main$all[[OUTCOME]] > cutoffs[[2]], ]
+country_year <- function(d) paste(d$GID_0, d$year)
+stopifnot(all(country_year(tails) %in% country_year(OUTLIER_CAUSES)))
+OUTLIERS <- OUTLIER_CAUSES[country_year(OUTLIER_CAUSES) %in% country_year(tails), ]
+OUTLIERS_DROPPED <- OUTLIERS[OUTLIERS$weather == "no", c("GID_0", "year")]
+main <- apply_exclusions(main, OUTLIERS_DROPPED)
+
+# The panels of the sensitivity: PWT and World Bank PPP with each climate dataset.
+SENS_GRID <- expand.grid(source = c("ERA5", "CRU TS", "UDelaware"), econ = c("PWT", "WB_PPP"),
+                         stringsAsFactors = FALSE)
+sens_panels <- lapply(seq_len(nrow(SENS_GRID)), function(i) {
+  if (SENS_GRID$econ[i] == "PWT" && SENS_GRID$source[i] == "ERA5") return(main)
+  prepare_panel(SENS_GRID$econ[i], SENS_GRID$source[i])
+})
+names(sens_panels) <- vapply(sens_panels, `[[`, "", "label")
+stopifnot(names(sens_panels)[[1]] == "PWT x ERA5")
+```
+
+```{r model-helpers}
+# As in weather_arms_robustness.Rmd (model-helpers and income-interaction),
+# with cubic arms added.
+# Deviation terms of the demeaned deviations dm_<v>_<suffix>, with one suffix
+# per variable (a definition), and the long-run climate they are interacted
+# with, clim_<v> = mean_<v>_<suffix[["clim_<v>"]]>.
+add_deviation_terms <- function(model_data, suffix) {
+  for (v in c("TM", "RR")) {
+    dev <- model_data[[paste0("dm_", v, "_", suffix[[v]])]]
+    model_data[[paste0("dev", v)]] <- dev
+    model_data[[paste0("dev", v, "_pos")]] <- pmax(dev, 0)
+    model_data[[paste0("dev", v, "_neg")]] <- pmax(-dev, 0)
+    model_data[[paste0("dev", v, "_pos2")]] <- pmax(dev, 0)^2
+    model_data[[paste0("dev", v, "_neg2")]] <- pmax(-dev, 0)^2
+    model_data[[paste0("dev", v, "_pos3")]] <- pmax(dev, 0)^3
+    model_data[[paste0("dev", v, "_neg3")]] <- pmax(-dev, 0)^3
+    clim <- paste0("clim_", v)
+    model_data[[clim]] <- model_data[[paste0("mean_", v, "_", suffix[[clim]])]]
+  }
+  model_data
+}
+definition <- function(TM, RR, matched = FALSE) {
+  c(TM = TM, RR = RR, clim_TM = if (matched) TM else "all", clim_RR = if (matched) RR else "all")
+}
+DEFINITIONS <- list(
+  "Horizon" = definition("all", "all"),
+  "20-year" = definition("lag_20", "lag_20"),
+  "30-year" = definition("lag_30", "lag_30")
+)
+# Each form: the deviation terms of each variable, by column suffix; one term
+# per arm.
+FORMS <- list(
+  "Symmetric" = list(TM = "", RR = ""),
+  "Linear arms" = list(TM = c("_pos", "_neg"), RR = c("_pos", "_neg")),
+  "Quadratic arms" = list(TM = c("_pos2", "_neg2"), RR = c("_pos2", "_neg2")),
+  "Cubic arms" = list(TM = c("_pos3", "_neg3"), RR = c("_pos3", "_neg3"))
+)
+
+form_terms <- function(form) {
+  terms <- unlist(lapply(c("TM", "RR"), function(v) {
+    x <- paste0("dev", v, form[[v]])
+    c(x, paste0(x, ":clim_", v))
+  }))
+  c(terms, CONTROLS)
+}
+# Every deviation term of `form` interacted with income.
+income_interactions <- function(form) {
+  unlist(lapply(c("TM", "RR"), function(v) paste0("dev", v, form[[v]], ":inc")))
+}
+# Value of a deviation term (by column suffix) at deviations x.
+term_value <- function(suffix, x) {
+  if (suffix == "") return(x)
+  switch(suffix, "_pos" = pmax(x, 0), "_neg" = pmax(-x, 0),
+         "_pos2" = pmax(x, 0)^2, "_neg2" = pmax(-x, 0)^2,
+         "_pos3" = pmax(x, 0)^3, "_neg3" = pmax(-x, 0)^3)
+}
+interaction_name <- function(a, b, terms) {
+  intersect(c(paste0(a, ":", b), paste0(b, ":", a)), terms)[[1]]
+}
+wald_p <- function(m, pattern) fixest::wald(m, keep = pattern, print = FALSE)$p
+stars <- function(p) ifelse(p < 0.01, "***", ifelse(p < 0.05, "**", ifelse(p < 0.1, "*", "")))
+# Patterns of the joint tests: every deviation term of variable v (with its
+# interactions), its interactions with income, its interactions with the
+# long-run climate.
+dev_pattern <- function(v) paste0("^dev", v)
+income_pattern <- function(v) paste0("^dev", v, ".*:inc$|^inc:dev", v)
+climate_pattern <- function(v) paste0("clim_", v)
+
+# Differences in fit against noise (see weather_arms_robustness.Rmd): a Vuong
+# test clustered by country for non-nested models, the clustered Wald test of
+# the added terms for nested ones; "indifferent" when not beyond noise at 5%.
+NOISE_LEVEL <- 0.05
+CRITERIA <- c(aic = "AIC", bic = "BIC", r2 = "within adj. R2")
+fit_record <- function(m) {
+  e <- stats::resid(m)
+  s2 <- mean(e^2)
+  list(aic = stats::AIC(m), bic = stats::BIC(m), war2 = fixest::fitstat(m, "war2")[[1]],
+       n = stats::nobs(m), ll = -0.5 * log(2 * pi * s2) - e^2 / (2 * s2), country = m$country)
+}
+as_record <- function(x) if (inherits(x, "fixest")) fit_record(x) else x
+criterion_value <- function(rec, criterion) {
+  switch(criterion, aic = -rec$aic / 2, bic = -rec$bic / 2, r2 = -(rec$n / 2) * log(1 - rec$war2))
+}
+fit_verdict <- function(a, b, criterion, nested_p = NULL) {
+  a <- as_record(a)
+  b <- as_record(b)
+  stopifnot(a$n == b$n, identical(a$country, b$country))
+  difference <- criterion_value(a, criterion) - criterion_value(b, criterion)
+  beyond_noise <- if (!is.null(nested_p)) {
+    !is.na(nested_p) && nested_p < NOISE_LEVEL
+  } else {
+    D <- tapply(a$ll - b$ll, a$country, sum)
+    G <- length(D)
+    se <- sqrt(G / (G - 1) * sum((D - mean(D))^2))
+    is.finite(se) && se > 0 && abs(difference / se) >= stats::qnorm(1 - NOISE_LEVEL / 2)
+  }
+  if (!beyond_noise) "indifferent" else if (difference > 0) "better" else "worse"
+}
+fit_verdicts <- function(a, b, nested_p = NULL) {
+  a <- as_record(a)
+  b <- as_record(b)
+  paste(vapply(names(CRITERIA), function(cr) fit_verdict(a, b, cr, nested_p), ""),
+        collapse = " / ")
+}
+# Each model of a set (records on the same rows) against the best of the set
+# by `criterion`: "best", "indifferent" or "worse".
+verdicts_vs_best <- function(records, criterion) {
+  records <- lapply(records, as_record)
+  value <- vapply(records, criterion_value, 0, criterion)
+  best <- which.max(value)
+  vapply(seq_along(records), function(i) {
+    if (i == best) "best" else fit_verdict(records[[i]], records[[best]], criterion)
+  }, "")
+}
+# The three verdicts of each model of a set against the best, "AIC / BIC / R2".
+set_verdicts <- function(records) {
+  verdicts <- lapply(names(CRITERIA), function(cr) verdicts_vs_best(records, cr))
+  do.call(paste, c(verdicts, sep = " / "))
+}
+added_terms_p <- function(larger, smaller) {
+  added <- setdiff(names(stats::coef(larger)), names(stats::coef(smaller)))
+  stopifnot(length(added) > 0, all(names(stats::coef(smaller)) %in% names(stats::coef(larger))))
+  b <- stats::coef(larger)[added]
+  V <- stats::vcov(larger)[added, added, drop = FALSE]
+  stats::pchisq(as.numeric(t(b) %*% solve(V, b)), df = length(added), lower.tail = FALSE)
+}
+VERDICT_NOTE <- paste(
+  "verdict by AIC / BIC / within adjusted R2: indifferent when the difference cannot be told",
+  "apart from noise (clustered Vuong test, or the Wald test of the added terms for nested",
+  "models, 5%)")
+
+# Deviations (SD) and long-run climates (C, m a year) at which the effects are
+# evaluated.
+EFFECT_AT <- c(-3, 3)
+EVAL_CLIMATE <- list(TM = c(5, 15, 25), RR = c(0.5, 1.5, 3))
+EVAL_LABELS <- list(TM = c("5 °C", "15 °C", "25 °C"), RR = c("0.5 m", "1.5 m", "3 m"))
+
+# Each unit's long-run income over the horizon of panel `p`, centred at the mean
+# over the rows `d`.
+add_income <- function(p, d) {
+  income <- p$data %>%
+    filter(year >= p$start_year, year <= p$end_year, !is.na(grp_pc_usd)) %>%
+    group_by(GID_1) %>%
+    summarise(inc_level = log(mean(grp_pc_usd)), .groups = "drop")
+  d <- left_join(d, income, by = "GID_1")
+  stopifnot(!anyNA(d$inc_level))
+  d$inc <- d$inc_level - mean(d$inc_level)
+  d
+}
+# Weights on the coefficients `terms` of a deviation x (SD) of variable v in a
+# model with the terms `suffixes`, at the values `modifiers` (named: the
+# variables interacted with every deviation term, e.g. clim_TM, inc).
+deviation_weights <- function(terms, suffixes, v, x, modifiers) {
+  w <- stats::setNames(numeric(length(terms)), terms)
+  for (s in suffixes) {
+    term <- paste0("dev", v, s)
+    w[[term]] <- term_value(s, x)
+    for (z in names(modifiers)) {
+      w[[interaction_name(term, z, terms)]] <- term_value(s, x) * modifiers[[z]]
+    }
+  }
+  w
+}
+# Effects (pp, 95% CI) of EFFECT_AT SD of each variable at each long-run
+# climate of EVAL_CLIMATE in model m (terms `form`), at the extra modifiers
+# `at` (e.g. list(inc = 0)).
+effects_at <- function(m, form, at = list()) {
+  terms <- names(stats::coef(m))
+  bind_rows(lapply(c("TM", "RR"), function(v) {
+    grid <- expand.grid(level = seq_along(EVAL_CLIMATE[[v]]), deviation = EFFECT_AT)
+    G <- t(mapply(function(g, x) {
+      mods <- c(stats::setNames(list(EVAL_CLIMATE[[v]][[g]]), paste0("clim_", v)), at)
+      deviation_weights(terms, form[[v]], v, x, mods)
+    }, grid$level, grid$deviation))
+    colnames(G) <- terms
+    linear_combination(m, G) %>%
+      mutate(variable = v, level = EVAL_LABELS[[v]][grid$level], deviation = grid$deviation,
+             p_value = 2 * stats::pnorm(-abs(estimate / std_error)), .before = 1)
+  }))
+}
+effect_cell <- function(e) {
+  sprintf("%+.2f [%+.2f, %+.2f]%s", 100 * e$estimate, 100 * e$conf_low, 100 * e$conf_high,
+          stars(e$p_value))
+}
+effect_column <- function(e) paste0(ifelse(e$variable == "TM", "T ", "P "),
+                                    sprintf("%+d SD, ", e$deviation), e$level)
+```
+
+# Check: income over the previous 20 years
+
+The model already estimated in `weather_arms_robustness.Rmd` (horizon
+deviations, linear arms for T and P, on `r main$label`) interacts the arms with
+one income per unit, the mean over the whole horizon. That income includes the
+years after the current one, and it is fixed. The alternative is the income of
+the 20 years before the current year:
+
+```text
+inc20(i,t) = log of the mean GDP per capita of unit i over t-20 .. t-1, minus its mean over the rows
+```
+
+It is built from the same GDP series as the outcome (PWT, from 1950). It is
+defined only when all 20 years have GDP: no partial windows, nothing filled.
+For example, a country whose PWT series starts in 1970 has it from 1990. Unlike
+the horizon income, it varies within a unit, so the unit effects no longer
+absorb its level. The model therefore has it in two versions, with its level
+(`inc`, mostly mean reversion within units, as in "Preferred model and lagged
+income" of the main notebook) and without. The models:
+
+```text
+A  horizon income, all the rows of the main notebook (the model already estimated)
+B  horizon income, on the rows with inc20 (re-centred on them)
+C  inc20 in the interactions, and its level
+D  inc20 in the interactions, without its level
+```
+
+B, C and D are on the same rows, so the effect of the income definition is
+C (or D) against B, and the effect of the rows is B against A. The tables:
+
+1. the rows, and how the two incomes relate;
+2. the coefficients;
+3. the joint tests and the verdicts against B;
+4. the effects of a +/-3 SD year at each long-run climate. They are evaluated
+   at the same levels of GDP per capita in every model: the geometric mean of
+   the rows of B, C and D, and the mean log income (horizon) of the poorest and
+   of the richest third of the units of A. Each level is converted to each
+   model's own centring.
+
+```{r income-window-check}
+INCOME_WINDOW <- 20L
+CHECK_FORM <- FORMS[["Linear arms"]]
+# Each unit-year's log of the mean GDP per capita of the `window` years before
+# it (t - window .. t - 1), from GDP series `econ` over every year of the source;
+# NA unless all of those years have GDP (no partial windows, nothing filled).
+trailing_income <- function(econ, window = INCOME_WINDOW) {
+  stored <- resolve_econ_source(econ)
+  load_econ_panel(stored) %>%
+    filter(gadm_level == GADM_LEVEL_BY_SOURCE[[stored]]) %>%
+    distinct(GID_1, year, grp_pc_usd) %>%
+    group_by(GID_1) %>%
+    tidyr::complete(year = seq(min(year), max(year))) %>%
+    arrange(year, .by_group = TRUE) %>%
+    mutate(window_mean = zoo::rollapplyr(grp_pc_usd, window, mean, fill = NA_real_),
+           inc_trailing_level = log(lag_by_year(window_mean, year))) %>%
+    ungroup() %>%
+    select(GID_1, year, inc_trailing_level)
+}
+inc20 <- trailing_income("PWT")
+stopifnot(!anyDuplicated(inc20[, c("GID_1", "year")]))
+
+check_all <- add_income(main, add_deviation_terms(main$clean, DEFINITIONS[["Horizon"]])) %>%
+  left_join(inc20, by = c("GID_1", "year"))
+check_rows <- check_all[is.finite(check_all$inc_trailing_level), ]
+# B: the horizon income, re-centred on these rows; C, D: the trailing income.
+horizon_rows <- mutate(check_rows, inc = inc_level - mean(inc_level))
+trailing_rows <- mutate(check_rows, inc = inc_trailing_level - mean(inc_trailing_level))
+check_terms <- c(form_terms(CHECK_FORM), income_interactions(CHECK_FORM))
+check_models <- list(
+  "A. horizon income, all rows" = fit_model(check_terms, check_all),
+  "B. horizon income, inc20 rows" = fit_model(check_terms, horizon_rows),
+  "C. inc20, with its level" = fit_model(c(check_terms, "inc"), trailing_rows),
+  "D. inc20, without its level" = fit_model(check_terms, trailing_rows)
+)
+# The centre of each model's income, to evaluate them at the same GDP per capita.
+check_centres <- c(mean(check_all$inc_level), mean(check_rows$inc_level),
+                   mean(check_rows$inc_trailing_level), mean(check_rows$inc_trailing_level))
+stopifnot(length(unique(vapply(check_models[-1], stats::nobs, 0))) == 1)
+
+# 1. The rows and the two incomes.
+within_sd <- check_rows %>%
+  group_by(GID_1) %>%
+  summarise(sd = stats::sd(inc_trailing_level), .groups = "drop")
+tibble::tibble(
+  rows = c("all rows of the main notebook (A)", "rows with inc20 (B, C, D)"),
+  observations = c(nrow(check_all), nrow(check_rows)),
+  countries = c(n_distinct(check_all$GID_0), n_distinct(check_rows$GID_0)),
+  years = c(paste(range(check_all$year), collapse = "-"), paste(range(check_rows$year), collapse = "-")),
+  mean_log_income_horizon = round(c(mean(check_all$inc_level), mean(check_rows$inc_level)), 2),
+  mean_log_income_inc20 = c(NA, round(mean(check_rows$inc_trailing_level), 2))
+) %>%
+  knitr::kable(caption = sprintf(paste(
+    "%s, the rows of the check; on the rows with inc20: correlation of the horizon log income",
+    "with inc20 %.3f; SD of inc20 across the rows %.2f, within units (mean of the units' SDs)",
+    "%.2f; mean of horizon minus inc20 %.2f log points"),
+    main$label, stats::cor(check_rows$inc_level, check_rows$inc_trailing_level),
+    stats::sd(check_rows$inc_trailing_level), mean(within_sd$sd, na.rm = TRUE),
+    mean(check_rows$inc_level - check_rows$inc_trailing_level)))
+
+# 2. Coefficients.
+etable(unname(check_models), headers = names(check_models), dict = DICT, drop = DROP,
+       order = c(ORDER, "^income$"), fitstat = FITSTAT,
+       title = paste0(main$label, ", linear arms, horizon deviations"))
+
+# 3. Joint tests, and the verdicts against B (same rows; C against D: nested,
+# the Wald test of the level).
+check_tests <- function(m) {
+  c(income_T = wald_p(m, income_pattern("TM")), income_P = wald_p(m, income_pattern("RR")),
+    climate_T = wald_p(m, climate_pattern("TM")), climate_P = wald_p(m, climate_pattern("RR")),
+    T = wald_p(m, dev_pattern("TM")), P = wald_p(m, dev_pattern("RR")))
+}
+level_p <- added_terms_p(check_models[[3]], check_models[[4]])
+bind_rows(lapply(names(check_models), function(k) {
+  m <- check_models[[k]]
+  tibble::as_tibble(as.list(signif(check_tests(m), 2))) %>%
+    mutate(model = k, observations = stats::nobs(m),
+           within_adj_r2 = round(fixest::fitstat(m, "war2")[[1]], 5),
+           income_level = if ("inc" %in% names(stats::coef(m))) {
+             sprintf("%.4f (%.4f)", stats::coef(m)[["inc"]], fixest::se(m)[["inc"]])
+           } else "",
+           against_B = if (k %in% names(check_models)[3:4]) {
+             fit_verdicts(m, check_models[[2]])
+           } else "",
+           .before = 1)
+})) %>%
+  knitr::kable(caption = paste0(
+    main$label, ": joint Wald tests (p) of each variable's income interactions, climate ",
+    "interactions and all its deviation terms; the coefficient (SE) of the level of inc20; ",
+    "C and D against B, ", VERDICT_NOTE, ". C against D (nested, the level): p = ",
+    signif(level_p, 2), ", ", fit_verdicts(check_models[[3]], check_models[[4]], nested_p = level_p)))
+
+# 4. Effects at the same GDP per capita levels.
+unit_income <- distinct(check_all, GID_1, inc_level)
+third <- dplyr::ntile(unit_income$inc_level, 3)
+CHECK_INCOME <- c("geometric mean of the inc20 rows" = mean(check_rows$inc_level),
+                  "poorest third" = mean(unit_income$inc_level[third == 1]),
+                  "richest third" = mean(unit_income$inc_level[third == 3]))
+check_effects <- bind_rows(lapply(seq_along(check_models), function(i) {
+  bind_rows(lapply(names(CHECK_INCOME), function(lvl) {
+    effects_at(check_models[[i]], CHECK_FORM, list(inc = CHECK_INCOME[[lvl]] - check_centres[[i]])) %>%
+      mutate(model = names(check_models)[[i]], income = lvl)
+  }))
+}))
+for (lvl in names(CHECK_INCOME)) {
+  e <- filter(check_effects, income == lvl)
+  print(knitr::kable(
+    e %>%
+      mutate(column = factor(effect_column(e), levels = unique(effect_column(e))),
+             cell = effect_cell(e)) %>%
+      select(column, model, cell) %>%
+      tidyr::pivot_wider(names_from = model, values_from = cell),
+    caption = sprintf(paste(
+      "%s: effect (pp, 95%% CI) of a year at +/-3 SD at each long-run climate, at the %s income",
+      "(GDP per capita %s); *** p < 0.01, ** p < 0.05, * p < 0.1"),
+      main$label, lvl, format(round(exp(CHECK_INCOME[[lvl]])), big.mark = ","))))
+}
+```
+
+Model A (horizon deviations, linear arms, horizon climate and income, on every
+row of the main notebook) is saved for later use, as the models of
+`results/preferred_model/`. The files are its weather coefficients with their
+VCOV (clustered by country), and the values that are needed to apply them: the
+centre of income and the number of rows and countries.
+
+```{r income-model-export}
+local({
+  m <- check_models[["A. horizon income, all rows"]]
+  weather <- grep("^dev(TM|RR)|^inc:dev", names(stats::coef(m)), value = TRUE)
+  stem <- file.path("results", "preferred_model", "pwt_era5_horizon_linear_arms_income")
+  dir.create(dirname(stem), showWarnings = FALSE, recursive = TRUE)
+  ct <- fixest::coeftable(m)[weather, , drop = FALSE]
+  utils::write.csv(tibble::tibble(
+    term = weather, estimate = ct[, 1], std_error = ct[, 2],
+    conf_low_95 = ct[, 1] - stats::qnorm(0.975) * ct[, 2],
+    conf_high_95 = ct[, 1] + stats::qnorm(0.975) * ct[, 2],
+    p_value = 2 * stats::pnorm(-abs(ct[, 1] / ct[, 2]))
+  ), paste0(stem, "_coefficients.csv"), row.names = FALSE)
+  V <- stats::vcov(m)[weather, weather]
+  utils::write.csv(data.frame(term = weather, V, check.names = FALSE),
+                   paste0(stem, "_vcov.csv"), row.names = FALSE)
+  utils::write.csv(tibble::tibble(
+    item = c("panel", "deviations", "form", "climate_interaction", "income",
+             "income_centre_log_gdp_pc", "observations", "countries", "years", "vcov"),
+    value = c(main$label, "horizon, demeaned", "linear arms (T and P)",
+              "horizon mean of TM (C) and RR (m a year)",
+              "log of the unit's mean GDP per capita over the horizon, minus income_centre_log_gdp_pc",
+              format(mean(check_all$inc_level), digits = 10), stats::nobs(m),
+              n_distinct(check_all$GID_0), paste(range(check_all$year), collapse = "-"),
+              "clustered by country (GID_0)")
+  ), paste0(stem, "_info.csv"), row.names = FALSE)
+})
+```
+
+The same model with restricted cubic splines in both the climate and income
+interactions is saved too. It is refitted here as in "Splines in climate and
+income" of the main notebook. Each interaction is the variable itself plus two
+non-linear terms, with knots at the 5th, 35th, 65th and 95th percentiles of the
+units. The spline is linear beyond the outer knots:
+
+```text
+slope of arm a = c_a + b_a clim + d_a1 nl_1(clim) + d_a2 nl_2(clim) + h_a inc + g_a1 nl_1(inc) + g_a2 nl_2(inc)
+nl_j(x) = [ (x - k_j)^3_+ - (x - k_3)^3_+ (k_4 - k_j) / (k_4 - k_3)
+            + (x - k_4)^3_+ (k_3 - k_j) / (k_4 - k_3) ] / (k_4 - k_1)^2          j = 1, 2
+```
+
+The knots of income are on the centred scale (`inc`); the knots file also gives
+them as log GDP per capita and as GDP per capita.
+
+```{r spline-model-export}
+SPLINE_KNOT_PROBS <- c(0.05, 0.35, 0.65, 0.95)
+# Restricted cubic spline basis of x with `knots` (Harrell): the K - 2
+# non-linear terms, scaled by the squared range of the knots (as in
+# weather_arms_robustness.Rmd).
+rcs_nonlinear <- function(x, knots) {
+  K <- length(knots)
+  cube <- function(z) pmax(z, 0)^3
+  out <- vapply(seq_len(K - 2), function(j) {
+    (cube(x - knots[[j]]) -
+       cube(x - knots[[K - 1]]) * (knots[[K]] - knots[[j]]) / (knots[[K]] - knots[[K - 1]]) +
+       cube(x - knots[[K]]) * (knots[[K - 1]] - knots[[j]]) / (knots[[K]] - knots[[K - 1]])) /
+      (knots[[K]] - knots[[1]])^2
+  }, numeric(length(x)))
+  matrix(out, nrow = length(x))
+}
+spline_units <- distinct(check_all, GID_1, inc, clim_TM, clim_RR)
+spline_knots <- lapply(c(clim_TM = "clim_TM", clim_RR = "clim_RR", inc = "inc"), function(z) {
+  stats::quantile(spline_units[[z]], SPLINE_KNOT_PROBS, names = FALSE)
+})
+spline_data <- check_all
+for (z in names(spline_knots)) {
+  nl <- rcs_nonlinear(spline_data[[z]], spline_knots[[z]])
+  for (j in seq_len(ncol(nl))) spline_data[[paste0(z, "_nl", j)]] <- nl[, j]
+}
+spline_terms <- c(check_terms, unlist(lapply(c("TM", "RR"), function(v) {
+  arms <- paste0("dev", v, CHECK_FORM[[v]])
+  as.vector(outer(arms, c(paste0(":clim_", v, "_nl", 1:2), paste0(":inc_nl", 1:2)), paste0))
+})))
+spline_model <- fit_model(spline_terms, spline_data)
+linear_model <- check_models[["A. horizon income, all rows"]]
+stopifnot(stats::nobs(spline_model) == stats::nobs(linear_model))
+spline_p <- added_terms_p(spline_model, linear_model)
+
+tibble::tibble(
+  model = c("linear interactions", "splines in climate and income"),
+  observations = c(stats::nobs(linear_model), stats::nobs(spline_model)),
+  within_adj_r2_pct = round(100 * c(fixest::fitstat(linear_model, "war2")[[1]],
+                                    fixest::fitstat(spline_model, "war2")[[1]]), 3),
+  aic_vs_linear = round(c(0, stats::AIC(spline_model) - stats::AIC(linear_model)), 1),
+  bic_vs_linear = round(c(0, stats::BIC(spline_model) - stats::BIC(linear_model)), 1),
+  verdict_vs_linear = c("", fit_verdicts(spline_model, linear_model, nested_p = spline_p))
+) %>%
+  knitr::kable(caption = paste0(
+    main$label, ", linear arms, horizon deviations: the splines against the linear interactions ",
+    "(nested: the Wald test of the non-linear terms, p = ", signif(spline_p, 2), "); ", VERDICT_NOTE))
+
+# Saves spline model m, fitted on the rows `d` with the knots `knots`, as
+# <stem>_coefficients.csv, _vcov.csv, _knots.csv and _info.csv; `outliers`
+# describes the growth outliers dropped.
+export_spline_model <- function(m, d, knots, stem, outliers) {
+  weather <- grep("^dev(TM|RR)|^(inc|clim_)[^:]*:dev", names(stats::coef(m)), value = TRUE)
+  ct <- fixest::coeftable(m)[weather, , drop = FALSE]
+  utils::write.csv(tibble::tibble(
+    term = weather, estimate = ct[, 1], std_error = ct[, 2],
+    conf_low_95 = ct[, 1] - stats::qnorm(0.975) * ct[, 2],
+    conf_high_95 = ct[, 1] + stats::qnorm(0.975) * ct[, 2],
+    p_value = 2 * stats::pnorm(-abs(ct[, 1] / ct[, 2]))
+  ), paste0(stem, "_coefficients.csv"), row.names = FALSE)
+  utils::write.csv(data.frame(term = weather, stats::vcov(m)[weather, weather], check.names = FALSE),
+                   paste0(stem, "_vcov.csv"), row.names = FALSE)
+  centre <- mean(d$inc_level)
+  knot_table <- tibble::tibble(
+    variable = c("clim_TM", "clim_RR", "inc", "inc", "inc"),
+    scale = c("long-run temperature (C)", "long-run precipitation (m a year)",
+              "inc: centred log GDP per capita (as in the model)", "log GDP per capita",
+              "GDP per capita (2021 PPP $)"),
+    knot_1 = NA_real_, knot_2 = NA_real_, knot_3 = NA_real_, knot_4 = NA_real_
+  )
+  knot_table[, paste0("knot_", 1:4)] <- rbind(knots$clim_TM, knots$clim_RR, knots$inc,
+                                              knots$inc + centre, exp(knots$inc + centre))
+  utils::write.csv(knot_table, paste0(stem, "_knots.csv"), row.names = FALSE)
+  utils::write.csv(tibble::tibble(
+    item = c("panel", "deviations", "form", "interactions", "basis", "knots", "income",
+             "income_centre_log_gdp_pc", "observations", "countries", "years", "growth_outliers",
+             "vcov"),
+    value = c(main$label, "horizon, demeaned", "linear arms (T and P)",
+              paste("each arm x (clim, clim_nl1, clim_nl2, inc, inc_nl1, inc_nl2); clim: horizon mean",
+                    "of TM (C) or RR (m a year)"),
+              paste("restricted cubic spline (Harrell): nl_j(x) = [(x-k_j)^3_+ - (x-k_3)^3_+ (k_4-k_j)/(k_4-k_3)",
+                    "+ (x-k_4)^3_+ (k_3-k_j)/(k_4-k_3)] / (k_4-k_1)^2, j = 1, 2; linear beyond k_1 and k_4"),
+              "5th, 35th, 65th and 95th percentiles of the units (see _knots.csv)",
+              "log of the unit's mean GDP per capita over the horizon, minus income_centre_log_gdp_pc",
+              format(centre, digits = 10), stats::nobs(m), n_distinct(d$GID_0),
+              paste(range(d$year), collapse = "-"), outliers, "clustered by country (GID_0)")
+  ), paste0(stem, "_info.csv"), row.names = FALSE)
+}
+SPLINE_STEM <- file.path("results", "preferred_model", "pwt_era5_horizon_linear_arms_income_climate_splines")
+export_spline_model(spline_model, check_all, spline_knots, SPLINE_STEM, paste(
+  "the 5% lowest and 5% highest growth rates of PWT x ERA5 from the start year whose cause",
+  "does not involve weather dropped"))
+```
+
+## Splines with only the 1% tails dropped
+
+The spline model above drops the growth outliers of the main rule: the 5%
+lowest and 5% highest growth rates, those whose cause does not involve
+weather. Here the tails are the 1% lowest and the 1% highest growth rates of
+`r main$label` from the start year, found in the same way (before any
+exclusion). Two samples:
+
+- **1% tails dropped**: every country-year of the two tails is dropped,
+  whatever its cause;
+- **1% tails, non-weather dropped**: the cause rule of the main sample applied
+  to the 1% tails (the weather-related ones stay).
+
+Everything else is as above, and the knots and the centre of income are
+recomputed on each sample. A coefficient therefore means something slightly
+different in each sample, so the samples are compared by their effects at
+fixed values. The effects are those of a +/-3 SD year for a typical unit of
+each third of income: the geometric mean income and the mean long-run climate
+of the third's units in the main sample. The tables:
+
+1. the samples: the rows, the dropped country-years by cause, and the fit
+   against the linear interactions on the same rows;
+2. the effects in each sample;
+3. figure: the effects across income at the main sample's average climate.
+
+The model of the first sample is saved as
+`results/preferred_model/pwt_era5_horizon_linear_arms_income_climate_splines_tails1pct_*.csv`,
+in the same format.
+
+```{r spline-tails-1pct, fig.width = 12, fig.height = 7}
+TAIL_SHARE <- 0.01
+# The spline model with the linear interactions on the rows `d` (with
+# inc_level): the knots and the income centre of the rows.
+fit_splines <- function(d) {
+  d$inc <- d$inc_level - mean(d$inc_level)
+  units <- distinct(d, GID_1, inc, clim_TM, clim_RR)
+  knots <- lapply(c(clim_TM = "clim_TM", clim_RR = "clim_RR", inc = "inc"), function(z) {
+    stats::quantile(units[[z]], SPLINE_KNOT_PROBS, names = FALSE)
+  })
+  for (z in names(knots)) {
+    nl <- rcs_nonlinear(d[[z]], knots[[z]])
+    for (j in seq_len(ncol(nl))) d[[paste0(z, "_nl", j)]] <- nl[, j]
+  }
+  list(spline = fit_model(spline_terms, d), linear = fit_model(check_terms, d), d = d,
+       knots = knots, centre = mean(d$inc_level))
+}
+# Effects (linear_combination) of a deviation x of variable v in spline fit `f`
+# at long-run climates `clim` and log GDP per capita `level` (vectors).
+spline_effect <- function(f, v, x, clim, level) {
+  terms <- names(stats::coef(f$spline))
+  clim_name <- paste0("clim_", v)
+  G <- t(vapply(seq_along(clim), function(i) {
+    inc <- level[[i]] - f$centre
+    nl_clim <- rcs_nonlinear(clim[[i]], f$knots[[clim_name]])
+    nl_inc <- rcs_nonlinear(inc, f$knots$inc)
+    mods <- c(stats::setNames(list(clim[[i]], nl_clim[1, 1], nl_clim[1, 2]),
+                              paste0(clim_name, c("", "_nl1", "_nl2"))),
+              list(inc = inc, inc_nl1 = nl_inc[1, 1], inc_nl2 = nl_inc[1, 2]))
+    deviation_weights(terms, CHECK_FORM[[v]], v, x, mods)
+  }, numeric(length(terms))))
+  colnames(G) <- terms
+  linear_combination(f$spline, G)
+}
+
+cutoffs_1pct <- stats::quantile(main$all[[OUTCOME]], c(TAIL_SHARE, 1 - TAIL_SHARE), names = FALSE)
+tails_1pct <- main$all[main$all[[OUTCOME]] < cutoffs_1pct[[1]] |
+                         main$all[[OUTCOME]] > cutoffs_1pct[[2]], ]
+# The 1% tails are inside the 5% tails, so each has an annotated cause.
+stopifnot(all(country_year(tails_1pct) %in% country_year(OUTLIERS)))
+tails_1pct <- OUTLIERS[country_year(OUTLIERS) %in% country_year(tails_1pct), ]
+TAIL_SAMPLES <- list(
+  "main rule (5% tails, non-weather dropped)" = OUTLIERS_DROPPED,
+  "1% tails dropped" = tails_1pct[, c("GID_0", "year")],
+  "1% tails, non-weather dropped" = tails_1pct[tails_1pct$weather == "no", c("GID_0", "year")]
+)
+main_rows <- add_income(main, add_deviation_terms(main$all, DEFINITIONS[["Horizon"]]))
+tail_fits <- lapply(TAIL_SAMPLES, function(drop) {
+  fit_splines(main_rows[!country_year(main_rows) %in% country_year(drop), ])
+})
+# The main rule reproduces the spline model above.
+stopifnot(isTRUE(all.equal(stats::AIC(tail_fits[[1]]$spline), stats::AIC(spline_model))))
+
+# 1. The samples.
+tibble::tibble(
+  sample = names(TAIL_SAMPLES),
+  dropped = vapply(TAIL_SAMPLES, nrow, 0),
+  observations = vapply(tail_fits, function(f) stats::nobs(f$spline), 0),
+  within_adj_r2_pct = vapply(tail_fits, function(f) round(100 * fixest::fitstat(f$spline, "war2")[[1]], 3), 0),
+  linear_within_adj_r2_pct = vapply(tail_fits, function(f) round(100 * fixest::fitstat(f$linear, "war2")[[1]], 3), 0),
+  aic_vs_linear = vapply(tail_fits, function(f) round(stats::AIC(f$spline) - stats::AIC(f$linear), 1), 0),
+  bic_vs_linear = vapply(tail_fits, function(f) round(stats::BIC(f$spline) - stats::BIC(f$linear), 1), 0),
+  nonlinear_p = vapply(tail_fits, function(f) signif(added_terms_p(f$spline, f$linear), 2), 0),
+  verdict_vs_linear = vapply(tail_fits, function(f) {
+    fit_verdicts(f$spline, f$linear, nested_p = added_terms_p(f$spline, f$linear))
+  }, "")
+) %>%
+  knitr::kable(caption = sprintf(paste(
+    "%s, splines in climate and income: the country-years dropped, the rows, the within adjusted",
+    "R2 (%%) of the splines and of the linear interactions, and the splines against the linear",
+    "interactions on the same rows (nested: the Wald test of the non-linear terms); %s. The 1%%",
+    "tails: growth below %.1f%% or above %.1f%%"),
+    main$label, VERDICT_NOTE, 100 * cutoffs_1pct[[1]], 100 * cutoffs_1pct[[2]]))
+tails_1pct %>%
+  mutate(tail = ifelse(country_year(tails_1pct) %in%
+                         country_year(main$all[main$all[[OUTCOME]] < 0, ]), "low", "high"),
+         status = ifelse(weather == "yes", "weather", "not weather")) %>%
+  count(category, status, tail) %>%
+  tidyr::pivot_wider(names_from = tail, values_from = n, values_fill = 0) %>%
+  arrange(status, desc(low + high)) %>%
+  knitr::kable(caption = "The 1% tails of growth by likely cause")
+
+# 2. Effects for a typical unit of each third of income (main sample).
+typical <- distinct(tail_fits[[1]]$d, GID_1, inc_level, clim_TM, clim_RR) %>%
+  mutate(third = factor(c("poorest third", "middle third", "richest third")[dplyr::ntile(inc_level, 3)],
+                        levels = c("poorest third", "middle third", "richest third"))) %>%
+  group_by(third) %>%
+  summarise(level = mean(inc_level), clim_TM = mean(clim_TM), clim_RR = mean(clim_RR),
+            .groups = "drop")
+tail_effects <- bind_rows(lapply(names(tail_fits), function(s) {
+  bind_rows(lapply(c("TM", "RR"), function(v) {
+    bind_rows(lapply(EFFECT_AT, function(x) {
+      spline_effect(tail_fits[[s]], v, x, typical[[paste0("clim_", v)]], typical$level) %>%
+        mutate(sample = s, variable = v, deviation = x, third = typical$third,
+               p_value = 2 * stats::pnorm(-abs(estimate / std_error)))
+    }))
+  }))
+}))
+tail_effects$cell <- effect_cell(tail_effects)
+tail_effects %>%
+  mutate(event = factor(sprintf("%s %+d SD", ifelse(variable == "TM", "T", "P"), deviation),
+                        levels = c("T -3 SD", "T +3 SD", "P -3 SD", "P +3 SD")),
+         sample = factor(sample, levels = names(TAIL_SAMPLES))) %>%
+  arrange(event, third, sample) %>%
+  select(event, third, sample, cell) %>%
+  tidyr::pivot_wider(names_from = sample, values_from = cell) %>%
+  knitr::kable(caption = sprintf(paste(
+    "Splines in climate and income: effect (pp, 95%% CI) of a year at +/-3 SD for a typical unit",
+    "of each third of income of the main sample (GDP per capita %s; long-run T %s °C, P %s m)",
+    "in each sample; *** p < 0.01, ** p < 0.05, * p < 0.1"),
+    paste(format(round(exp(typical$level)), big.mark = ","), collapse = ", "),
+    paste(round(typical$clim_TM, 1), collapse = ", "), paste(round(typical$clim_RR, 2), collapse = ", ")))
+
+# 3. Figure: across income at the main sample's average climate.
+levels_grid <- seq(min(main_rows$inc_level), max(main_rows$inc_level), length.out = 60)
+avg_clim <- c(TM = mean(tail_fits[[1]]$d$clim_TM), RR = mean(tail_fits[[1]]$d$clim_RR))
+TAIL_COLOURS <- stats::setNames(c("#2a78d6", "#eb6834", "#7f7f7f"), names(TAIL_SAMPLES))
+bind_rows(lapply(names(tail_fits), function(s) {
+  bind_rows(lapply(c("TM", "RR"), function(v) {
+    bind_rows(lapply(EFFECT_AT, function(x) {
+      spline_effect(tail_fits[[s]], v, x, rep(avg_clim[[v]], length(levels_grid)), levels_grid) %>%
+        mutate(sample = s, gdp_pc = exp(levels_grid),
+               event = sprintf("%s %+d SD", ifelse(v == "TM", "T", "P"), x))
+    }))
+  }))
+})) %>%
+  mutate(event = factor(event, levels = c("T -3 SD", "T +3 SD", "P -3 SD", "P +3 SD")),
+         sample = factor(sample, levels = names(TAIL_SAMPLES))) %>%
+  ggplot(aes(gdp_pc, 100 * estimate, colour = sample, fill = sample)) +
+  geom_hline(yintercept = 0, colour = "grey55", linewidth = 0.4) +
+  geom_ribbon(aes(ymin = 100 * conf_low, ymax = 100 * conf_high), alpha = 0.1, colour = NA) +
+  geom_line(linewidth = 0.8) +
+  facet_wrap(~event, nrow = 1) +
+  scale_x_log10(labels = function(x) format(x, big.mark = ",", scientific = FALSE)) +
+  scale_colour_manual(values = TAIL_COLOURS, name = NULL) +
+  scale_fill_manual(values = TAIL_COLOURS, name = NULL) +
+  labs(x = "Long-run GDP per capita (log scale)", y = "Effect on growth of GDP per capita (pp)",
+       title = "Splines in climate and income: growth outliers dropped",
+       subtitle = sprintf(paste("%s, linear arms, horizon deviations; at the average long-run",
+                                "climate (%.1f °C, %.2f m); bands: 95%% CI"),
+                          main$label, avg_clim[["TM"]], avg_clim[["RR"]])) +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "top", panel.grid.minor = element_blank(),
+        strip.text = element_text(face = "bold"))
+
+export_spline_model(tail_fits[["1% tails dropped"]]$spline, tail_fits[["1% tails dropped"]]$d,
+                    tail_fits[["1% tails dropped"]]$knots, paste0(SPLINE_STEM, "_tails1pct"),
+                    sprintf(paste("the 1%% lowest and 1%% highest growth rates of PWT x ERA5 from the",
+                                  "start year (below %.2f%% or above %.2f%%) dropped, whatever their cause"),
+                            100 * cutoffs_1pct[[1]], 100 * cutoffs_1pct[[2]]))
+```
+
+# Forms and definitions on every panel
+
+The model with income and climate interactions, for each definition (horizon,
+20-year, 30-year) and form (symmetric, linear, quadratic and cubic arms), on
+each panel. Income is the `r if (params$income_baseline == "horizon") "horizon mean (as in the main notebook)" else "mean of the 20 years before, with its level"`
+(the parameter `income_baseline`; see the check above). Within a panel the 12
+models are on the same rows: those of the main notebook that also have the
+30-year moments (with ERA5, which starts in 1940, the 30-year baseline exists
+from 1970, so none are lost; the demeaning of the 30-year deviations is fitted
+from 1970 rather than 1960 there).
+
+A cubic arm at 3 SD is 27 times its coefficient. The cubic and quadratic
+effects at +/-3 SD therefore rest on the few years that far out, so their
+intervals are wide.
+
+The tables:
+
+1. the rows of each panel, and the GDP per capita of the thirds of its units by
+   income;
+2. for each panel, the fit of the 12 models: within adjusted R2, AIC and BIC
+   relative to the best of the panel, each model's verdict against the best of
+   the panel and against the best form of its definition, and the joint tests
+   of each variable's deviation terms, of its income interactions and of its
+   climate interactions;
+3. the model each criterion picks on each panel, and how many models cannot be
+   told apart from it;
+4. the effects of a +/-3 SD year at each long-run climate, at the panel's
+   average income;
+5. the effects at the mean income of the poorest and of the richest third of
+   the units, at the middle climates (15 °C, 1.5 m).
+
+```{r sensitivity}
+INCOME_BASELINE <- params$income_baseline
+stopifnot(INCOME_BASELINE %in% c("horizon", "lag_20"))
+SENS_MOMENTS <- c("mean_TM_lag_30", "sd_TM_lag_30", "mean_RR_lag_30", "sd_RR_lag_30",
+                  "dm_TM_lag_30", "dm_RR_lag_30")
+# The rows of panel p with the 30-year moments (positive SDs) and its income:
+# inc_level (log), inc (centred on the rows).
+sens_rows <- function(p) {
+  d <- p$clean
+  keep <- Reduce(`&`, lapply(SENS_MOMENTS, function(x) is.finite(d[[x]]))) &
+    d$sd_TM_lag_30 > 0 & d$sd_RR_lag_30 > 0
+  d <- add_income(p, d[keep, ])
+  if (INCOME_BASELINE == "lag_20") {
+    d <- d %>%
+      select(-inc_level, -inc) %>%
+      left_join(trailing_income(p$econ), by = c("GID_1", "year")) %>%
+      rename(inc_level = inc_trailing_level) %>%
+      filter(is.finite(inc_level))
+    d$inc <- d$inc_level - mean(d$inc_level)
+  }
+  d
+}
+# Deviations (SD) of the response curves of the figures.
+CURVE_X <- seq(-3, 3, by = 0.1)
+sens_terms <- function(form) {
+  c(form_terms(form), income_interactions(form), if (INCOME_BASELINE == "lag_20") "inc")
+}
+
+sens_results <- lapply(names(sens_panels), function(label) {
+  p <- sens_panels[[label]]
+  d0 <- sens_rows(p)
+  # Income of the units' thirds (the units' mean log income), centred.
+  units <- d0 %>% group_by(GID_1) %>% summarise(inc_level = mean(inc_level), .groups = "drop")
+  third <- dplyr::ntile(units$inc_level, 3)
+  centre <- mean(d0$inc_level)
+  income_at <- list("average income" = 0,
+                    "poorest third" = mean(units$inc_level[third == 1]) - centre,
+                    "richest third" = mean(units$inc_level[third == 3]) - centre)
+  grid <- expand.grid(form = names(FORMS), definition = names(DEFINITIONS), stringsAsFactors = FALSE)
+  models <- lapply(seq_len(nrow(grid)), function(i) {
+    d <- add_deviation_terms(d0, DEFINITIONS[[grid$definition[i]]])
+    fit_model(sens_terms(FORMS[[grid$form[i]]]), d)
+  })
+  stopifnot(length(unique(vapply(models, stats::nobs, 0))) == 1)
+  records <- lapply(models, fit_record)
+  by_definition <- unlist(lapply(names(DEFINITIONS), function(def) {
+    k <- which(grid$definition == def)
+    stats::setNames(set_verdicts(records[k]), k)
+  }))[as.character(seq_len(nrow(grid)))]
+  fit <- tibble::tibble(
+    panel = label, definition = grid$definition, form = grid$form,
+    within_adj_r2 = vapply(records, `[[`, 0, "war2"),
+    aic = vapply(records, `[[`, 0, "aic"), bic = vapply(records, `[[`, 0, "bic"),
+    vs_best_of_panel = set_verdicts(records), vs_best_form = by_definition,
+    T_p = vapply(models, wald_p, 0, dev_pattern("TM")),
+    P_p = vapply(models, wald_p, 0, dev_pattern("RR")),
+    T_income_p = vapply(models, wald_p, 0, income_pattern("TM")),
+    P_income_p = vapply(models, wald_p, 0, income_pattern("RR")),
+    T_climate_p = vapply(models, wald_p, 0, climate_pattern("TM")),
+    P_climate_p = vapply(models, wald_p, 0, climate_pattern("RR"))
+  )
+  effects <- bind_rows(lapply(seq_len(nrow(grid)), function(i) {
+    bind_rows(lapply(names(income_at), function(k) {
+      effects_at(models[[i]], FORMS[[grid$form[i]]], list(inc = income_at[[k]])) %>%
+        mutate(panel = label, definition = grid$definition[i], form = grid$form[i], income = k)
+    }))
+  }))
+  # Response curves at the average income, for the figures.
+  curves <- bind_rows(lapply(seq_len(nrow(grid)), function(i) {
+    m <- models[[i]]
+    terms <- names(stats::coef(m))
+    bind_rows(lapply(c("TM", "RR"), function(v) {
+      g <- expand.grid(x = CURVE_X, level = seq_along(EVAL_CLIMATE[[v]]))
+      G <- t(mapply(function(x, l) {
+        mods <- c(stats::setNames(list(EVAL_CLIMATE[[v]][[l]]), paste0("clim_", v)), list(inc = 0))
+        deviation_weights(terms, FORMS[[grid$form[i]]][[v]], v, x, mods)
+      }, g$x, g$level))
+      colnames(G) <- terms
+      linear_combination(m, G) %>%
+        mutate(variable = v, x = g$x, level = EVAL_LABELS[[v]][g$level])
+    })) %>%
+      mutate(panel = label, definition = grid$definition[i], form = grid$form[i])
+  }))
+  sample <- tibble::tibble(
+    panel = label, observations = nrow(d0), main_rows = nrow(p$clean),
+    countries = n_distinct(d0$GID_0), years = paste(range(d0$year), collapse = "-"),
+    gdp_pc_poorest_third = round(exp(mean(units$inc_level[third == 1]))),
+    gdp_pc_middle_third = round(exp(mean(units$inc_level[third == 2]))),
+    gdp_pc_richest_third = round(exp(mean(units$inc_level[third == 3])))
+  )
+  # The models are not kept (cache size); only the results above.
+  list(sample = sample, fit = fit, effects = effects, curves = curves)
+})
+```
+
+```{r sensitivity-tables}
+sens_fit <- bind_rows(lapply(sens_results, `[[`, "fit"))
+sens_effects <- bind_rows(lapply(sens_results, `[[`, "effects"))
+sens_effects$column <- effect_column(sens_effects)
+sens_effects$cell <- sprintf("%+.2f%s", 100 * sens_effects$estimate, stars(sens_effects$p_value))
+model_label <- function(definition, form) paste0(definition, ", ", form)
+
+# 1. The rows.
+bind_rows(lapply(sens_results, `[[`, "sample")) %>%
+  knitr::kable(caption = paste(
+    "The rows of each panel (with the 30-year moments; main_rows: the rows of the main",
+    "notebook) and the GDP per capita (geometric mean) of the thirds of its units by income"))
+
+# 2. Fit and tests, one table per panel.
+for (label in names(sens_panels)) {
+  print(knitr::kable(
+    filter(sens_fit, panel == label) %>%
+      mutate(aic = round(aic - min(aic), 1), bic = round(bic - min(bic), 1),
+             within_adj_r2 = round(within_adj_r2, 5),
+             across(ends_with("_p"), ~ signif(.x, 2))) %>%
+      select(-panel),
+    caption = paste0(
+      label, ": fit of each definition and form (AIC and BIC relative to the best of the panel), ",
+      "the verdict of each model against the best of the panel and against the best form of its ",
+      "definition (", VERDICT_NOTE, "), and the joint Wald tests (p) of each variable's ",
+      "deviation terms, income interactions and climate interactions")))
+}
+
+# 3. The model each criterion picks, and the models within noise of it.
+bind_rows(lapply(names(sens_panels), function(label) {
+  f <- filter(sens_fit, panel == label)
+  bind_rows(lapply(seq_along(CRITERIA), function(j) {
+    verdict <- vapply(strsplit(f$vs_best_of_panel, " / "), `[[`, "", j)
+    tibble::tibble(panel = label, criterion = CRITERIA[[j]],
+                   best = model_label(f$definition, f$form)[verdict == "best"],
+                   indifferent = sum(verdict == "indifferent"),
+                   indifferent_forms = paste(sort(unique(f$form[verdict == "indifferent"])),
+                                             collapse = ", "))
+  }))
+})) %>%
+  knitr::kable(caption = paste(
+    "The model each criterion picks on each panel, among the 12 (3 definitions x 4 forms), the",
+    "number of the others that cannot be told apart from it, and their forms"))
+
+# 4. Effects at the average income, one table per panel.
+for (label in names(sens_panels)) {
+  e <- filter(sens_effects, panel == label, income == "average income")
+  print(knitr::kable(
+    e %>%
+      mutate(column = factor(column, levels = unique(column)),
+             model = model_label(definition, form)) %>%
+      select(model, column, cell) %>%
+      tidyr::pivot_wider(names_from = column, values_from = cell),
+    caption = paste0(label, ": effect (pp) of a year at +/-3 SD at each long-run climate, at the ",
+                     "average income; *** p < 0.01, ** p < 0.05, * p < 0.1")))
+}
+
+# 5. Effects at the poorest and the richest third's income, middle climates.
+for (label in names(sens_panels)) {
+  e <- filter(sens_effects, panel == label, income != "average income",
+              level %in% c("15 °C", "1.5 m"))
+  print(knitr::kable(
+    e %>%
+      mutate(column = factor(paste0(column, ", ", income),
+                             levels = unique(paste0(column, ", ", income))),
+             model = model_label(definition, form)) %>%
+      select(model, column, cell) %>%
+      tidyr::pivot_wider(names_from = column, values_from = cell),
+    caption = paste0(label, ": effect (pp) of a year at +/-3 SD at 15 °C and 1.5 m, at the mean ",
+                     "income of the poorest and of the richest third of the units; ",
+                     "*** p < 0.01, ** p < 0.05, * p < 0.1")))
+}
+```
+
+The figures show the response of growth to a deviation from -3 to +3 SD at the
+average income, one figure per variable and definition. Rows are panels,
+columns are long-run climates, and the colours are the four forms. The bands
+are 95% CIs (clustered by country).
+
+```{r sensitivity-figures, fig.width = 11, fig.height = 13}
+FORM_COLOURS <- c("Symmetric" = "#7f7f7f", "Linear arms" = "#2a78d6",
+                  "Quadratic arms" = "#eb6834", "Cubic arms" = "#1b9e77")
+sens_curves <- bind_rows(lapply(sens_results, `[[`, "curves")) %>%
+  mutate(form = factor(form, levels = names(FORMS)),
+         panel = factor(panel, levels = names(sens_panels)))
+for (v in c("TM", "RR")) for (def in names(DEFINITIONS)) {
+  cv <- filter(sens_curves, variable == v, definition == def) %>%
+    mutate(level = factor(level, levels = EVAL_LABELS[[v]]))
+  p <- ggplot(cv, aes(x, 100 * estimate, colour = form, fill = form)) +
+    geom_hline(yintercept = 0, colour = "grey55", linewidth = 0.4) +
+    geom_vline(xintercept = 0, colour = "grey85", linewidth = 0.3) +
+    geom_ribbon(aes(ymin = 100 * conf_low, ymax = 100 * conf_high), alpha = 0.08, colour = NA) +
+    geom_line(linewidth = 0.7) +
+    facet_grid(panel ~ level, scales = "free_y") +
+    scale_colour_manual(values = FORM_COLOURS, name = NULL) +
+    scale_fill_manual(values = FORM_COLOURS, name = NULL) +
+    scale_x_continuous(breaks = -3:3) +
+    labs(x = paste(if (v == "TM") "Temperature" else "Precipitation", "deviation (SD, demeaned)"),
+         y = "Effect on growth of GDP per capita (pp)",
+         title = paste(if (v == "TM") "Temperature" else "Precipitation", "response,", def,
+                       "deviations"),
+         subtitle = paste("At the average income; columns: long-run climate; bands: 95% CI,",
+                          "clustered by country")) +
+    theme_minimal(base_size = 11) +
+    theme(legend.position = "top", panel.grid.minor = element_blank(),
+          panel.grid.major = element_line(colour = "grey92", linewidth = 0.3),
+          strip.text = element_text(face = "bold"))
+  print(p)
+}
+```
+
+# Temperature with income only
+
+Once income is in the model, the climate interactions of the temperature arms
+are jointly insignificant on `r main$label`, as on most panels above. Hot
+countries are poor, so income takes over the gradient. Here the temperature
+arms are interacted with income only, or with the climate only, and compared
+with the model that has both. Precipitation keeps both interactions
+throughout (horizon deviations, linear arms):
+
+```text
+both          dT_a x (c_a + b_a clim_T + h_a inc)
+income only   dT_a x (c_a + h_a inc)                  b_a = 0
+climate only  dT_a x (c_a + b_a clim_T)               h_a = 0
+```
+
+Each restricted model is nested in the one with both, so its verdict uses the
+Wald test of the two terms it drops. On every panel (same rows):
+
+1. the fit and the tests, and the coefficients on `r main$label`;
+2. the effect of a +/-3 SD temperature year for a typical unit of each third
+   of income: the mean income and the mean long-run temperature of the third's
+   units (the model with income only does not use the temperature);
+3. figure: the effect of a +/-3 SD year across income on `r main$label`. The
+   models with the climate are evaluated at the average long-run temperature
+   of the rows. The ticks are the units.
+
+```{r temperature-income-only, fig.width = 11, fig.height = 5}
+T_ONLY_FORM <- FORMS[["Linear arms"]]
+T_ONLY_MODELS <- list("both" = c("clim_TM", "inc"), "income only" = "inc",
+                      "climate only" = "clim_TM")
+# Terms with the temperature arms interacted with `t_modifiers`; precipitation
+# with its climate and income.
+t_only_terms <- function(t_modifiers) {
+  t_arms <- paste0("devTM", T_ONLY_FORM$TM)
+  p_arms <- paste0("devRR", T_ONLY_FORM$RR)
+  c(t_arms, as.vector(outer(t_arms, paste0(":", t_modifiers), paste0)),
+    p_arms, paste0(p_arms, ":clim_RR"), paste0(p_arms, ":inc"), CONTROLS)
+}
+# Effects (linear_combination) of a temperature deviation x in model m (of
+# T_ONLY_MODELS[[k]]) at the long-run temperatures `clim` and centred incomes
+# `inc` (vectors of the same length).
+t_only_effect <- function(m, k, x, clim, inc) {
+  terms <- names(stats::coef(m))
+  G <- t(vapply(seq_along(clim), function(i) {
+    mods <- list(clim_TM = clim[[i]], inc = inc[[i]])[T_ONLY_MODELS[[k]]]
+    deviation_weights(terms, T_ONLY_FORM$TM, "TM", x, mods)
+  }, numeric(length(terms))))
+  colnames(G) <- terms
+  linear_combination(m, G)
+}
+
+t_only <- lapply(stats::setNames(nm = names(sens_panels)), function(label) {
+  p <- sens_panels[[label]]
+  d <- add_income(p, add_deviation_terms(p$clean, DEFINITIONS[["Horizon"]]))
+  fits <- lapply(T_ONLY_MODELS, function(z) fit_model(t_only_terms(z), d))
+  stopifnot(length(unique(vapply(fits, stats::nobs, 0))) == 1)
+  centre <- mean(d$inc_level)
+  units <- distinct(d, GID_1, inc, clim_TM) %>%
+    mutate(gdp_pc = exp(inc + centre),
+           third = factor(c("poorest third", "middle third", "richest third")[dplyr::ntile(inc, 3)],
+                          levels = c("poorest third", "middle third", "richest third")))
+  thirds <- units %>%
+    group_by(third) %>%
+    summarise(units = n(), gdp_pc = round(exp(mean(inc) + centre)),
+              mean_T = mean(clim_TM), inc = mean(inc), .groups = "drop")
+  tests <- bind_rows(lapply(names(fits), function(k) {
+    m <- fits[[k]]
+    dropped_p <- if (k != "both") added_terms_p(fits$both, m)
+    tibble::tibble(
+      panel = label, model = k, observations = stats::nobs(m),
+      within_adj_r2_pct = round(100 * fixest::fitstat(m, "war2")[[1]], 3),
+      aic_vs_both = round(stats::AIC(m) - stats::AIC(fits$both), 1),
+      dropped_terms_p = if (is.null(dropped_p)) NA_real_ else signif(dropped_p, 2),
+      verdict_vs_both = if (is.null(dropped_p)) "" else fit_verdicts(m, fits$both, nested_p = dropped_p),
+      T_p = signif(wald_p(m, dev_pattern("TM")), 2),
+      T_income_p = if ("inc" %in% T_ONLY_MODELS[[k]]) signif(wald_p(m, income_pattern("TM")), 2) else NA_real_,
+      T_climate_p = if ("clim_TM" %in% T_ONLY_MODELS[[k]]) {
+        signif(wald_p(m, climate_pattern("TM")), 2)
+      } else NA_real_
+    )
+  }))
+  effects <- bind_rows(lapply(names(fits), function(k) {
+    bind_rows(lapply(EFFECT_AT, function(x) {
+      t_only_effect(fits[[k]], k, x, thirds$mean_T, thirds$inc) %>%
+        mutate(panel = label, model = k, deviation = x, third = thirds$third,
+               p_value = 2 * stats::pnorm(-abs(estimate / std_error)))
+    }))
+  }))
+  # Curves across income at the average long-run temperature of the rows (main
+  # panel only).
+  curves <- NULL
+  if (label == main$label) {
+    grid <- seq(min(units$inc), max(units$inc), length.out = 60)
+    curves <- bind_rows(lapply(names(fits), function(k) {
+      bind_rows(lapply(EFFECT_AT, function(x) {
+        t_only_effect(fits[[k]], k, x, rep(mean(d$clim_TM), length(grid)), grid) %>%
+          mutate(model = k, deviation = x, gdp_pc = exp(grid + centre))
+      }))
+    }))
+  }
+  list(tests = tests, effects = effects, thirds = mutate(thirds, panel = label, .before = 1),
+       curves = curves, units = units, fits = if (label == main$label) fits)
+})
+
+# 1. Fit and tests.
+bind_rows(lapply(t_only, `[[`, "tests")) %>%
+  knitr::kable(caption = paste0(
+    "Temperature arms interacted with both, income only or the climate only (precipitation with ",
+    "both): within adjusted R2 (%), AIC against both, the Wald test (p) of the two terms dropped ",
+    "and the ", VERDICT_NOTE, " against both; joint tests (p) of all the temperature terms, of ",
+    "their income interactions and of their climate interactions"))
+etable(unname(t_only[[main$label]]$fits), headers = names(T_ONLY_MODELS), dict = DICT,
+       drop = DROP, order = ORDER, fitstat = FITSTAT,
+       title = paste0(main$label, ", linear arms, horizon deviations"))
+
+# 2. Effects for a typical unit of each third of income.
+bind_rows(lapply(t_only, `[[`, "thirds")) %>%
+  transmute(panel, third, units, gdp_pc, mean_T = round(mean_T, 1)) %>%
+  knitr::kable(caption = paste("The thirds of the units by income: GDP per capita (geometric",
+                               "mean) and mean long-run temperature"))
+t_only_effects <- bind_rows(lapply(t_only, `[[`, "effects"))
+t_only_effects$cell <- effect_cell(t_only_effects)
+t_only_effects$column <- factor(
+  sprintf("T %+d SD, %s", t_only_effects$deviation, t_only_effects$model),
+  levels = as.vector(t(outer(sprintf("T %+d SD", EFFECT_AT), names(T_ONLY_MODELS), paste, sep = ", "))))
+t_only_effects %>%
+  select(panel, third, column, cell) %>%
+  tidyr::pivot_wider(names_from = column, values_from = cell) %>%
+  knitr::kable(caption = paste(
+    "Effect (pp, 95% CI) of a temperature year at +/-3 SD for a typical unit of each third of",
+    "income (its mean income and mean long-run temperature); *** p < 0.01, ** p < 0.05, * p < 0.1"))
+
+# 3. Figure.
+T_ONLY_COLOURS <- c("both" = "#2a78d6", "income only" = "#eb6834", "climate only" = "#7f7f7f")
+t_only[[main$label]]$curves %>%
+  mutate(event = factor(sprintf("T %+d SD", deviation), levels = sprintf("T %+d SD", EFFECT_AT)),
+         model = factor(model, levels = names(T_ONLY_MODELS))) %>%
+  ggplot(aes(gdp_pc, 100 * estimate, colour = model, fill = model)) +
+  geom_hline(yintercept = 0, colour = "grey55", linewidth = 0.4) +
+  geom_ribbon(aes(ymin = 100 * conf_low, ymax = 100 * conf_high), alpha = 0.12, colour = NA) +
+  geom_line(linewidth = 0.8) +
+  geom_rug(data = t_only[[main$label]]$units, aes(x = gdp_pc), inherit.aes = FALSE,
+           colour = "grey40", alpha = 0.5, sides = "b") +
+  facet_wrap(~event) +
+  scale_x_log10(labels = function(x) format(x, big.mark = ",", scientific = FALSE)) +
+  scale_colour_manual(values = T_ONLY_COLOURS, name = NULL) +
+  scale_fill_manual(values = T_ONLY_COLOURS, name = NULL) +
+  labs(x = "Long-run GDP per capita (log scale)", y = "Effect on growth of GDP per capita (pp)",
+       title = "Temperature response across income",
+       subtitle = paste0(main$label, ", linear arms, horizon deviations; the models with the ",
+                         "climate at the rows' average long-run temperature; bands: 95% CI; ",
+                         "ticks: the units")) +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "top", panel.grid.minor = element_blank(),
+        strip.text = element_text(face = "bold"))
+```
+
+# Oil prices and oil producers
+
+In the model with income, a hot year raises the growth of the richest
+countries. At the top of the income range the effect is significant, and most
+of the countries there are oil exporters (Qatar, the United Arab Emirates,
+Brunei, Saudi Arabia, Kuwait). Does the oil price account for it?
+
+**Data.**
+- The oil price is the Energy Institute's crude oil price since 1861, in
+  constant 2025 US$ (per cubic metre; the unit drops out in logs). It is from
+  the Statistical Review of World Energy 2026, as published by Our World in
+  Data (`data/oil/oil-prices-inflation-adjusted.csv`).
+- A country's oil production is its oil rents as a share of GDP (WDI
+  `NY.GDP.PETR.RT.ZS`, % of GDP, 1970-2021; `data/oil/wb_oil_rents.csv`). The
+  share is averaged over the country's years from `r params$start_year`. It is
+  one number per country, so it does not respond to the price of the year.
+- A producer is a country whose average share exceeds 10% of GDP.
+
+**Specification.** The oil price is the same for every country in a year, so
+the year effects absorb it, and it cannot enter on its own. What can enter is
+its interaction with how much a country produces. The model with income
+(horizon deviations, linear arms) gets, in turn:
+
+```text
+level      h1 log P(t) x share
+change     h1 dlog P(t) x share + h2 dlog P(t-1) x share          dlog P(t) = log P(t) - log P(t-1)
+dummy      h1 dlog P(t) x producer + h2 dlog P(t-1) x producer
+dropped    no oil terms, without the producers
+```
+
+All the models are on the rows of `r main$label` whose country has oil rents
+in WDI. The baseline is the model without oil terms on the same rows. Each
+model with oil terms is nested in it (the Wald test of the oil terms). The
+tables:
+
+1. the producers in the sample, and the oil share of the richest countries;
+2. the coefficients;
+3. the tests: the oil terms, the income interactions of each variable, and
+   each model against the baseline;
+4. the effects of a +/-3 SD year at each long-run climate. They are evaluated
+   at the mean income of the poorest and of the richest third of the units,
+   and at the highest income of the sample.
+
+```{r oil-prices}
+OIL_PRODUCER_SHARE <- 10
+oil_price_raw <- utils::read.csv(data_file("oil/oil-prices-inflation-adjusted.csv"), check.names = FALSE)
+stopifnot(identical(names(oil_price_raw)[1:3], c("Entity", "Code", "Year")))
+oil_price <- tibble::tibble(year = oil_price_raw$Year, price = oil_price_raw[[4]]) %>%
+  arrange(year) %>%
+  mutate(log_oil = log(price),
+         dlog_oil = log_oil - lag_by_year(log_oil, year),
+         dlog_oil_l1 = lag_by_year(dlog_oil, year))
+# Each country's mean oil rents (% of GDP) over its WDI years from the start
+# year (no year filled).
+oil_share <- read_wdi_csv(data_file("oil/wb_oil_rents.csv"), c(oil_rents = "NY.GDP.PETR.RT.ZS")) %>%
+  filter(year >= START_YEAR, !is.na(oil_rents)) %>%
+  group_by(GID_0) %>%
+  summarise(oil_share = mean(oil_rents), oil_years = n(), .groups = "drop") %>%
+  mutate(producer = as.numeric(oil_share > OIL_PRODUCER_SHARE))
+oil_rows <- check_all %>%
+  inner_join(oil_share, by = "GID_0") %>%
+  left_join(select(oil_price, year, log_oil, dlog_oil, dlog_oil_l1), by = "year")
+stopifnot(!anyNA(oil_rows[, c("log_oil", "dlog_oil", "dlog_oil_l1")]))
+OIL_MODELS <- list(
+  "baseline" = list(terms = check_terms, rows = oil_rows),
+  "level x share" = list(terms = c(check_terms, "log_oil:oil_share"), rows = oil_rows),
+  "change x share" = list(terms = c(check_terms, "dlog_oil:oil_share", "dlog_oil_l1:oil_share"),
+                          rows = oil_rows),
+  "change x producer" = list(terms = c(check_terms, "dlog_oil:producer", "dlog_oil_l1:producer"),
+                             rows = oil_rows),
+  "producers dropped" = list(terms = check_terms, rows = filter(oil_rows, producer == 0))
+)
+oil_fits <- lapply(OIL_MODELS, function(m) fit_model(m$terms, m$rows))
+
+# 1. The producers, and the oil share of the richest countries.
+oil_units <- distinct(oil_rows, GID_0, inc_level, oil_share, producer, clim_TM)
+tibble::tibble(
+  sample = c("all", "producers"),
+  countries = c(nrow(oil_units), sum(oil_units$producer)),
+  rows = c(nrow(oil_rows), sum(oil_rows$producer)),
+  missing_oil_rents = c(n_distinct(check_all$GID_0) - nrow(oil_units), NA)
+) %>%
+  knitr::kable(caption = sprintf(paste(
+    "%s: the countries with WDI oil rents (missing: countries of the main sample without them, left",
+    "out), and the producers (mean oil rents above %d%% of GDP): %s"),
+    main$label, OIL_PRODUCER_SHARE,
+    paste(sort(oil_units$GID_0[oil_units$producer == 1]), collapse = ", ")))
+oil_units %>%
+  arrange(desc(inc_level)) %>%
+  head(15) %>%
+  transmute(GID_0, gdp_pc = round(exp(inc_level)), oil_share = round(oil_share, 1),
+            producer = producer == 1, mean_T = round(clim_TM, 1)) %>%
+  knitr::kable(caption = paste("The 15 richest countries: GDP per capita (horizon mean), mean oil",
+                               "rents (% of GDP) and long-run temperature (C)"))
+
+# 2. Coefficients.
+etable(unname(oil_fits), headers = names(oil_fits),
+       dict = c(DICT, "log_oil:oil_share" = "log P x share", "dlog_oil:oil_share" = "dlog P x share",
+                "dlog_oil_l1:oil_share" = "dlog P(t-1) x share", "dlog_oil:producer" = "dlog P x producer",
+                "dlog_oil_l1:producer" = "dlog P(t-1) x producer",
+                # fixest may name an interaction with its parts in the other order.
+                "oil_share:dlog_oil_l1" = "dlog P(t-1) x share",
+                "producer:dlog_oil_l1" = "dlog P(t-1) x producer"),
+       drop = DROP, order = c(ORDER, "oil"), fitstat = FITSTAT,
+       title = paste0(main$label, ", linear arms, horizon deviations, with income; oil share in % of GDP"))
+
+# 3. Tests.
+bind_rows(lapply(names(oil_fits), function(k) {
+  m <- oil_fits[[k]]
+  oil_p <- if (k %in% c("baseline", "producers dropped")) NULL else added_terms_p(m, oil_fits$baseline)
+  tibble::tibble(
+    model = k, observations = stats::nobs(m),
+    within_adj_r2_pct = round(100 * fixest::fitstat(m, "war2")[[1]], 3),
+    oil_terms_p = if (is.null(oil_p)) NA_real_ else signif(oil_p, 2),
+    verdict_vs_baseline = if (is.null(oil_p)) "" else fit_verdicts(m, oil_fits$baseline, nested_p = oil_p),
+    T_income_p = signif(wald_p(m, income_pattern("TM")), 2),
+    P_income_p = signif(wald_p(m, income_pattern("RR")), 2),
+    T_p = signif(wald_p(m, dev_pattern("TM")), 2), P_p = signif(wald_p(m, dev_pattern("RR")), 2)
+  )
+})) %>%
+  knitr::kable(caption = paste0(
+    main$label, ": within adjusted R2 (%), the Wald test (p) of the oil terms and the ", VERDICT_NOTE,
+    " against the baseline (nested, same rows; not for the model without the producers, on other ",
+    "rows); joint tests (p) of each variable's income interactions and of all its deviation terms"))
+
+# 4. Effects at three incomes (the units of the oil rows).
+oil_third <- dplyr::ntile(oil_units$inc_level, 3)
+OIL_INCOME <- c("poorest third" = mean(oil_units$inc_level[oil_third == 1]),
+                "richest third" = mean(oil_units$inc_level[oil_third == 3]),
+                "highest income" = max(oil_units$inc_level))
+oil_centre <- mean(check_all$inc_level)
+oil_effects <- bind_rows(lapply(names(oil_fits), function(k) {
+  bind_rows(lapply(names(OIL_INCOME), function(lvl) {
+    effects_at(oil_fits[[k]], CHECK_FORM, list(inc = OIL_INCOME[[lvl]] - oil_centre)) %>%
+      mutate(model = k, income = lvl)
+  }))
+}))
+oil_effects$cell <- effect_cell(oil_effects)
+oil_effects %>%
+  mutate(event = effect_column(oil_effects),
+         income = factor(income, levels = names(OIL_INCOME)),
+         model = factor(model, levels = names(OIL_MODELS))) %>%
+  select(event, income, model, cell) %>%
+  tidyr::pivot_wider(names_from = model, values_from = cell) %>%
+  arrange(factor(event, levels = unique(effect_column(oil_effects))), income) %>%
+  knitr::kable(caption = sprintf(paste(
+    "%s: effect (pp, 95%% CI) of a year at +/-3 SD at each long-run climate, at the mean income of",
+    "the poorest and of the richest third of the units and at the highest income (GDP per capita",
+    "%s), with and without the oil terms; *** p < 0.01, ** p < 0.05, * p < 0.1"),
+    main$label, paste(format(round(exp(OIL_INCOME)), big.mark = ","), collapse = ", ")))
+```
