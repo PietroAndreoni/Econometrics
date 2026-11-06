@@ -1,0 +1,1160 @@
+---
+title: "Weather shocks and growth: from the symmetric response to the preferred specification, with projections"
+subtitle: "PWT 11.0 × ERA5, national panel, 1970–2023"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  word_document:
+    toc: false
+---
+
+```{r setup, include = FALSE}
+# Renders the handout from the estimates of handout_preferred_specification.R
+# (run it first). Equations are written in LaTeX and become native, editable
+# Word equations; tables are native Word tables (flextable).
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, dpi = 200)
+library(flextable)
+library(ggplot2)
+e <- readRDS(file.path("results", "handout_preferred_specification", "estimates.rds"))
+# PWT against World Bank GDP and the outliers (handout_sources.R).
+src <- readRDS(file.path("results", "handout_preferred_specification", "sources.rds"))
+set_flextable_defaults(font.family = "Calibri", font.size = 8, padding = 1.5)
+ybar <- exp(e$inc_mean)
+pp <- function(x, d = 2) formatC(100 * x, format = "f", digits = d)
+pv <- function(p) ifelse(p < 0.001, "< 0.001", formatC(p, format = "f", digits = 3))
+stars <- function(p) ifelse(p < 0.01, "***", ifelse(p < 0.05, "**", ifelse(p < 0.1, "*", "")))
+fit <- e$fit
+g <- e$grid
+xi_p <- function(x) g$p_score[abs(g$xi - x) < 1e-9]
+aic_of <- function(x) g$aic[abs(g$xi - x) < 1e-9]
+
+# Readable row labels of the terms, in the order of the tables (each arm
+# followed by its interactions).
+TERM_LABELS <- c(
+  dTM = "T deviation d_T (symmetric)", "dTM:clim_TM" = "   T deviation × climate c_T",
+  pTM = "T warm arm D⁺_T", "pTM:clim_TM" = "   warm × climate c_T", "pTM:y" = "   warm × income y",
+  "pTM:agr" = "   warm × agr. share s",
+  nTM = "T cold arm D⁻_T", "nTM:clim_TM" = "   cold × climate c_T", "nTM:y" = "   cold × income y",
+  "nTM:agr" = "   cold × agr. share s",
+  "pTM:r" = "T warm arm D⁺_T × (Ȳ/Y)^(1−ξ)", "pTM:clim_TM:r" = "   warm × climate c_T × (Ȳ/Y)^(1−ξ)",
+  "nTM:r" = "T cold arm D⁻_T × (Ȳ/Y)^(1−ξ)", "nTM:clim_TM:r" = "   cold × climate c_T × (Ȳ/Y)^(1−ξ)",
+  dRR = "P deviation d_P (symmetric)", "dRR:clim_RR" = "   P deviation × climate c_P",
+  pRR = "P wet arm D⁺_P", "pRR:clim_RR" = "   wet × climate c_P", "pRR:y" = "   wet × income y",
+  "pRR:agr" = "   wet × agr. share s",
+  nRR = "P dry arm D⁻_P", "nRR:clim_RR" = "   dry × climate c_P", "nRR:y" = "   dry × income y",
+  "nRR:agr" = "   dry × agr. share s",
+  "pTM2:r" = "T warm arm squared (D⁺_T)² × (Ȳ/Y)^(1−ξ)", "pTM2:clim_TM:r" = "   warm² × climate c_T × (Ȳ/Y)^(1−ξ)",
+  "nTM2:r" = "T cold arm squared (D⁻_T)² × (Ȳ/Y)^(1−ξ)", "nTM2:clim_TM:r" = "   cold² × climate c_T × (Ȳ/Y)^(1−ξ)",
+  pRR2 = "P wet arm squared (D⁺_P)²", "pRR2:clim_RR" = "   wet² × climate c_P", "pRR2:agr" = "   wet² × agr. share s",
+  nRR2 = "P dry arm squared (D⁻_P)²", "nRR2:clim_RR" = "   dry² × climate c_P", "nRR2:agr" = "   dry² × agr. share s",
+  clim_TM = "Level: climate c_T", clim_RR = "Level: climate c_P", y = "Level: income y"
+)
+pr <- readRDS(file.path("results", "handout_preferred_specification", "projections.rds"))
+library(sf)
+# A coefficient table of models `ms` (names: column headers): estimate (pp)
+# with stars, clustered SE below, then the fit.
+coef_table <- function(ms, coefs = e$coefs, fits = NULL) {
+  terms <- unique(unlist(lapply(coefs[ms], `[[`, "term")))
+  terms <- terms[order(match(terms, names(TERM_LABELS)))]
+  cols <- lapply(ms, function(k) {
+    x <- coefs[[k]]
+    i <- match(terms, x$term)
+    ifelse(is.na(i), "", paste0(pp(x$estimate[i], 3), stars(x$p[i]), "\n(", pp(x$se[i], 3), ")"))
+  })
+  out <- data.frame(Term = unname(TERM_LABELS[terms]), cols, check.names = FALSE)
+  names(out)[-1] <- names(ms)
+  if (!is.null(fits)) {
+    extra <- data.frame(Term = c("Observations (countries)", "AIC", "BIC", "Within adj. R²"),
+                        do.call(cbind, lapply(fits, function(f) c(sprintf("%s (%d)", format(f$rows, big.mark = ","), f$countries),
+                                                                  sprintf("%.1f", f$aic), sprintf("%.1f", f$bic),
+                                                                  sprintf("%.4f", f$war2)))),
+                        check.names = FALSE)
+    names(extra) <- names(out)
+    out <- rbind(out, extra)
+  }
+  ft <- flextable(out)
+  ft <- align(ft, j = -1, align = "center", part = "all")
+  ft <- bold(ft, part = "header")
+  ft <- hline(ft, i = length(terms), border = officer::fp_border(width = 0.75))
+  ft <- autofit(ft)
+  ft
+}
+fit_of <- function(ks) lapply(ks, function(k) as.list(fit[k, ]))
+```
+
+**Purpose.** This note motivates the specification we propose for the growth response to weather shocks. It starts from the symmetric response common in climate econometrics and changes one assumption at a time. All coefficients of every specification are reported in the tables.
+
+# 1. Data and base specification
+
+*Data.* Growth of real GDP per capita from the Penn World Table 11.0 (rgdpna / pop, constant national prices, 2021 PPP US\$). Annual temperature and precipitation from ERA5, aggregated to countries with 2000 population-density weights. The sample has `r format(e$sample[["rows"]], big.mark = ",")` country-years and `r e$sample[["countries"]]` countries over `r e$sample[["first"]]`–`r e$sample[["last"]]`: the rows with all the trailing values below. Recognised non-weather growth outliers are excluded. The `r 100 * src$outliers$share / 2`% lowest and highest growth rates of PWT × ERA5 from `r src$outliers$start_year` (`r format(src$outliers$tails, big.mark = ",")` country-years) are annotated by cause. The `r src$outliers$dropped` not caused by weather are dropped: wars, oil and commodity shocks, reforms and booms, crises, COVID-19 and unidentified causes. `r src$outliers$dropped_sample` of them would otherwise be in the estimation rows. The `r src$outliers$weather_kept` caused by weather (droughts, storms, floods, harvests) stay, as they are the response studied. The agricultural share comes from the **World Bank WDI**: agriculture over the value added of the three sectors, averaged over `r e$horizon[1]`–`r e$horizon[2]` using the previous year's share, so it is constant within a country. PWT does not report it, and a trailing WDI share would drop about 30% of the rows, mostly before 1990.
+
+*Weather deviations.* Each country's weather is measured against its own trailing 20-year climate and scaled by its long-run variability. The trailing mean is used for the deviation; the SD is fixed:
+
+$$x_{v,it} = \frac{v_{it} - \mu^{20}_{v,it}}{\sigma_{v,i}}, \qquad \mu^{20}_{v,it} = \frac{1}{20}\sum_{k=1}^{20} v_{i,t-k}, \qquad v \in \{T, P\}$$
+
+Here $\sigma_{v,i}$ is the SD of $v_{it}$ over `r e$horizon[1]`–`r e$horizon[2]`. The deviation is demeaned by the country's quadratic trend, $d_{v,it} = x_{v,it} - (\hat a_i + \hat b_i t + \hat c_i t^2)$, fitted by OLS for each country. The linear arms split it into positive and negative parts:
+
+$$D^{+}_{v,it} = \max(d_{v,it}, 0), \qquad D^{-}_{v,it} = \max(-d_{v,it}, 0)$$
+
+*Characteristics* (all trailing, apart from the share):
+
+- climate $c_{v,it} = \mu^{20}_{v,it} - \operatorname{med}_j \bar v_j$, the same 20-year trailing mean less the median of the countries' long-run means;
+- income $y_{it} = \ln\big(\tfrac{1}{5}\sum_{k=1}^{5} \mathrm{GDPpc}_{i,t-k}\big)$ less its mean over the rows;
+- agricultural share $s_i$, less its mean.
+
+*Regression.* Every specification has the form
+
+$$\Delta \ln \mathrm{GDPpc}_{it} = f_T(\cdot) + f_P(\cdot) + \phi_T c_{T,it} + \phi_P c_{P,it} + \phi_y y_{it} + \kappa' C_{it} + \lambda_t + \alpha_i + \delta_i t + \eta_i t^2 + \varepsilon_{it}$$
+
+- $f_T$ and $f_P$ are the weather terms, which change across specifications.
+- The levels of trailing climate and income enter every model as controls, so the models differ only in their weather terms.
+- $C_{it}$ holds the conflict dummies (minor conflict, war) and the Soviet and Yugoslav collapse years.
+- $\lambda_t$ are year effects; $\alpha_i$, $\delta_i t$ and $\eta_i t^2$ are country effects and country linear and quadratic trends.
+- Errors are clustered by country.
+
+Coefficients are reported in percentage points of growth per SD of deviation. Interaction coefficients are per unit of the characteristic: °C, m per year, log points of income, or share.
+
+*Comparing models.* Nested models are compared with clustered Wald tests. Non-nested ones are compared by AIC, and a difference is called "indifferent" when a Vuong test clustered by country cannot tell it from noise at 5%.
+
+# 2. Starting point: a symmetric response
+
+The usual specification is linear in the deviation, possibly interacted with the climate:
+
+$$f_v = \beta_v\, d_{v,it} \;\big(+\, \gamma_v\, d_{v,it}\, c_{v,it}\big)$$
+
+This assumes that a hot (wet) year and a cold (dry) year of the same size move growth by the same amount in opposite directions. Nothing in theory or evidence requires that: a dry year and a flood year can both be harmful.
+
+# 3. Test 1: separate hot–cold and wet–dry arms
+
+Each arm gets its own coefficient (and its own climate interaction):
+
+$$f_v = \sum_{a \in \{+,-\}} \big(\beta^{a}_{v} + \gamma^{a}_{v}\, c_{v,it}\big)\, D^{a}_{v,it}$$
+
+The symmetric model is the special case $\beta^{-}_{v} = -\beta^{+}_{v}$ (and $\gamma^{-}_{v} = -\gamma^{+}_{v}$), since $d = D^{+} - D^{-}$. A positive $\beta^{-}$ means that a cold (dry) year *raises* growth.
+
+**Table 1. Symmetric response and arms (pp of growth per SD).**
+
+```{r table1}
+coef_table(c("M0: symmetric" = "M0", "M1: arms" = "M1", "M0c: symmetric × climate" = "M0c", "M1c: arms × climate" = "M1c"),
+           fits = fit_of(c("M0", "M1", "M0c", "M1c")))
+```
+
+*Clustered SEs in brackets; \*\*\* p < 0.01, \*\* p < 0.05, \* p < 0.1.*
+
+**Table 2. Wald tests of symmetry (β⁺ + β⁻ = 0, and γ⁺ + γ⁻ = 0 with the climate interaction).**
+
+```{r table2}
+s <- e$tests$symmetry
+ft <- flextable(data.frame(Test = rownames(s), F = sprintf("%.2f", s[, "F"]), Restrictions = as.integer(s[, "df"]),
+                           `p-value` = pv(s[, "p"]), check.names = FALSE))
+autofit(bold(ft, part = "header"))
+```
+
+**Result.** Temperature looks symmetric: the warm and cold arms have opposite signs (`r pp(e$coefs$M1$estimate[1])` and +`r pp(e$coefs$M1$estimate[2])` pp), and symmetry is not rejected (p = `r pv(s[1, "p"])`).
+
+Precipitation is not symmetric (p = `r pv(s[2, "p"])`; p = `r pv(s[4, "p"])` with the climate interaction).
+
+- Wet and dry years are *both* harmful: a one-SD wet year changes growth by `r pp(e$coefs$M1$estimate[3])` pp and a one-SD dry year by `r pp(e$coefs$M1$estimate[4])` pp.
+- The symmetric term averages them away: `r pp(e$coefs$M0$estimate[2])` pp, p = `r pv(e$coefs$M0$p[2])`.
+- With arms, **precipitation is significant at the national level**: joint p = `r pv(e$tests$arms[2, "p"])`, and p = `r pv(e$tests$arms[4, "p"])` with the climate interaction.
+
+By AIC the arms do better (M1 against M0: `r sprintf("%.1f", fit["M1", "aic"] - fit["M0", "aic"])`), although the non-nested Vuong verdict is `r e$verdicts[["M1 vs M0"]]`. Since the models are nested, the symmetry Wald test is the relevant one.
+
+# 4. Test 2: climate or income?
+
+Hot countries are also poorer, so a climate interaction can pick up an income effect. We add income and the agricultural share to the climate interaction:
+
+$$f_v = \sum_{a \in \{+,-\}} \big(\beta^{a}_{v} + \gamma^{a}_{v,c}\, c_{v,it} + \gamma^{a}_{v,y}\, y_{it} + \gamma^{a}_{v,s}\, s_{i}\big)\, D^{a}_{v,it}$$
+
+**Table 3. Climate, income and agricultural-share interactions (pp of growth per SD).**
+
+```{r table3}
+coef_table(c("M1c: climate" = "M1c", "M2: climate + income + share" = "M2", "M2b: T climate + income, P climate + share" = "M2b"),
+           fits = fit_of(c("M1c", "M2", "M2b")))
+```
+
+*Clustered SEs in brackets; \*\*\* p < 0.01, \*\* p < 0.05, \* p < 0.1.*
+
+**Table 4. Joint Wald tests of each characteristic's interactions in M2 (both arms).**
+
+```{r table4}
+x <- e$tests$interactions
+ft <- flextable(data.frame(Interactions = rownames(x), F = sprintf("%.2f", x[, "F"]), Restrictions = as.integer(x[, "df"]),
+                           `p-value` = pv(x[, "p"]), check.names = FALSE))
+autofit(bold(ft, part = "header"))
+```
+
+**Result.** For temperature, **income** is what matters (p = `r pv(x["T income", "p"])`). Climate (p = `r pv(x["T climate", "p"])`) and share (p = `r pv(x["T share", "p"])`) add little.
+
+For precipitation, the **climate** (p = `r pv(x["P climate", "p"])`) and the **agricultural share** (p = `r pv(x["P share", "p"])`) matter, but income does not (p = `r pv(x["P income", "p"])`). Dry years hurt more where agriculture is a larger share of the economy and less in wetter climates.
+
+Dropping the T × share and P × income terms (M2b) is not rejected: p = `r pv(e$tests$M2b_vs_M2[["p"]])` jointly, with AIC `r sprintf("%+.1f", fit["M2b", "aic"] - fit["M2", "aic"])` and BIC `r sprintf("%+.1f", fit["M2b", "bic"] - fit["M2", "bic"])` against M2. Against M1c (climate only), M2b improves the fit: AIC `r sprintf("%+.1f", fit["M2b", "aic"] - fit["M1c", "aic"])` and BIC `r sprintf("%+.1f", fit["M2b", "bic"] - fit["M1c", "bic"])`.
+
+# 5. A mechanical problem with the linear income interaction
+
+In M2b, the response to a warm year of one SD, at the median climate, is linear in log income:
+
+$$\frac{\partial\, \Delta \ln \mathrm{GDPpc}_{it}}{\partial D^{+}_{T,it}} = \beta^{+}_{T} + \gamma^{+}_{T,y}\, y_{it}$$
+
+- With $\gamma^{+}_{T,y} > 0$, it must change sign at some income and becomes a *gain* for every richer country.
+- In M2b this happens at a trailing income of about **US\$`r format(round(e$threshold[["warm"]], -2), big.mark = ",")`** (2021 PPP). That is `r round(100 * e$share_above[["warm"]])`% of the countries in their last sample year.
+- For the cold arm the switch is at about US\$`r format(round(e$threshold[["cold"]], -2), big.mark = ",")`.
+- The USA would gain `r sprintf("%+.2f", e$responses$warm.estimate[e$responses$iso == "USA" & e$responses$model == "M2b"])` pp of growth from a warm year of one SD (SE `r sprintf("%.2f", e$responses$warm.se[e$responses$iso == "USA" & e$responses$model == "M2b"])`).
+
+The linear form makes this gain inevitable. In projections, where incomes grow, more and more of the world would gain from warming.
+
+```{r fig-income, fig.width = 6.5, fig.height = 3.2, fig.cap = paste0("Response to a warm year of one SD at the median climate, by trailing income: linear income interaction (M2b) against the scaled form with ξ = ", e$xi_preferred, " (Pref). Bands: 95% CI; ticks: the countries' incomes in their last sample year.")}
+inc <- exp(seq(log(400), log(150000), length.out = 200))
+y <- log(inc) - e$inc_mean
+curve_of <- function(k, w) {
+  b <- e$coefs[[k]]
+  V <- e$vcov[[k]]
+  est <- drop(w %*% b$estimate[match(colnames(w), b$term)])
+  se <- sqrt(rowSums((w %*% V[colnames(w), colnames(w)]) * w))
+  data.frame(income = inc, estimate = 100 * est, low = 100 * (est - 1.96 * se), high = 100 * (est + 1.96 * se))
+}
+w2 <- cbind(pTM = 1, `pTM:y` = y)
+wp <- cbind(`pTM:r` = exp(-(1 - e$xi_preferred) * y))
+d <- rbind(cbind(model = "M2b: linear income interaction", curve_of("M2b", w2)),
+           cbind(model = paste0("Pref: scaled, ξ = ", e$xi_preferred), curve_of("Pref", wp)))
+ggplot(d, aes(income, estimate, colour = model, fill = model)) +
+  geom_hline(yintercept = 0, colour = "grey40", linewidth = 0.3) +
+  geom_ribbon(aes(ymin = low, ymax = high), alpha = 0.15, colour = NA) +
+  geom_line(linewidth = 0.8) +
+  geom_rug(data = data.frame(income = exp(e$last$inc_trailing)), aes(x = income), inherit.aes = FALSE,
+           sides = "b", alpha = 0.4, colour = "grey30") +
+  scale_x_log10(labels = scales::label_dollar(accuracy = 1), breaks = c(500, 2000, 10000, 50000)) +
+  scale_colour_manual(values = c("#eb6834", "#2a78d6"), name = NULL) +
+  scale_fill_manual(values = c("#eb6834", "#2a78d6"), name = NULL) +
+  labs(x = "Trailing GDP per capita (2021 PPP US$, log scale)", y = "pp of growth per SD") +
+  theme_minimal(base_size = 9) + theme(legend.position = "top", panel.grid.minor = element_blank())
+```
+
+# 6. Test 3: income as a scaling of the temperature response
+
+Instead of adding income linearly, we let it *scale* the whole temperature response:
+
+$$f_T = \left(\frac{\bar Y}{Y_{it}}\right)^{1-\xi} \sum_{a \in \{+,-\}} \big(\tilde\beta^{a}_{T} + \tilde\gamma^{a}_{T}\, c_{T,it}\big)\, D^{a}_{T,it}$$
+
+$Y_{it}$ is the country's trailing income, and $\bar Y$ = US\$`r format(round(ybar, -1), big.mark = ",")` is a constant: the geometric mean of the trailing income over the rows. A growth effect $\tilde\beta$ at $\bar Y$ is then a loss of $\tilde\beta\, \bar Y^{1-\xi} Y_{it}^{\xi}$ dollars per person, proportional to $Y_{it}^{\xi}$. So $\xi$ is the income elasticity of the dollar loss:
+
+- $\xi = 1$: equal growth effects (the same % at every income; the standard form without income);
+- $\xi = 0$: equal losses per capita (the same dollars at every income);
+- in between, poorer countries lose a larger % but fewer dollars.
+
+The response cannot change sign with income, so the mechanical problem of Section 5 disappears. Precipitation keeps its climate and share interactions, unscaled.
+
+**Table 5. Income elasticity ξ of the temperature terms, ξ from 0 (equal per-capita dollars) to 1 (equal growth).**
+
+```{r table5}
+ft <- flextable(data.frame(
+  `ξ` = sprintf("%.1f", g$xi), AIC = sprintf("%.1f", g$aic), `ΔAIC vs best` = sprintf("%+.1f", g$aic - min(g$aic)),
+  BIC = sprintf("%.1f", g$bic), `Within adj. R²` = sprintf("%.4f", g$war2),
+  `Score test of ξ, p-value` = pv(g$p_score), `Against the best ξ` = g$verdict_vs_best,
+  `Against M2b` = g$verdict_vs_M2b, check.names = FALSE))
+ft <- bold(ft, i = which(abs(g$xi - e$xi_preferred) < 1e-9), part = "body")
+autofit(bold(ft, part = "header"))
+```
+
+*Score test: a clustered C(α) test of the given ξ (the derivative of the temperature terms in ξ added to the model). Verdicts: AIC difference beyond noise by the Vuong test clustered by country (5%). The preferred ξ is in bold.*
+
+**Result.** Neither end of the range can be rejected:
+
+- **ξ = 0** has p = `r pv(xi_p(0))` and **ξ = 1** has p = `r pv(xi_p(1))`.
+- No ξ fits worse than the best beyond noise, and none differs from M2b.
+
+The data lean towards stronger scaling. AIC is lowest at ξ = 0 (`r sprintf("%+.1f", aic_of(1) - aic_of(0))` from ξ = 0 to ξ = 1), and its unconstrained minimum is at ξ = `r sprintf("%.2f", e$xi_hat)`. The score test also rejects some intermediate values (p < 0.05 for ξ between 0.2 and 0.5). It is a local test of the slope of the fit, and here the fit is not quadratic in ξ, so we read it as weak evidence on where ξ lies. The data do not pin ξ down.
+
+**Estimating ξ directly.** Instead of a grid, ξ can be estimated jointly with the other coefficients by nonlinear least squares. Equal dollars (ξ = 0) and equal growth (ξ = 1) are then restrictions within one model. Given ξ, the model is linear in everything else (fixed effects and trends included), so the estimate minimises over ξ the residual sum of squares of the usual regression (the *profile*):
+
+$$\hat\xi = \arg\min_{\xi} \Big\{ \min_{\tilde\beta,\tilde\gamma,\beta_P,\gamma_P,\phi,\kappa,\lambda,\alpha,\delta,\eta} \textstyle\sum_{it} \hat\varepsilon_{it}(\xi)^2 \Big\}$$
+
+ξ is not restricted to [0, 1]; the search covers −4 to 4. ξ refers to the 5-year trailing income, the income that enters the scaling. The SEs of the conditional regression at $\hat\xi$ treat ξ as known, so inference uses three alternatives:
+
+- **Wald:** the clustered covariance of the full nonlinear model (the Gauss–Newton regression at $\hat\xi$);
+- **test inversion:** the ξ not rejected at 5% by a clustered test. The robust test adds every scaled T term times $y_{it}$ to the model at the given ξ and tests these four terms jointly. Under the null they are zero whatever the size of the T response, so the test keeps its size where the response is small. The score test of Table 5 only tests the slope of the profile, so it also accepts at its maxima;
+- **country bootstrap:** `r e$xi_nls$boot[["reps"]]` resamples of whole countries, with ξ re-estimated in each.
+
+```{r xi-nls-numbers, include = FALSE}
+# The table, the figure and their pieces (xn, G, prof, at, wald_p, draws,
+# boot_p, fmt_set, at_low).
+source("handout_xi_figure.R")
+list2env(xi_helpers(e), environment())
+```
+
+**Table 5b. Nonlinear least-squares estimate of ξ: $\hat\xi$ = `r sprintf("%.2f", xn$estimate)` (Wald SE `r sprintf("%.2f", xn$wald[["se"]])`, bootstrap SE `r sprintf("%.2f", xn$boot[["se"]])`). 95% confidence sets and p-values of three values of ξ.**
+
+```{r table5b}
+autofit(bold(flextable(xi_table(e, pv)), part = "header"))
+```
+
+*Search over ξ in [−4, 4]: a set reaching ±4 continues to the end of the search. Bootstrap: `r sprintf("%.0f", 100 * xn$boot[["at_bound"]])`% of the draws end at a bound (`r sprintf("%.0f", 100 * at_low)`% at −4); p-values from the share of draws on either side of the value. Clustered tests: t (Wald, score) or F (robust) with G − 1 = `r G - 1` degrees of freedom.*
+
+```{r fig-xi, fig.width = 6.5, fig.height = 5.4, fig.cap = "Nonlinear least-squares estimate of ξ. Top: profile of the fit (AIC less its minimum; same rows and terms at every ξ). Middle: p-value of the test of each ξ (dotted: 5%). Bottom: country-bootstrap estimates. Shaded: the 95% confidence set of each panel (top: Wald; middle: robust test inverted; bottom: bootstrap percentiles), cut at the bounds of the search. Dashed line: the estimate; grey lines: ξ = 0, 0.6 and 1."}
+xi_figure(e)
+```
+
+**Result.**
+
+- The estimate is **$\hat\xi$ = `r sprintf("%.2f", xn$estimate)`**: the dollar loss per person falls slightly with income, so poorer countries lose more dollars per person, not only a larger share of income. The profile has a clear global minimum; values of ξ above 1 fit worse by `r sprintf("%.0f", min(prof$aic[prof$xi >= 1]) - min(prof$aic))` AIC points or more.
+- **ξ = 0 (equal dollars) is not rejected** by any of the methods (p = `r pv(wald_p(0))` Wald, `r pv(at(0, "p_ar"))` robust, `r pv(boot_p(0))` bootstrap).
+- **ξ = 1 (equal growth) is rejected** by the Wald test (p `r sub("^([0-9])", "= \\1", pv(wald_p(1)))`). By the robust test (p = `r pv(at(1, "p_ar"))`) and the bootstrap (p = `r pv(boot_p(1))`) it is at the 5% margin.
+- **ξ = 0.6**, an intermediate value, has p = `r pv(wald_p(0.6))` (Wald), `r pv(at(0.6, "p_ar"))` (robust) and `r pv(boot_p(0.6))` (bootstrap).
+- ξ is **weakly identified**:
+  - the bootstrap SE (`r sprintf("%.2f", xn$boot[["se"]])`) is `r sprintf("%.1f", xn$boot[["se"]] / xn$wald[["se"]])` times the Wald SE, and `r sprintf("%.0f", 100 * at_low)`% of the draws run to −4;
+  - the robust confidence set is not one interval and is open at both ends;
+  - for ξ far from 1 the scaled T terms rest on a few of the poorest or richest countries, so no test has power there, even though the fit is much worse.
+
+  The Wald interval relies on a well-identified ξ and is too narrow here. ξ estimates the combined income elasticity of exposure, relative productivity and vulnerability; separating them needs other data.
+
+Section 12 repeats the estimate with World Bank GDP. There $\hat\xi$ = `r sprintf("%.2f", readRDS(file.path("results", "handout_preferred_specification", "WB", "estimates.rds"))$xi_nls$estimate)`, and the difference from PWT is well within the noise. Section 13 explains the tests and the bootstrap.
+
+**Choice: ξ = `r e$xi_preferred`, equal losses in dollars per person.** The strong income interaction of Section 4 points to some scaling, and equal dollars is the value the evidence supports best:
+
+- it has the lowest AIC on the grid of Table 5, and it is the round value closest to the unconstrained estimates with both GDP sources (Section 12);
+- no method rejects it, with either GDP source (here p = `r pv(wald_p(0))` Wald, `r pv(at(0, "p_ar"))` robust, `r pv(boot_p(0))` bootstrap);
+- equal growth (ξ = 1) is rejected or at the margin with both sources, and the intermediate ξ = 0.6 is rejected with PWT. These tests reject too often (Section 13), so the evidence against ξ = 0.6 and 1 is weaker than the p-values suggest, but it is against them, not against ξ = 0;
+- it has a simple reading: a warm year costs the same dollars per person at every income, so its growth effect falls in proportion to 1/Y.
+
+Because ξ is weakly identified, the other values not rejected remain plausible. In the projections, income growth shrinks the temperature response in proportion to 1/Y, faster than with any ξ above 0.
+
+# 7. Preferred specification
+
+$$\begin{aligned}
+\Delta \ln \mathrm{GDPpc}_{it} = {} & \frac{\bar Y}{Y_{it}} \sum_{a \in \{+,-\}} \big(\tilde\beta^{a}_{T} + \tilde\gamma^{a}_{T,c}\, c_{T,it}\big)\, D^{a}_{T,it} \\
+& + \sum_{a \in \{+,-\}} \big(\beta^{a}_{P} + \gamma^{a}_{P,c}\, c_{P,it} + \gamma^{a}_{P,s}\, s_{i}\big)\, D^{a}_{P,it} \\
+& + \phi_T c_{T,it} + \phi_P c_{P,it} + \phi_y y_{it} + \kappa' C_{it} + \lambda_t + \alpha_i + \delta_i t + \eta_i t^2 + \varepsilon_{it}
+\end{aligned}$$
+
+The specification combines:
+
+- the temperature arms scaled by income with ξ = `r e$xi_preferred` (equal losses in dollars per person), interacted with the climate;
+- the precipitation arms interacted with the climate and the agricultural share;
+- climate as the 20-year trailing mean (deviations and interactions), income as the 5-year trailing mean, and the fixed long-run SD.
+
+It fits like M2b (`r e$verdicts[["Pref vs M2b"]]`; AIC `r sprintf("%+.1f", fit["Pref", "aic"] - fit["M2b", "aic"])`, BIC `r sprintf("%+.1f", fit["Pref", "bic"] - fit["M2b", "bic"])`) with two fewer terms.
+
+**Table 6. Preferred specification (ξ = `r e$xi_preferred`), two other values of ξ, and M2b (pp of growth per SD).**
+
+```{r table6}
+cf <- c(e$coefs, list(xi06 = e$coefs_scaled[["xi=0.6"]], xi1 = e$coefs_scaled[["xi=1.0"]]))
+f <- function(k) {
+  if (k %in% rownames(fit)) return(as.list(fit[k, ]))
+  r <- g[abs(g$xi - c(xi06 = 0.6, xi1 = 1)[[k]]) < 1e-9, ]
+  list(rows = fit["Pref", "rows"], countries = fit["Pref", "countries"], aic = r$aic, bic = r$bic, war2 = r$war2)
+}
+coef_table(stats::setNames(c("Pref", "xi06", "xi1", "M2b"),
+                           c(paste0("Preferred: ξ = ", e$xi_preferred, " (equal dollars)"), "ξ = 0.6",
+                             "ξ = 1 (equal growth)", "M2b: linear income")),
+           coefs = cf, fits = lapply(c("Pref", "xi06", "xi1", "M2b"), f))
+```
+
+*Clustered SEs in brackets; \*\*\* p < 0.01, \*\* p < 0.05, \* p < 0.1. The scaled coefficients are the responses at income Ȳ.*
+
+**Table 7. Responses to a one-SD year in selected countries (pp of growth; clustered SE in brackets), at their trailing climate and income in the last sample year.**
+
+```{r table7}
+r <- e$responses
+cell <- function(est, se) sprintf("%+.2f (%.2f)", est, se)
+labels <- c(M1c = "M1c: climate", M2b = "M2b: linear income", Pref = "Preferred")
+ft <- flextable(data.frame(
+  Country = countrycode::countrycode(r$iso, "iso3c", "country.name"),
+  `Income (US$)` = format(round(r$income, -1), big.mark = ","), Model = labels[r$model],
+  Warm = cell(r$warm.estimate, r$warm.se), Cold = cell(r$cold.estimate, r$cold.se),
+  Wet = cell(r$wet.estimate, r$wet.se), Dry = cell(r$dry.estimate, r$dry.se), check.names = FALSE))
+ft <- merge_v(ft, j = c("Country", "Income (US$)"))
+ft <- hline(ft, i = seq(3, nrow(r) - 1, by = 3), border = officer::fp_border(width = 0.5, color = "grey60"))
+ft <- valign(ft, j = 1:2, valign = "top")
+autofit(bold(ft, part = "header"))
+```
+
+**Reading.** Under the preferred specification a warm year is harmful everywhere. The loss shrinks with income: `r sprintf("%+.2f", r$warm.estimate[r$iso == "BDI" & r$model == "Pref"])` pp in Burundi and `r sprintf("%+.2f", r$warm.estimate[r$iso == "USA" & r$model == "Pref"])` pp in the USA, against `r sprintf("%+.2f", r$warm.estimate[r$iso == "USA" & r$model == "M2b"])` pp with the linear income term. Dry years cost the most where agriculture is large (Burundi `r sprintf("%+.2f", r$dry.estimate[r$iso == "BDI" & r$model == "Pref"])` pp).
+
+The linear share interaction has the same kind of problem on a smaller scale. For economies with little agriculture in wet climates, a dry year has a small positive, not significant, effect (Brazil and the USA, about +0.16 pp).
+
+# 8. Linear or quadratic arms?
+
+The arms enter linearly so far. The quadratic alternative squares them, with the same interactions and the same income scaling:
+
+$$f_T = \frac{\bar Y}{Y_{it}} \sum_{a \in \{+,-\}} \big(\tilde\beta^{a}_{T} + \tilde\gamma^{a}_{T,c}\, c_{T,it}\big) \big(D^{a}_{T,it}\big)^{2}, \qquad f_P = \sum_{a \in \{+,-\}} \big(\beta^{a}_{P} + \gamma^{a}_{P,c}\, c_{P,it} + \gamma^{a}_{P,s}\, s_{i}\big) \big(D^{a}_{P,it}\big)^{2}$$
+
+The two forms are not nested, so we use two tests:
+
+- a Vuong test of the two models (same number of terms);
+- Wald tests in the model with both the linear and the squared arms: either set of terms set to zero.
+
+**Table 8. Linear and quadratic arms in the preferred specification (pp of growth per SD, or per SD squared).**
+
+```{r table8}
+coef_table(c("Linear arms (preferred)" = "Pref", "Quadratic arms" = "PrefQ"), fits = fit_of(c("Pref", "PrefQ")))
+```
+
+*Clustered SEs in brackets; \*\*\* p < 0.01, \*\* p < 0.05, \* p < 0.1.*
+
+**Table 9. Wald tests in the model with both linear and squared arms (`r fit["PrefLQ", "terms"]` terms).**
+
+```{r table9}
+q <- e$tests$quadratic
+ft <- flextable(data.frame(`Null hypothesis` = rownames(q), F = sprintf("%.2f", q[, "F"]),
+                           Restrictions = as.integer(q[, "df"]), `p-value` = pv(q[, "p"]), check.names = FALSE))
+autofit(bold(ft, part = "header"))
+```
+
+**Result. With ξ = `r e$xi_preferred`, the data lean towards quadratic arms for temperature.**
+
+- In the model with both, dropping the squared terms is rejected (p = `r pv(q[1, "p"])`; for T alone p = `r pv(q[2, "p"])`), and dropping the linear terms is not (p = `r pv(q[4, "p"])`). For P neither set is needed given the other (p = `r pv(q[3, "p"])` and `r pv(q[6, "p"])`).
+- The quadratic form has the lower AIC (`r sprintf("%+.1f", fit["PrefQ", "aic"] - fit["Pref", "aic"])`) and BIC, but the Vuong test of the two is `r e$verdicts[["PrefQ vs Pref"]]`.
+- With ξ = 0.6 neither form could be rejected (p = 0.39 and 0.94).
+
+**The quadratic specification is therefore at least as well supported as the linear one**, and it changes how much the *rate* of warming matters relative to its *level*:
+
+- The deviations are measured from the trailing 20-year climate, so gradual warming shows up mostly as a moving climate. That is a level, acting through the climate interactions.
+- Only the part of warming faster than the trailing mean can follow shows up as a deviation. That is the rate.
+- With linear arms, the same total warming costs about the same however fast it arrives.
+- With quadratic arms, small deviations (slow warming) cost less and large deviations (fast warming) cost more than in the linear model.
+
+Table 10 shows this at the country level. The quadratic responses are similar or smaller at one SD, but they grow fourfold from one to two SD, against twofold for linear arms. At two SD the quadratic response is larger for warm and dry years (Burundi: warm `r sprintf("%+.2f", e$responses_q$warm.estimate[e$responses_q$iso == "BDI" & e$responses_q$size == 2 & e$responses_q$model == "PrefQ"])` against `r sprintf("%+.2f", e$responses_q$warm.estimate[e$responses_q$iso == "BDI" & e$responses_q$size == 2 & e$responses_q$model == "Pref"])` pp).
+
+**Table 10. Responses to a one- and a two-SD year, linear and quadratic arms (pp of growth; clustered SE in brackets).**
+
+```{r table10}
+rq <- e$responses_q[e$responses_q$iso %in% c("BDI", "IND", "BRA", "USA"), ]
+cell <- function(est, se) sprintf("%+.2f (%.2f)", est, se)
+ft <- flextable(data.frame(
+  Country = countrycode::countrycode(rq$iso, "iso3c", "country.name"), `Size (SD)` = rq$size,
+  Arms = ifelse(rq$model == "Pref", "linear", "quadratic"),
+  Warm = cell(rq$warm.estimate, rq$warm.se), Cold = cell(rq$cold.estimate, rq$cold.se),
+  Wet = cell(rq$wet.estimate, rq$wet.se), Dry = cell(rq$dry.estimate, rq$dry.se), check.names = FALSE))
+ft <- merge_v(ft, j = c("Country", "Size (SD)"))
+ft <- valign(ft, j = 1:2, valign = "top")
+autofit(bold(ft, part = "header"))
+```
+
+# 9. Global GDP projections: fixed or evolving income and agricultural share
+
+We project the linear preferred specification under SSP1-2.6 and SSP2-4.5, each with its own SSP. The projections use the response explorer's code.
+
+*Warming.* The global path is the FaIR median (AR6 calibration). It is scaled to each country by its CMIP6 pattern: the median slope for T, and the median relative slope times the country's long-run P for P.
+
+*Climate characteristics.* The deviations are measured against the trailing 20-year mean of the projected anomalies and divided by the country's long-run SD. The climate in the interactions moves with the same trailing mean, so climate evolves in both variants below.
+
+*Income and agricultural share.* Two variants:
+
+- **fixed**: held at the country's 2025 values;
+- **SSP**: they follow the SSP, as trailing means of the country's history continued with the SSP's relative change (5 years for income, 20 for the share).
+
+*Losses.* They accumulate from 2025 against a world without further climate change. The global loss weights the countries by the SSP's GDP of each year. It covers `r sprintf("%.0f", 100 * pr$coverage[[1]])`% of the SSP's world GDP (`r pr$n[[1]]` countries). The 95% CI comes from the clustered covariance of the coefficients.
+
+```{r fig-global, fig.width = 6.8, fig.height = 3.2, fig.cap = "Global GDP loss against no climate change, linear preferred specification. Left: income and agricultural share fixed at their 2025 values; right: following the SSP. The climate evolves in both. Bands: 95% CI of the coefficients."}
+gl <- pr$global
+gl$econ <- factor(gl$econ, levels = unname(pr$econ_labels))
+ggplot(gl, aes(year, estimate, colour = scenario, fill = scenario)) +
+  geom_hline(yintercept = 0, colour = "grey40", linewidth = 0.3) +
+  geom_ribbon(aes(ymin = low, ymax = high), alpha = 0.12, colour = NA) +
+  geom_line(linewidth = 0.8) +
+  facet_wrap(~econ) +
+  scale_colour_manual(values = c("SSP1-2.6" = "#5598e7", "SSP2-4.5" = "#eb6834"), name = NULL) +
+  scale_fill_manual(values = c("SSP1-2.6" = "#5598e7", "SSP2-4.5" = "#eb6834"), name = NULL) +
+  labs(x = NULL, y = "World GDP against no climate change (%)") +
+  theme_minimal(base_size = 9) + theme(legend.position = "top", panel.grid.minor = element_blank())
+```
+
+**Table 11. Global GDP loss (% against no climate change; 95% CI), linear preferred specification.**
+
+```{r table11}
+x <- pr$global[pr$global$year %in% c(2050, 2100), ]
+cell <- function(r) sprintf("%+.2f [%+.2f, %+.2f]", r$estimate, r$low, r$high)
+tab <- do.call(rbind, lapply(split(x, list(x$scenario, x$econ), drop = TRUE), function(r) {
+  data.frame(Scenario = r$scenario[1], `Income and share` = sub("Income and share ", "", r$econ[1]),
+             `2050` = cell(r[r$year == 2050, ]), `2100` = cell(r[r$year == 2100, ]), check.names = FALSE)
+}))
+tab <- tab[order(tab$Scenario), ]
+autofit(bold(flextable(tab), part = "header"))
+```
+
+```{r numbers-proj, include = FALSE}
+g100 <- function(s, k) pr$global$estimate[pr$global$scenario == s & pr$global$year == 2100 & pr$global$econ == pr$econ_labels[[k]]]
+```
+
+**Result.** Letting income and the share evolve reduces the global loss in 2100 from `r sprintf("%.1f", g100("SSP2-4.5", "fixed"))`% to `r sprintf("%.1f", g100("SSP2-4.5", "SSP"))`% under SSP2-4.5, and from `r sprintf("%.1f", g100("SSP1-2.6", "fixed"))`% to `r sprintf("%.1f", g100("SSP1-2.6", "SSP"))`% under SSP1-2.6. Two things drive this:
+
+- as countries grow richer, the temperature response shrinks with the income scaling ($\xi$ = `r e$xi_preferred`: in proportion to 1/Y);
+- as their agricultural share falls, the dry-year response shrinks.
+
+```{r numbers-proj-old, include = FALSE}
+pr_old <- readRDS(file.path("results", "handout_preferred_specification", "projections_xi06.rds"))
+g100_old <- function(s, k) pr_old$global$estimate[pr_old$global$scenario == s & pr_old$global$year == 2100 & pr_old$global$econ == pr_old$econ_labels[[k]]]
+c45 <- pr$countries_2100[pr$countries_2100$scenario == "SSP2-4.5" & pr$countries_2100$econ == pr$econ_labels[["fixed"]], ]
+c45 <- c45[order(c45$loss_T), ]
+```
+
+With ξ = 0.6, the previous choice, the losses were larger and less precise: `r sprintf("%.1f", g100_old("SSP2-4.5", "fixed"))`% (fixed) and `r sprintf("%.1f", g100_old("SSP2-4.5", "SSP"))`% (SSP) under SSP2-4.5 in 2100. Equal dollars concentrates the losses on the poorest countries. With income and share fixed under SSP2-4.5, temperature alone costs `r paste(sprintf("%s %.0f%%", countrycode::countrycode(c45$iso3[1:4], "iso3c", "country.name", custom_match = c(COD = "DR Congo")), c45$loss_T[1:4]), collapse = ", ")` by 2100, and less than `r sprintf("%.1f", ceiling(10 * max(abs(c45$loss_T[c45$iso3 %in% c("USA", "DEU", "FRA", "GBR", "JPN", "NOR", "CHE")]))) / 10)`% in the richest economies.
+
+Most of the damage comes from temperature. Precipitation matters mainly in the drier agricultural economies of the Sahel and West Africa (Guinea-Bissau, Gambia, Niger, Chad), and in India. In very wet climates with little agriculture it adds a small gain (Costa Rica, Colombia, Panama).
+
+```{r maps, fig.width = 7, fig.height = 3.1, fig.cap = c("GDP loss in 2100 against no climate change under SSP2-4.5, by country: impact of the temperature deviations, of the precipitation deviations, and total. Top: income and share fixed at 2025; bottom: following the SSP. Each component has its own colour scale (in %, the same for the two rows), capped at the 98th percentile of its absolute losses.", "As the previous figure, under SSP1-2.6.")}
+world <- SCEN_world <- readRDS(file.path("results", "response_explorer", "scenarios.rds"))$world
+world <- world[world$iso3 != "ATA", ]
+# `countries`: the 2100 losses to map; the colour scales come from those
+# without variability, so the maps with it are comparable.
+map_of <- function(scen, countries = pr$countries_2100) {
+  scale_ref <- pr$countries_2100[pr$countries_2100$scenario == scen, ]
+  c2 <- countries[countries$scenario == scen, ]
+  long <- do.call(rbind, lapply(c(loss_T = "Temperature", loss_P = "Precipitation", loss = "Total"), function(k) {
+    data.frame(iso3 = c2$iso3, econ = c2$econ, component = k, value = c2[[names(which(c(loss_T = "Temperature",
+      loss_P = "Precipitation", loss = "Total") == k))]])
+  }))
+  long$component <- factor(long$component, levels = c("Temperature", "Precipitation", "Total"))
+  long$econ <- factor(sub("Income and share ", "", long$econ), levels = c("fixed at 2025", "follow the SSP"))
+  grid <- expand.grid(econ = levels(long$econ), component = levels(long$component), stringsAsFactors = FALSE)
+  sfl <- do.call(rbind, lapply(seq_len(nrow(grid)), function(i) {
+    w <- world
+    v <- long[long$econ == grid$econ[i] & long$component == grid$component[i], ]
+    w$value <- v$value[match(w$iso3, v$iso3)]
+    w$econ <- grid$econ[i]
+    w$component <- grid$component[i]
+    w
+  }))
+  sfl$econ <- factor(sfl$econ, levels = levels(long$econ))
+  sfl$component <- factor(sfl$component, levels = levels(long$component))
+  # One colour scale per component (the same for the two rows), capped at the
+  # 98th percentile of its absolute losses.
+  panels <- lapply(levels(long$component), function(k) {
+    x <- sfl[sfl$component == k, ]
+    column <- c(Temperature = "loss_T", Precipitation = "loss_P", Total = "loss")[[k]]
+    limit <- stats::quantile(abs(scale_ref[[column]]), 0.98, na.rm = TRUE)
+    ggplot(x) +
+      geom_sf(aes(fill = value), colour = "white", linewidth = 0.05) +
+      facet_grid(econ ~ component, switch = "y") +
+      coord_sf(expand = FALSE, ylim = c(-6.2e6, 8.4e6)) +
+      scale_fill_gradient2(low = "#e34948", mid = "#f0efec", high = "#2a78d6", midpoint = 0,
+                           limits = c(-limit, limit), oob = scales::squish, na.value = "#d9d8d4",
+                           name = "%", breaks = scales::breaks_pretty(4)) +
+      theme_void(base_size = 8) +
+      theme(legend.position = "bottom", legend.key.width = grid::unit(0.9, "cm"),
+            legend.key.height = grid::unit(0.25, "cm"), strip.text = element_text(size = 8),
+            strip.text.y.left = if (k == "Temperature") element_text(angle = 90, size = 8) else element_blank())
+  })
+  patchwork::wrap_plots(panels, nrow = 1)
+}
+print(map_of("SSP2-4.5"))
+print(map_of("SSP1-2.6"))
+```
+
+# 10. Termination of geoengineering under SSP2-4.5: quadratic specification
+
+Perfect geoengineering holds global warming at `r pr$held` °C from 2025, as the response explorer's termination paths do. After termination in 2050 or 2070, the temperature catches up with the SSP2-4.5 path with a characteristic time of `r pr$tau` years:
+
+$$G(t) = B(t) - \max\big(B(T) - H, 0\big)\, e^{-(t - T)/\tau}$$
+
+Here $B$ is the SSP2-4.5 path, $H$ the held level and $T$ the termination year. We use the quadratic specification, since that is where the rate of warming matters, with income and share fixed at 2025 or following SSP2. The linear specification is reported for comparison.
+
+```{r fig-gmt, fig.width = 6.5, fig.height = 2.4, fig.cap = "Global warming above 1850–1900 under SSP2-4.5 (FaIR median), with geoengineering sustained at 1.5 °C and terminated in 2050 or 2070."}
+cols <- c("No geoengineering (SSP2-4.5)" = "#52514e", "Geoengineering sustained at 1.5 C" = "#2a78d6",
+          "Terminated in 2050" = "#f0a35e", "Terminated in 2070" = "#c4511a")
+gp <- pr$gmt_paths[pr$gmt_paths$year >= 2000, ]
+gp$path <- factor(gp$path, levels = names(cols))
+ggplot(gp, aes(year, warming, colour = path)) +
+  geom_line(linewidth = 0.8) +
+  scale_colour_manual(values = cols, name = NULL) +
+  labs(x = NULL, y = "Warming (°C)") +
+  theme_minimal(base_size = 9) + theme(legend.position = "right", panel.grid.minor = element_blank())
+```
+
+```{r fig-termination, fig.width = 6.8, fig.height = 3.2, fig.cap = "Global GDP loss against no climate change under SSP2-4.5 with termination of geoengineering, quadratic specification. Left: income and agricultural share fixed at 2025; right: following SSP2. Bands: 95% CI of the coefficients."}
+tq <- pr$termination[pr$termination$model == "Quadratic arms", ]
+tq$path <- factor(tq$path, levels = names(cols))
+tq$econ <- factor(tq$econ, levels = unname(pr$econ_labels))
+ggplot(tq, aes(year, estimate, colour = path, fill = path)) +
+  geom_hline(yintercept = 0, colour = "grey40", linewidth = 0.3) +
+  geom_ribbon(aes(ymin = low, ymax = high), alpha = 0.08, colour = NA) +
+  geom_line(linewidth = 0.8) +
+  facet_wrap(~econ) +
+  scale_colour_manual(values = cols, name = NULL) +
+  scale_fill_manual(values = cols, name = NULL) +
+  labs(x = NULL, y = "World GDP against no climate change (%)") +
+  theme_minimal(base_size = 9) +
+  theme(legend.position = "top", panel.grid.minor = element_blank()) +
+  guides(colour = guide_legend(nrow = 2), fill = guide_legend(nrow = 2))
+```
+
+**Table 12. Global GDP loss with termination of geoengineering under SSP2-4.5 (% against no climate change; 95% CI).**
+
+```{r table12}
+tt <- pr$termination[pr$termination$year %in% c(2050, 2070, 2100), ]
+cell <- function(r) sprintf("%+.2f [%+.2f, %+.2f]", r$estimate, r$low, r$high)
+tab <- do.call(rbind, lapply(split(tt, list(tt$model, tt$econ, tt$path), drop = TRUE), function(r) {
+  data.frame(Arms = sub(" arms", "", r$model[1]), `Income and share` = sub("Income and share ", "", r$econ[1]),
+             Path = r$path[1], `2050` = cell(r[r$year == 2050, ]), `2070` = cell(r[r$year == 2070, ]),
+             `2100` = cell(r[r$year == 2100, ]), check.names = FALSE)
+}))
+tab <- tab[order(tab$Arms != "Quadratic", tab$`Income and share`, match(tab$Path, names(cols))), ]
+ft <- merge_v(flextable(tab), j = c("Arms", "Income and share"))
+ft <- valign(ft, j = 1:2, valign = "top")
+autofit(bold(ft, part = "header"))
+```
+
+```{r numbers-term, include = FALSE}
+tv <- function(model, econ, path, year) {
+  x <- pr$termination
+  x$estimate[x$model == model & x$econ == pr$econ_labels[[econ]] & x$path == path & x$year == year]
+}
+```
+
+**Result.** With quadratic arms, termination is costly because of how fast the catch-up is.
+
+- **Terminated in 2050**, with income and share fixed: the loss reaches `r sprintf("%.1f", tv("Quadratic arms", "fixed", "Terminated in 2050", 2070))`% by 2070. Without geoengineering it would be `r sprintf("%.1f", tv("Quadratic arms", "fixed", "No geoengineering (SSP2-4.5)", 2070))`%, and with sustained geoengineering `r sprintf("%.1f", tv("Quadratic arms", "fixed", "Geoengineering sustained at 1.5 C", 2070))`%.
+- **By 2100** the loss is `r sprintf("%.1f", tv("Quadratic arms", "fixed", "Terminated in 2050", 2100))`% after termination in 2050 and `r sprintf("%.1f", tv("Quadratic arms", "fixed", "Terminated in 2070", 2100))`% after termination in 2070. Both are above the `r sprintf("%.1f", tv("Quadratic arms", "fixed", "No geoengineering (SSP2-4.5)", 2100))`% of gradual warming to the same temperature. The later the termination, the larger the jump and the cost.
+- **With income and share following SSP2**, all losses are much smaller and termination adds little: `r sprintf("%.1f", tv("Quadratic arms", "SSP", "Terminated in 2070", 2100))`% in 2100 after termination in 2070, against `r sprintf("%.1f", tv("Quadratic arms", "SSP", "No geoengineering (SSP2-4.5)", 2100))`% without geoengineering. With equal-dollar scaling, incomes have grown enough by the catch-up to shrink the response.
+- **With linear arms**, termination costs about the same as never deploying: `r sprintf("%.1f", tv("Linear arms", "fixed", "Terminated in 2070", 2100))`% against `r sprintf("%.1f", tv("Linear arms", "fixed", "No geoengineering (SSP2-4.5)", 2100))`% in 2100, with income and share fixed. Only the level of warming matters in the long run.
+
+The choice between the two forms, which the data cannot make, decides whether termination shocks matter, as long as the climate is the forced signal alone. Section 11 adds natural variability.
+
+# 11. Natural variability
+
+So far each country's climate in the projections is the forced signal alone: a smooth path with no year-to-year variability. The real climate varies around that path. The noise averages to zero, but the response is not linear in the anomaly, so it changes the expected loss:
+
+- the kink between the warm and cold (wet and dry) arms;
+- the squared arms;
+- the trailing climate in the interactions, which moves with the noise.
+
+*Noise.* For each country and $v \in \{T, P\}$, the noise pool is the annual series less the country's own quadratic trend over `r e$horizon[1]`–`r e$horizon[2]`:
+
+$$\nu_{v,i\tau} = v_{i\tau} - (\hat a_{v,i} + \hat b_{v,i} \tau + \hat c_{v,i} \tau^2), \qquad \tau = `r e$horizon[1]`, \dots, `r e$horizon[2]`$$
+
+A noise path draws a historical year $\tau_k$ for each projection year $k$. The anomaly is the forced signal $S_{v,ik}$ plus the noise of that year, from 1994 so that the trailing means of 2025 already contain noise. The counterfactual has the noise alone. The loss is the difference:
+
+$$L_i(t) = \exp\Big(\sum_{k=2025}^{t} \big[\, g_i\big(S_{ik} + \nu_{i\tau_k}\big) - g_i\big(\nu_{i\tau_k}\big) \big]\Big) - 1$$
+
+Here $g_i$ is the growth effect of the specification, including the trailing mean, the deviation and the interactions. The same noise path enters both terms, so the noise affects the loss only through the non-linearity of $g_i$.
+
+The years can be drawn in three ways:
+
+- **independently** for each country;
+- **jointly**: the same calendar year for every country. This keeps the spatial correlation of the weather, which is local for P and both local and global for T;
+- **jointly in 5-year blocks** of consecutive years, which also keeps their persistence.
+
+We use `r format(pr$n_paths, big.mark = ",")` noise paths. Each path is paired with a draw of the coefficients, so the 95% CI includes both sources of uncertainty. The estimate is the mean over the paths at the estimated coefficients. The variability range is the 2.5–97.5% range of the paths alone, at the estimated coefficients. `r pr$n_noise` countries have the complete historical climate.
+
+**Table 13. Global GDP loss under SSP2-4.5 with income and share fixed at 2025, by way of drawing the noise (% against no climate change; 95% CI, then the range over the noise paths). T and P: the losses of each variable alone in 2100.**
+
+```{r table13}
+nv <- pr$noise_versions
+nv$noise <- factor(nv$noise, levels = c("none", "iid", "joint", "blocks"),
+                   labels = c("None (forced signal)", "Independent years", "Joint years", "Joint 5-year blocks"))
+cell <- function(r) {
+  out <- sprintf("%+.2f [%+.2f, %+.2f]", r$estimate, r$low, r$high)
+  ifelse(is.na(r$noise_low), out, paste0(out, "\n(", sprintf("%+.2f, %+.2f", r$noise_low, r$noise_high), ")"))
+}
+tab <- do.call(rbind, lapply(split(nv, list(nv$model, nv$noise), drop = TRUE), function(r) {
+  r100 <- r[r$year == 2100, ]
+  data.frame(Arms = sub(" arms", "", r$model[1]), Noise = as.character(r$noise[1]), noise_order = as.integer(r$noise[1]),
+             `2050` = cell(r[r$year == 2050, ]), `2100` = cell(r100),
+             `T, 2100` = sprintf("%+.2f", r100$T), `P, 2100` = sprintf("%+.2f", r100$P), check.names = FALSE)
+}))
+tab <- tab[order(tab$Arms, tab$noise_order), names(tab) != "noise_order"]
+ft <- merge_v(flextable(tab), j = "Arms")
+ft <- valign(ft, j = 1, valign = "top")
+autofit(bold(ft, part = "header"))
+```
+
+```{r numbers-noise, include = FALSE}
+nvv <- function(model, noise, year, column = "estimate") {
+  nv0 <- pr$noise_versions
+  nv0[[column]][nv0$model == model & nv0$noise == noise & nv0$year == year]
+}
+cf <- function(k, term) 100 * e$coefs[[k]]$estimate[e$coefs[[k]]$term == term]
+```
+
+**Result. Variability changes the loss, but how it is drawn does not.**
+
+- **The way of drawing barely matters.** Spatial correlation and persistence leave the mean loss unchanged (each country still draws from its own distribution). Joint draws widen the range over the noise paths, but only slightly: the same noise is in the warming run and in the counterfactual, so even a run of globally hot years mostly cancels out. Coefficient uncertainty dominates the CI.
+- **With linear arms the loss is smaller**: `r sprintf("%.1f", nvv("Linear arms", "blocks", 2100))`% in 2100 against `r sprintf("%.1f", nvv("Linear arms", "none", 2100))`% without noise. Without noise, warming is a positive deviation and hits only the warm arm (`r sprintf("%+.2f", cf("Pref", "pTM:r"))` pp per SD). With noise, a small shift of the climate moves deviations on both sides of zero, so its effect is a probability-weighted mix of the warm arm and the cold arm. The cold arm is small and not significant (`r sprintf("%+.2f", cf("Pref", "nTM:r"))` pp per SD of cold). A year shifted out of it changes growth by minus that amount, so near zero the slope is about the average of `r sprintf("%+.2f", cf("Pref", "pTM:r"))` and `r sprintf("%+.2f", -cf("Pref", "nTM:r"))`, much less steep than the warm arm alone. Precipitation turns from a loss to a small gain (`r sprintf("%+.2f", nvv("Linear arms", "blocks", 2100, "P"))`%). Without noise a wetter climate only adds wet years. With noise it also removes dry years, which hurt more (`r sprintf("%+.2f", cf("Pref", "nRR"))` against `r sprintf("%+.2f", cf("Pref", "pRR"))` pp per SD).
+- **With quadratic arms the loss is larger**: `r sprintf("%.1f", nvv("Quadratic arms", "blocks", 2100))`% against `r sprintf("%.1f", nvv("Quadratic arms", "none", 2100))`%. Without noise a slow shift $s$ costs only $s^2$, almost nothing. With noise, $E[(x+s)_+^2] - E[x_+^2] \approx 2s\,E[x_+]$: the shift costs in proportion to its size, as in a linear model.
+- **The two forms now give similar losses** (`r sprintf("%.1f", nvv("Linear arms", "blocks", 2100))`% and `r sprintf("%.1f", nvv("Quadratic arms", "blocks", 2100))`% in 2100, against `r sprintf("%.1f", nvv("Linear arms", "none", 2100))`% and `r sprintf("%.1f", nvv("Quadratic arms", "none", 2100))`% without noise). Natural variability smooths both responses around zero, so the choice of form, which the data cannot make, matters much less once the climate is realistic.
+
+We use joint 5-year blocks below, the most realistic of the three.
+
+```{r fig-global-noise, fig.width = 6.8, fig.height = 3.2, fig.cap = "Global GDP loss against no climate change, linear preferred specification, with natural variability (joint 5-year blocks; solid) and without it (dashed, as in Section 9). Left: income and agricultural share fixed at 2025; right: following the SSP. Bands: 95% of the coefficient draws, each with its noise path."}
+gn <- rbind(cbind(pr$global_noise[, c("scenario", "econ", "year", "estimate", "low", "high")], climate = "with variability"),
+            cbind(pr$global[, c("scenario", "econ", "year", "estimate", "low", "high")], climate = "forced signal only"))
+gn$econ <- factor(gn$econ, levels = unname(pr$econ_labels))
+gn$climate <- factor(gn$climate, levels = c("with variability", "forced signal only"))
+ggplot(gn, aes(year, estimate, colour = scenario, fill = scenario, linetype = climate)) +
+  geom_hline(yintercept = 0, colour = "grey40", linewidth = 0.3) +
+  geom_ribbon(data = gn[gn$climate == "with variability", ], aes(ymin = low, ymax = high), alpha = 0.12, colour = NA) +
+  geom_line(linewidth = 0.8) +
+  facet_wrap(~econ) +
+  scale_colour_manual(values = c("SSP1-2.6" = "#5598e7", "SSP2-4.5" = "#eb6834"), name = NULL) +
+  scale_fill_manual(values = c("SSP1-2.6" = "#5598e7", "SSP2-4.5" = "#eb6834"), name = NULL) +
+  scale_linetype_manual(values = c("with variability" = "solid", "forced signal only" = "22"), name = NULL) +
+  labs(x = NULL, y = "World GDP against no climate change (%)") +
+  theme_minimal(base_size = 9) + theme(legend.position = "top", panel.grid.minor = element_blank())
+```
+
+**Table 14. Global GDP loss with natural variability (joint 5-year blocks), linear preferred specification (% against no climate change; 95% CI, then the range over the noise paths).**
+
+```{r table14}
+x <- pr$global_noise[pr$global_noise$year %in% c(2050, 2100), ]
+tab <- do.call(rbind, lapply(split(x, list(x$scenario, x$econ), drop = TRUE), function(r) {
+  data.frame(Scenario = r$scenario[1], `Income and share` = sub("Income and share ", "", r$econ[1]),
+             `2050` = cell(r[r$year == 2050, ]), `2100` = cell(r[r$year == 2100, ]), check.names = FALSE)
+}))
+tab <- tab[order(tab$Scenario), ]
+autofit(bold(flextable(tab), part = "header"))
+```
+
+```{r maps-noise, fig.width = 7, fig.height = 3.1, fig.cap = "GDP loss in 2100 against no climate change under SSP2-4.5, by country, with natural variability (joint 5-year blocks; mean over the noise paths): impact of the temperature deviations, of the precipitation deviations, and total. Top: income and share fixed at 2025; bottom: following the SSP. Colour scales as in the maps of Section 9, without variability."}
+print(map_of("SSP2-4.5", pr$countries_2100_noise))
+```
+
+```{r numbers-term-noise, include = FALSE}
+tvn <- function(model, econ, path, year) {
+  x <- pr$termination_noise
+  x$estimate[x$model == model & x$econ == pr$econ_labels[[econ]] & x$path == path & x$year == year]
+}
+```
+
+*Termination with variability.* The next figure and Table 15 repeat Section 10 with the same noise for every warming path.
+
+```{r fig-termination-noise, fig.width = 6.8, fig.height = 3.2, fig.cap = "Global GDP loss against no climate change under SSP2-4.5 with termination of geoengineering, quadratic specification, as in Section 10, with natural variability (joint 5-year blocks). Left: income and agricultural share fixed at 2025; right: following SSP2. Bands: 95% of the coefficient draws, each with its noise path."}
+tq <- pr$termination_noise[pr$termination_noise$model == "Quadratic arms", ]
+tq$path <- factor(tq$path, levels = names(cols))
+tq$econ <- factor(tq$econ, levels = unname(pr$econ_labels))
+ggplot(tq, aes(year, estimate, colour = path, fill = path)) +
+  geom_hline(yintercept = 0, colour = "grey40", linewidth = 0.3) +
+  geom_ribbon(aes(ymin = low, ymax = high), alpha = 0.08, colour = NA) +
+  geom_line(linewidth = 0.8) +
+  facet_wrap(~econ) +
+  scale_colour_manual(values = cols, name = NULL) +
+  scale_fill_manual(values = cols, name = NULL) +
+  labs(x = NULL, y = "World GDP against no climate change (%)") +
+  theme_minimal(base_size = 9) +
+  theme(legend.position = "top", panel.grid.minor = element_blank()) +
+  guides(colour = guide_legend(nrow = 2), fill = guide_legend(nrow = 2))
+```
+
+**Table 15. Global GDP loss with termination of geoengineering under SSP2-4.5, with natural variability (joint 5-year blocks; % against no climate change; 95% CI, then the range over the noise paths).**
+
+```{r table15}
+tt <- pr$termination_noise[pr$termination_noise$year %in% c(2050, 2070, 2100), ]
+tab <- do.call(rbind, lapply(split(tt, list(tt$model, tt$econ, tt$path), drop = TRUE), function(r) {
+  data.frame(Arms = sub(" arms", "", r$model[1]), `Income and share` = sub("Income and share ", "", r$econ[1]),
+             Path = r$path[1], `2050` = cell(r[r$year == 2050, ]), `2070` = cell(r[r$year == 2070, ]),
+             `2100` = cell(r[r$year == 2100, ]), check.names = FALSE)
+}))
+tab <- tab[order(tab$Arms != "Quadratic", tab$`Income and share`, match(tab$Path, names(cols))), ]
+ft <- merge_v(flextable(tab), j = c("Arms", "Income and share"))
+ft <- valign(ft, j = 1:2, valign = "top")
+autofit(bold(ft, part = "header"))
+```
+
+```{r numbers-term-gap, include = FALSE}
+# Extra loss in 2100 of termination in `year` over no geoengineering (pp).
+gap <- function(model, econ, year, noise = TRUE) {
+  f <- if (noise) tvn else tv
+  f(model, econ, paste("Terminated in", year), 2100) - f(model, econ, "No geoengineering (SSP2-4.5)", 2100)
+}
+```
+
+**Result. With variability, termination costs more than never deploying under both forms, and the gap between the forms narrows.**
+
+- **Quadratic arms, income and share fixed:** termination in 2070 costs `r sprintf("%.1f", tvn("Quadratic arms", "fixed", "Terminated in 2070", 2100))`% by 2100, against `r sprintf("%.1f", tvn("Quadratic arms", "fixed", "No geoengineering (SSP2-4.5)", 2100))`% without geoengineering. That is `r sprintf("%.1f", -gap("Quadratic arms", "fixed", 2070))` pp more, against `r sprintf("%.1f", -gap("Quadratic arms", "fixed", 2070, FALSE))` pp without variability. Termination in 2050 costs `r sprintf("%.1f", -gap("Quadratic arms", "fixed", 2050))` pp more (`r sprintf("%.1f", -gap("Quadratic arms", "fixed", 2050, FALSE))` pp without variability). The extra cost of a late termination survives, but it is smaller, because the gradual path is now also costly.
+- **Linear arms, income and share fixed:** termination in 2070 now costs `r sprintf("%.1f", -gap("Linear arms", "fixed", 2070))` pp more than never deploying (`r sprintf("%.1f", tvn("Linear arms", "fixed", "Terminated in 2070", 2100))`% against `r sprintf("%.1f", tvn("Linear arms", "fixed", "No geoengineering (SSP2-4.5)", 2100))`%). Without variability the two were the same. With noise, the expected linear-arm response is convex in the shift: a shift within the noise has about the average slope of the two arms, and a shift beyond it the full warm-arm slope. A fast catch-up therefore costs more than gradual warming, so the rate of warming matters with linear arms too.
+- **With income and share following SSP2**, termination in 2070 makes no difference by 2100 with either form (`r sprintf("%+.1f", gap("Quadratic arms", "SSP", 2070))` pp of GDP against never deploying with quadratic arms, `r sprintf("%+.1f", gap("Linear arms", "SSP", 2070))` pp with linear arms): growing incomes shrink the response before the catch-up arrives.
+- **Sustained geoengineering:** the loss by 2100 is `r sprintf("%.1f", tvn("Quadratic arms", "fixed", "Geoengineering sustained at 1.5 C", 2100))`% (quadratic) and `r sprintf("%.1f", tvn("Linear arms", "fixed", "Geoengineering sustained at 1.5 C", 2100))`% (linear), against `r sprintf("%.1f", tv("Quadratic arms", "fixed", "Geoengineering sustained at 1.5 C", 2100))`% and `r sprintf("%.1f", tv("Linear arms", "fixed", "Geoengineering sustained at 1.5 C", 2100))`% without variability.
+
+The conclusion of Section 10 holds in a weaker form. With realistic variability, termination shocks matter under both forms. How much they matter still depends on the form, by a factor of about `r sprintf("%.0f", gap("Quadratic arms", "fixed", 2070) / gap("Linear arms", "fixed", 2070))` for termination in 2070 with income and share fixed.
+
+# 12. Robustness of ξ: World Bank GDP
+
+```{r wb-setup, include = FALSE}
+base_dir <- file.path("results", "handout_preferred_specification")
+wbe <- readRDS(file.path(base_dir, "WB", "estimates.rds"))
+pce <- readRDS(file.path(base_dir, "PWT_common", "estimates.rds"))
+wce <- readRDS(file.path(base_dir, "WB_common", "estimates.rds"))
+gr <- src$growth
+lv <- src$levels
+dx <- wce$xi_nls$boot_draws - pce$xi_nls$boot_draws
+sw <- pce$xi_nls$swaps
+pct <- function(x) sprintf("%.0f%%", 100 * x)
+name_of <- function(iso) countrycode::countrycode(iso, "iso3c", "country.name")
+```
+
+The estimate of ξ is repeated with World Bank GDP per capita (WDI NY.GDP.PCAP.KD, constant 2015 US\$). Everything else is unchanged: ERA5 weather, the same outliers (the PWT tails of Section 1), the same specification, the same search over ξ and the same bootstrap.
+
+**How the two sources differ: growth.** Both series are real growth at constant national prices. Their gap therefore does not come from PPP against exchange rates, but from the national-accounts sources, vintages, splices and population series. On the `r format(gr$rows, big.mark = ",")` country-years both cover, the growth rates correlate at `r sprintf("%.2f", gr$cor)`. In most years they agree (median absolute gap `r sprintf("%.2f", gr$median_abs)` pp), but the gap exceeds 2 pp in `r pct(gr$over[["2"]])` of them (SD of the gap `r sprintf("%.1f", gr$sd_gap)` pp, against `r sprintf("%.1f", gr$sd_pwt)` pp for growth itself).
+
+**Table 16. Gap between PWT and World Bank growth (pp), by group: SD, mean absolute gap and share of years with a gap above 2 pp.**
+
+```{r table16}
+lab_rows <- function(x, group, label) {
+  data.frame(Group = group, ` ` = label, Rows = x$rows, SD = sprintf("%.2f", x$sd), `Mean |gap|` = sprintf("%.2f", x$mean_abs),
+             `Gap > 2 pp` = pct(x$over_2pp), check.names = FALSE)
+}
+co <- gr$conflict_outlier
+tab <- rbind(
+  lab_rows(gr$decade, "Decade", gr$decade$decade),
+  lab_rows(gr$region, "Region", gr$region$region),
+  lab_rows(gr$quintile, "WB income quintile", paste0("Q", gr$quintile$quintile, c(" (poorest)", "", "", "", " (richest)"))),
+  lab_rows(co, "Year type", paste0(ifelse(co$conflict, "conflict", "no conflict"), ", ",
+                                   ifelse(co$outlier_5, "dropped outlier", "kept"))))
+ft <- merge_v(flextable(tab), j = "Group")
+ft <- valign(ft, j = 1, valign = "top")
+autofit(bold(ft, part = "header"))
+```
+
+- **Mostly noise.** Country effects explain `r pct(gr$r2[["country"]])` of the gap and year effects `r pct(gr$r2[["year"]])`. Its first-order autocorrelation is `r sprintf("%.2f", gr$ar1)`, so it does not persist.
+- **Where statistics are weaker.** The gap is larger before 2000, in Sub-Saharan Africa and the Middle East, in the poorest countries, and in conflict and outlier years. In a regression of the absolute gap, outlier years add `r sprintf("%.1f", gr$abs_gap_model["outlier_5TRUE", 1])` pp and years after 2000 `r sprintf("%+.1f", gr$abs_gap_model["I(year >= 2000)TRUE", 1])` pp; income adds nothing (p = `r pv(gr$abs_gap_model["inc_level_wb", 4])`) once those are controlled.
+- **A few countries drift**, with PWT growing persistently faster or slower than WB: `r paste(sprintf("%s (%+.1f pp a year)", name_of(gr$drift$GID_0[1:5]), gr$drift$mean[1:5]), collapse = ", ")`.
+- **The gap does not follow the weather.** Regressed on the four weather arms with the handout's fixed effects and trends, it gives p = `r pv(src$weather$p_gap)` jointly. The warm arm is `r sprintf("%+.2f", src$weather$coef["pTM", "PWT"])` pp per SD with PWT growth and `r sprintf("%+.2f", src$weather$coef["pTM", "WB"])` with WB growth. The gap is noise in the outcome: it widens the SEs but does not bias the weather coefficients.
+
+**How the two sources differ: income levels.** Here PPP against exchange rates matters, and systematically (the Penn effect).
+
+**Table 17. Trailing income by WB income quintile: WB (2015 US\$, exchange rates), PWT (2021 PPP US\$), and their ratio.**
+
+```{r table17}
+q <- lv$quintile
+autofit(bold(flextable(data.frame(Quintile = paste0("Q", q$quintile), `WB (US$)` = format(round(q$mer, -1), big.mark = ","),
+                                  `PWT (PPP US$)` = format(round(q$ppp, -1), big.mark = ","),
+                                  `PPP / WB` = sprintf("%.2f", q$ratio), check.names = FALSE)), part = "header"))
+```
+
+The log ratio falls by `r sprintf("%.2f", -lv$slope)` per log point of WB income. Ranks barely change (Spearman `r sprintf("%.2f", lv$rank_cor)`), and the ratio hardly moves within a country (SD `r sprintf("%.2f", lv$sd_within)` within, `r sprintf("%.2f", lv$sd_between)` between). So log income is more spread out with WB data, which changes the scale of ξ: with a spread larger by a factor $k$, the same scaling has $1 - \xi$ smaller by $k$.
+
+**ξ with World Bank GDP.** The sample has `r format(wbe$sample[["rows"]], big.mark = ",")` country-years and `r wbe$sample[["countries"]]` countries.
+
+**Table 18. Nonlinear least-squares estimate of ξ with World Bank GDP: $\hat\xi$ = `r sprintf("%.2f", wbe$xi_nls$estimate)` (Wald SE `r sprintf("%.2f", wbe$xi_nls$wald[["se"]])`, bootstrap SE `r sprintf("%.2f", wbe$xi_nls$boot[["se"]])`).**
+
+```{r table18}
+autofit(bold(flextable(xi_table(wbe, pv)), part = "header"))
+```
+
+```{r fig-xi-wb, fig.width = 6.5, fig.height = 5.4, fig.cap = "As the figure of Section 6, with World Bank GDP. Dashed line: the estimate; grey lines: ξ = 0, 0.6 and 1."}
+xi_figure(wbe)
+```
+
+**Same rows, different source.** The two samples differ: `r format(e$sample[["rows"]] - pce$sample[["rows"]], big.mark = ",")` PWT rows have no WB data, and WB covers more countries. To isolate the source, both are re-estimated on the `r format(pce$sample[["rows"]], big.mark = ",")` rows they share (`r pce$sample[["countries"]]` countries). There the weather, climate, share, controls and trends are identical; only the growth outcome and the trailing income differ. The two bootstraps use the same country draws, so the difference in ξ can be bootstrapped draw by draw.
+
+**Table 19. ξ by GDP source and sample. p-values: Wald / robust test / bootstrap.**
+
+```{r table19}
+runs <- list(`PWT, own rows` = e, `PWT, common rows` = pce, `WB, common rows` = wce, `WB, own rows` = wbe)
+autofit(bold(flextable(xi_compare_table(runs, pv)), part = "header"))
+```
+
+```{r fig-xi-common, fig.width = 6.5, fig.height = 5.4, fig.cap = "PWT and World Bank GDP on the same rows. Top: profiles of the fit; middle: bootstrap estimates (the same country draws for both); bottom: the difference in ξ, draw by draw. Dashed lines: the estimates."}
+xi_compare_figure(pce, wce, c("PWT", "WB"))
+```
+
+**Table 20. ξ on the common rows with the outcome and the income of the scaling taken from either source.**
+
+```{r table20}
+autofit(bold(flextable(data.frame(Outcome = sub(",.*", "", names(sw$xi)), `Income in the scaling` = sub(".*, ", "", names(sw$xi)),
+                                  `ξ̂` = sprintf("%.2f", sw$xi), `Change from PWT` = sprintf("%+.2f", sw$xi - sw$xi[[1]]),
+                                  check.names = FALSE)), part = "header"))
+```
+
+**Result.**
+
+- **The picture is the same with WB data.** ξ is weakly identified (bootstrap SE `r sprintf("%.2f", wbe$xi_nls$boot[["se"]])`), ξ = 0 is never rejected, and ξ = 1 is rejected by the Wald test with both sources, and at the margin by the robust test. ξ = 0.6 is rejected with PWT, not with WB.
+- **The source, not the sample, moves the estimate.** On the same rows, $\hat\xi$ is `r sprintf("%.2f", pce$xi_nls$estimate)` with PWT and `r sprintf("%.2f", wce$xi_nls$estimate)` with WB. Changing the sample moves it by only `r sprintf("%+.2f", pce$xi_nls$estimate - e$xi_nls$estimate)` (PWT) and `r sprintf("%+.2f", wbe$xi_nls$estimate - wce$xi_nls$estimate)` (WB).
+- **Half outcome, half income.** WB growth alone moves ξ by `r sprintf("%+.2f", sw$xi[[2]] - sw$xi[[1]])`, WB income alone by `r sprintf("%+.2f", sw$xi[[3]] - sw$xi[[1]])`, and together by `r sprintf("%+.2f", sw$xi[[4]] - sw$xi[[1]])`. WB log income is `r sprintf("%.2f", sw$income_spread)` times as spread out as PWT's on these rows, which alone would move ξ by about `r sprintf("%+.2f", (1 - sw$xi[[1]]) * (1 - 1 / sw$income_spread))`. The rest comes from which countries are richer under each source.
+- **The difference is not significant.** The paired bootstrap gives `r sprintf("%+.2f", wce$xi_nls$estimate - pce$xi_nls$estimate)` with SE `r sprintf("%.2f", sd(dx))` (95% `r sprintf("[%.1f, %.1f]", quantile(dx, 0.025), quantile(dx, 0.975))`, p = `r pv(min(1, 2 * min(mean(dx <= 0), mean(dx >= 0))))`). The draws correlate at only `r sprintf("%.2f", cor(pce$xi_nls$boot_draws, wce$xi_nls$boot_draws))` across sources: in the same resample, the two sources pull ξ to different places, as expected when it is weakly identified.
+- **The income dependence itself is clearer with PWT.** The T × income interaction of M2 has p = `r pv(e$tests$interactions["T income", "p"])` with PWT and `r pv(wbe$tests$interactions["T income", "p"])` with WB (`r pv(pce$tests$interactions["T income", "p"])` and `r pv(wce$tests$interactions["T income", "p"])` on the common rows).
+
+# 13. Methods: the tests of ξ and the bootstrap
+
+Every test of ξ = ξ₀ starts from the same step: with ξ fixed at ξ₀, the model is linear and is estimated by the usual fixed-effects regression. The tests differ in what they add to it.
+
+**Score test (C(α); Table 5, orange dashed line in the figures).** It adds one regressor, the derivative of the fitted temperature part in ξ, $h_{it} = y_{it}\, (\bar Y / Y_{it})^{1-\xi_0} \hat f_T$, and tests its coefficient with a clustered t. It asks whether moving ξ slightly away from ξ₀ would improve the fit: it tests the *slope* of the profile.
+
+- It does not reject wherever the slope is zero, at maxima of the profile as well as at its minimum (with PWT near ξ = 2.5, where the fit is about 50 AIC points worse than at $\hat\xi$).
+- $h$ contains the estimated response $\hat f_T$. Where the response is small, $h$ carries little information and the test's distribution is unreliable.
+
+**Robust test (Anderson–Rubin type; blue line).** It adds $y_{it}$ times each of the four scaled temperature terms (warm, cold, and each times the climate) as free regressors, and tests them jointly with a clustered F. It asks whether any income gradient is left in the temperature response after scaling it with ξ₀.
+
+- If ξ₀ is true, these terms are exactly zero whatever the size of the temperature response, so the test keeps its size where the response is small (the analogue of the Anderson–Rubin test with weak instruments).
+- It has less power: four restrictions instead of one. Far from ξ = 1 it has none, because the scaling puts almost all the weight on a few of the poorest (ξ ≪ 0) or richest (ξ ≫ 1) countries, where $y$ barely varies. Its p-value near 1 at ξ = −4 says that the test cannot see anything there, not that ξ = −4 fits: the profile is 40 AIC points worse.
+
+**Wald test.** The clustered covariance of the full nonlinear model (from the Gauss–Newton regression at $\hat\xi$). It is valid when ξ is well identified, which here it is not, so its interval is too narrow.
+
+**Country bootstrap.** A nonparametric pairs bootstrap by cluster:
+
+- `r e$xi_nls$boot[["reps"]]` replications; each draws `r e$sample[["countries"]]` countries with replacement and keeps all the years of each, preserving the serial correlation within countries;
+- a country drawn more than once enters as separate countries, each with its own fixed effect and trends;
+- in each replication ξ is re-estimated by profile NLS as in the main estimate (a grid over [−4, 4] in steps of 0.5, then a continuous search), so the fixed effects, trends and all other coefficients are re-estimated too;
+- SE = SD of the estimates; 95% interval = 2.5–97.5% percentiles; p-value of ξ₀ = twice the smaller share of estimates on either side of ξ₀;
+- the same seed and countries give the same draws for PWT and WB on the common rows, so their difference is a paired bootstrap.
+
+Its limits come from the weak identification: the percentile interval of a weakly identified estimator has no guaranteed coverage, and estimates beyond the search bounds are stacked at ±4, so the lower end of its interval is "−4 or below".
+
+**Would a sign change with income bias the tests?** The scaled form cannot change sign with income: every country loses from a warm year, less if richer. If the truth were the linear income interaction of M2b, where rich countries gain (Section 5), the scaled model would be misspecified. A Monte Carlo checks what the procedure does then. Samples are generated from the fitted M2b (its fitted values plus its residuals times a random sign per country), and ξ is estimated and tested in each. As a check of size, samples are also generated from the scaled model with ξ = 0.6, where the robust test of ξ = 0.6 should reject 5% of the time.
+
+```{r mc-numbers, include = FALSE}
+mc <- readRDS(file.path(base_dir, "xi_montecarlo.rds"))
+mcs <- function(k) {
+  x <- mc[[k]]
+  data.frame(`Data generated by` = k, Samples = nrow(x),
+             `ξ̂: median [IQR]` = sprintf("%.2f [%.2f, %.2f]", median(x[, "xi"]), quantile(x[, "xi"], 0.25),
+                                       quantile(x[, "xi"], 0.75)),
+             `At −4` = pct(mean(x[, "xi"] <= -4)),
+             `Rejects ξ = 0` = pct(mean(x[, "p0"] < 0.05)), `Rejects ξ = 0.6` = pct(mean(x[, "p06"] < 0.05)),
+             `Rejects ξ = 1` = pct(mean(x[, "p1"] < 0.05)), check.names = FALSE)
+}
+mc_tab <- rbind(mcs("M2b"), mcs("scaled_0.6"))
+mc_tab$`Data generated by` <- c("M2b: linear income (rich countries gain)", "Scaled model, ξ = 0.6")
+```
+
+**Table 21. Monte Carlo: estimate of ξ and rejection rates of the robust test at 5%.**
+
+```{r table21}
+autofit(bold(flextable(mc_tab), part = "header"))
+```
+
+```{r mc-get, include = FALSE}
+mm <- function(k, col) mean(mc[[k]][, col] < 0.05)
+```
+
+**Result. A sign change does not push ξ to an extreme, but the tests reject too often even when the model is right.**
+
+- **With rich countries gaining (M2b)**, the scaled model cannot reproduce the gain. The best it can do is a response that falls steeply with income, and $\hat\xi$ settles near equal dollars (median `r sprintf("%.2f", median(mc$M2b[, "xi"]))`), not at an extreme. The robust test rejects every value more often (`r pct(mm("M2b", "p0"))`, `r pct(mm("M2b", "p06"))` and `r pct(mm("M2b", "p1"))` for ξ = 0, 0.6 and 1): it partly detects the misspecification. With the data, ξ = 0 is not rejected, which argues weakly against a strong sign change; Section 7 finds the two forms indifferent in fit.
+- **Size.** When the scaled model with ξ = 0.6 is true, the robust test rejects ξ = 0.6 in `r pct(mm("scaled_0.6", "p06"))` of the samples, not 5%. Clustered tests over-reject when a few clusters dominate a regressor, and the scaled terms put much of their weight on the poorest countries. The test is robust to a small response, not to this. Its p-values, and the Wald ones, which rely on the same clustered covariance, are therefore too small. "Rejected at 5%" in Tables 5b, 18 and 19 means less than it says, and the rejection of ξ = 0.6 with PWT is weaker evidence than its p-value suggests.
+- **Bias.** In the same samples $\hat\xi$ has median `r sprintf("%.2f", median(mc$scaled_0.6[, "xi"]))` against a true 0.6: the estimator is biased downward, as the long left tail of the bootstrap suggests. The estimates with the data, `r sprintf("%.2f", e$xi_nls$estimate)` (PWT) and `r sprintf("%.2f", wbe$xi_nls$estimate)` (WB), are compatible with somewhat higher true values.
+
+A wild cluster bootstrap of the robust test with the null imposed would correct its size. Section 14 applies it to the tests of the coefficients; for the test of ξ it has not been run yet.
+
+# 14. Robust inference: few effective clusters and cross-country correlation
+
+```{r robust-setup, include = FALSE}
+inf <- readRDS(file.path(base_dir, "inference.rds"))
+infr <- inf$results
+main_key <- "PWT ERA5"
+methods <- c("CR1", "WCR", "CR3", "2-way", "DK", paste0("Conley ", inf$cutoffs, " km"))
+TEST_LABELS <- c(`T terms` = "All T terms", `P terms` = "All P terms", `warm arm` = "Warm arm, all its terms",
+                 `cold arm` = "Cold arm, all its terms", `wet arm` = "Wet arm, all its terms", `dry arm` = "Dry arm, all its terms",
+                 `T x climate` = "T × climate, both arms", `T x income` = "T × income, both arms",
+                 `P x climate` = "P × climate, both arms", `P x share` = "P × share, both arms")
+test_label <- function(x) ifelse(x %in% names(TEST_LABELS), TEST_LABELS[x], trimws(TERM_LABELS[x]))
+p_of <- function(r, mod, test, k) r[[mod]]$p[[k]][r[[mod]]$p$test == test]
+n_sig <- function(mod, test, k) sum(vapply(infr, function(r) p_of(r, mod, test, k) < 0.05, TRUE))
+rng <- function(x, d = 0) sprintf(paste0("%.", d, "f–%.", d, "f"), min(x), max(x))
+gstar <- function(mod, term) sapply(infr, function(r) r[[mod]]$coef$gstar[r[[mod]]$coef$term == term])
+se_ratio <- function(mod, k) apply(sapply(infr, function(r) r[[mod]]$coef[[k]] / r[[mod]]$coef$CR1), 1, median)
+G_main <- infr[[main_key]]$Pref$G
+```
+
+Every p-value so far comes from errors clustered by country (CR1), tested against F(q, G − 1). Two features of this panel can make those p-values too small.
+
+- **Few effective clusters.** Clustered tests assume that many countries each contribute a little. When a coefficient is identified by a handful of countries, the clustered variance is too small and the tests over-reject. In Section 13, the robust test of ξ rejected a true value in `r pct(mm("scaled_0.6", "p06"))` of the samples.
+- **Correlation across countries.** Year effects remove the shock common to all countries in a year. They do not remove correlation among neighbours (a regional drought), nor a common shock to which countries respond differently. Country clusters ignore both.
+
+The preferred specification (ξ = 0) and M2b are therefore re-tested on all six datasets: PWT and WB GDP × ERA5, CRU TS and UDel weather. Each dataset keeps its own sample and the outlier rule of Section 1; with WB GDP and ERA5 the sample is that of Section 12. The alternatives are:
+
+- **WCR**, a wild cluster restricted bootstrap by country. The null is imposed, the residuals of each country are multiplied by one random Webb weight, and the CR1 Wald statistic is recomputed in each of `r format(inf$B, big.mark = ",")` draws. It is the standard fix for few or unbalanced clusters (MacKinnon, Nielsen and Webb 2023).
+- **CR3**, the jackknife variance: the coefficients re-estimated without each country in turn (exactly, not approximated).
+- **2-way**, errors clustered by country and by year.
+- **DK**, Driscoll–Kraay errors. They allow any correlation across countries within a year, and serial correlation of the yearly averages.
+- **Conley**, country clusters plus spatial correlation between countries in the same year (Conley–Hsiang). The weight of a pair falls linearly with the distance between the countries' centroids, reaching zero at `r paste(format(inf$cutoffs, big.mark = ","), collapse = ", ")` km.
+- **G\***, the effective number of clusters of each coefficient (Carter, Schnepel and Steigerwald 2017). It measures how unevenly the countries share the coefficient's leverage, and equals the number of countries when all weigh the same.
+
+All are computed on the model's own design: country effects and trends partialled out, year effects as dummies. CR1 reproduces the p-values of the previous sections.
+
+**Table 22. p-values by method, PWT × ERA5; in brackets, the number of the six datasets with p < 0.05.**
+
+```{r table22}
+p_rows <- function(mod, tests) {
+  out <- data.frame(Model = mod, Test = unname(test_label(tests)), check.names = FALSE)
+  for (k in methods) out[[sub(" km", "", k)]] <- vapply(tests, function(t) sprintf("%s (%d)", pv(p_of(infr[[main_key]], mod, t, k)), n_sig(mod, t, k)), "")
+  out
+}
+tab <- rbind(
+  p_rows("Pref", c("pTM:r", "pTM:clim_TM:r", "nTM:r", "pRR", "nRR", "nRR:clim_RR", "nRR:agr", "T terms", "warm arm", "cold arm",
+                   "P terms", "wet arm", "dry arm", "P x climate", "P x share")),
+  p_rows("M2b", c("pTM", "pTM:y", "pTM:clim_TM", "nTM:y", "warm arm", "T x income", "T x climate", "T terms")))
+ft <- merge_v(flextable(tab), j = "Model")
+ft <- valign(ft, j = 1, valign = "top")
+ft <- hline(ft, i = 15, border = officer::fp_border(width = 0.75))
+autofit(bold(ft, part = "header"))
+```
+
+**Table 23. Effective number of clusters G\* and largest partial leverage (PWT × ERA5; ISO codes, share of the coefficient's leverage), and the SE of each method relative to CR1 (median over the six datasets).**
+
+```{r table23}
+lev_rows <- function(mod, terms) {
+  cf <- infr[[main_key]][[mod]]$coef
+  i <- match(terms, cf$term)
+  g_all <- t(sapply(terms, function(t) gstar(mod, t)))
+  ratio <- function(k) sprintf("%.2f", se_ratio(mod, k)[i])
+  data.frame(Model = mod, Coefficient = unname(trimws(TERM_LABELS[terms])), `G*` = round(cf$gstar[i]),
+             `G*, six datasets` = sprintf("%.0f–%.0f", apply(g_all, 1, min), apply(g_all, 1, max)),
+             CR3 = ratio("CR3"), `2-way` = ratio("2-way"), DK = ratio("DK"), `Conley 2000` = ratio("Conley 2000 km"),
+             `Largest leverage` = vapply(strsplit(cf$top_leverage[i], ", "), function(x) paste(x[1:3], collapse = ", "), ""),
+             check.names = FALSE)
+}
+pref_terms <- infr[[main_key]]$Pref$coef$term
+tab <- rbind(lev_rows("Pref", pref_terms), lev_rows("M2b", grep("TM", infr[[main_key]]$M2b$coef$term, value = TRUE)))
+ft <- merge_v(flextable(tab), j = "Model")
+ft <- valign(ft, j = 1, valign = "top")
+ft <- hline(ft, i = length(pref_terms), border = officer::fp_border(width = 0.75))
+autofit(bold(ft, part = "header"))
+```
+
+**Result. Drought survives every method; the warm-year response survives too, but it rests on few countries and is the most sensitive to correlation across countries.**
+
+- **Drought is robust.** The dry arm and dry × share have p < 0.05 in all six datasets under every method, and so do the P terms jointly. P × climate is the only P result that two-way clustering weakens (`r n_sig("Pref", "P x climate", "2-way")` of 6).
+- **The warm arm survives, but its identification is thin.** The warm arm of the preferred specification is significant in `r n_sig("Pref", "pTM:r", "WCR")` of 6 datasets with the bootstrap and `r n_sig("Pref", "pTM:r", "CR3")` with CR3. But its G\* is only `r rng(gstar("Pref", "pTM:r"))` out of about `r G_main` countries, and `r rng(gstar("Pref", "nTM:clim_TM:r"))` for the cold × climate term. The scaling Ȳ/Y gives the poorest countries the largest values of the T terms, so a few of them (Mozambique, Lesotho, Malawi, Mali, China, Myanmar) carry 6–23% of a coefficient's leverage each. This is the situation in which CR1 over-rejects. The joint test of the four T terms shows it most: with PWT × ERA5, p = `r pv(p_of(infr[[main_key]], "Pref", "T terms", "CR1"))` with CR1 against `r pv(p_of(infr[[main_key]], "Pref", "T terms", "WCR"))` with the bootstrap. In M2b, where income enters linearly, the T terms have G\* of `r rng(c(gstar("M2b", "pTM"), gstar("M2b", "pTM:y")))`.
+- **Correlation across countries matters for warm years, not for precipitation.** Conley errors are at most about 10% larger than CR1, so correlation among neighbours adds little. Two-way and Driscoll–Kraay errors are up to `r sprintf("%.0f", 100 * (max(se_ratio("Pref", "2-way")[1:2]) - 1))`% larger on the warm terms of the preferred specification. That points to shocks common to a year to which countries respond differently, which the year effects do not absorb. With these errors, M2b's warm arm is significant in only `r n_sig("M2b", "warm arm", "2-way")` (two-way) and `r n_sig("M2b", "warm arm", "DK")` (DK) of 6 datasets. Its income gradient holds better: `r n_sig("M2b", "T x income", "2-way")` and `r n_sig("M2b", "T x income", "DK")` of 6.
+- **No single country dominates.** CR3 errors are within `r sprintf("%.0f", 100 * (max(se_ratio("Pref", "CR3"), se_ratio("M2b", "CR3")) - 1))`% of CR1, mostly on the cold terms. The fragility is that few countries carry the warm response, not that one outlier does. Section 15 measures it.
+- **The cold arm and wet arm stay insignificant**, or significant in one dataset only, under every method.
+
+# 15. Influence: which countries drive the warm and dry responses
+
+```{r influence-setup, include = FALSE}
+ifl <- readRDS(file.path(base_dir, "influence.rds"))
+ir <- ifl$results
+TARGET_LABELS <- c(`Pref warm arm` = "Warm arm (Pref)", `Pref dry arm` = "Dry arm (Pref)", `Pref dry x share` = "Dry × share (Pref)",
+                   `M2b warm x income` = "Warm × income (M2b)", `M2b warm x climate` = "Warm × climate (M2b)",
+                   `Income only: warm x income` = "Warm × income, no climate interaction",
+                   `Climate only: warm x climate` = "Warm × climate, no income interaction")
+k_of <- function(s, what) vapply(ir, function(r) r$minimal[[s]][[what]], 0)
+first_drops <- function(s, n = 8) {
+  f <- sort(table(unlist(lapply(ir, function(r) head(r$minimal[[s]]$path$dropped[-1], n)))), decreasing = TRUE)
+  f[f >= 3]
+}
+recurring <- function(s) paste(sprintf("%s (%d)", name_of(names(first_drops(s))), first_drops(s)), collapse = ", ")
+loo_top <- function(s, n = 5) {
+  x <- head(ir[[main_key]]$influence[[s]], n)
+  paste(sprintf("%s %+.2f", name_of(x$GID_0), x$change_se), collapse = ", ")
+}
+full <- function(d, s) ir[[d]]$minimal[[s]]$path[1, ]
+```
+
+Section 14 shows that the warm response rests on few countries. This section asks which countries, how many of them, and whether the warm response depends on income or on the long-run temperature. Same models, datasets and errors as Section 14 (CR1, which the bootstrap broadly confirmed).
+
+- **Leave one country out.** Each country's exact effect on a coefficient: the change in the estimate when it is dropped, in SE of the full sample.
+- **Minimal sets.** The country whose removal moves the coefficient most towards zero is dropped, the model is re-estimated, and the step is repeated. The table reports how many countries had been dropped when the coefficient stopped being significant at 5%, and when its sign flipped. The search is greedy, so the true minimum may be smaller. For warm × climate in M2b, which is not significant, the search goes the other way: it drops the countries that hold it back from a loss in hotter climates, until it becomes significant.
+
+**Table 24. Minimal sets: countries dropped until p ≥ 0.05 / until the sign flips (out of about `r G_main` countries). Warm × climate in M2b: countries dropped until it becomes a significant loss in hotter climates.**
+
+```{r table24}
+cell <- function(m) {
+  if (!is.na(m$k_significant) || all(is.na(c(m$k_insignificant, m$k_flip)))) {
+    return(if (is.na(m$k_significant)) sprintf("not in %d", ifl$steps) else as.character(m$k_significant))
+  }
+  sprintf("%s / %s", m$k_insignificant, if (is.na(m$k_flip)) sprintf(">%d", ifl$steps) else m$k_flip)
+}
+tab <- data.frame(Coefficient = unname(TARGET_LABELS[names(ir[[1]]$minimal)]),
+                  `PWT × ERA5: estimate (p)` = vapply(names(ir[[1]]$minimal), function(s) {
+                    f <- full(main_key, s)
+                    sprintf("%+.3f (%s)", 100 * f$est, pv(f$p))
+                  }, ""),
+                  t(sapply(names(ir[[1]]$minimal), function(s) vapply(ir, function(r) cell(r$minimal[[s]]), ""))),
+                  check.names = FALSE, row.names = NULL)
+autofit(bold(flextable(tab), part = "header"))
+```
+
+Estimates are in pp of growth per SD, and the interactions per log point of income or per °C.
+
+**Table 25. The countries that matter: those among the first eight dropped in at least three of the six datasets (number of datasets), and the largest leave-one-out changes with PWT × ERA5 (in SE; positive: the country makes the estimate more negative, i.e. the loss larger or the income gradient smaller).**
+
+```{r table25}
+keys <- c(`Pref warm arm` = "Pref pTM_X_r", `Pref dry arm` = "Pref nRR", `Pref dry x share` = "Pref nRR_X_agr",
+          `M2b warm x income` = "M2b pTM_X_y")
+tab <- data.frame(Coefficient = unname(TARGET_LABELS[names(keys)]),
+                  `Recurring in the minimal sets` = vapply(names(keys), recurring, ""),
+                  `Largest leave-one-out changes, PWT × ERA5` = vapply(keys, loo_top, ""),
+                  check.names = FALSE, row.names = NULL)
+ft <- flextable(tab)
+ft <- width(ft, j = 1, width = 1.2)
+ft <- width(ft, j = 2:3, width = 2.7)
+bold(ft, part = "header")
+```
+
+```{r fig-influence, fig.width = 6.8, fig.height = 3.2, fig.cap = "Leave-one-out change of the warm arm and the dry arm of the preferred specification, PWT × ERA5, in SE of the full-sample estimate, against the country's mean income. Positive: dropping the country moves the estimate towards zero (the country makes the loss larger). Colour: mean temperature. Labels: the eight largest changes."}
+fig_dat <- rbind(cbind(ir[[main_key]]$influence[["Pref pTM_X_r"]], arm = "Warm arm"),
+                 cbind(ir[[main_key]]$influence[["Pref nRR"]], arm = "Dry arm"))
+fig_dat$arm <- factor(fig_dat$arm, c("Warm arm", "Dry arm"))
+fig_dat$label <- ""
+for (a in levels(fig_dat$arm)) {
+  i <- which(fig_dat$arm == a)
+  top <- i[order(-abs(fig_dat$change_se[i]))][1:8]
+  fig_dat$label[top] <- fig_dat$GID_0[top]
+}
+ggplot(fig_dat, aes(income, change_se)) +
+  geom_hline(yintercept = 0, colour = "grey60", linewidth = 0.3) +
+  geom_point(aes(fill = temp), shape = 21, colour = "grey35", size = 1.8, stroke = 0.25) +
+  ggrepel::geom_text_repel(aes(label = label), size = 2.3, colour = "grey20", min.segment.length = 0, segment.size = 0.2,
+                           seed = 1) +
+  scale_x_log10(labels = scales::label_dollar()) +
+  scale_fill_gradient2(low = "#2b6cb0", mid = "white", high = "#c53030", midpoint = 15, name = "Mean T (°C)") +
+  facet_wrap(~arm) +
+  labs(x = "Mean income (2021 PPP US$, log scale)", y = "Change when dropped (SE)") +
+  theme_minimal(base_size = 8) +
+  theme(panel.grid.minor = element_blank(), legend.key.height = unit(0.4, "cm"))
+```
+
+**Result: which countries.**
+
+- **Warm years: mostly poor countries of southern and east Africa.** The warm arm loses significance after `r rng(k_of("Pref warm arm", "k_insignificant"))` countries and flips after `r rng(k_of("Pref warm arm", "k_flip"))`. Mozambique, Zimbabwe and Morocco are among the first dropped in every dataset; Lesotho, Nepal, China and Peru follow. Mozambique alone moves the estimate by `r sprintf("%.2f", abs(ir[[main_key]]$influence[["Pref pTM_X_r"]]$change_se[1]))` SE with PWT × ERA5, and with WB × ERA5 dropping it is enough to lose significance. Rwanda and Myanmar pull the other way: dropping them makes the loss larger.
+- **Dry years: the Sahel, plus Syria.** The dry arm needs `r rng(k_of("Pref dry arm", "k_insignificant"))` countries to lose significance and `r rng(k_of("Pref dry arm", "k_flip"))` to flip, the most of any result. Niger, Guinea-Bissau and Syria are among the first dropped in every dataset, then Mozambique, Mauritania, Malawi and Sudan. Dry × share depends on the same countries and is less robust (`r rng(k_of("Pref dry x share", "k_insignificant"))` / `r rng(k_of("Pref dry x share", "k_flip"))`). Syria is the odd one: its income differs about tenfold between PWT (about \$12,000) and WB (about \$1,000), and its rows deserve a check before much is read into its weight.
+- **How fragile is this?** Losing significance after dropping a handful of `r G_main` countries is fragile by the usual standard (Broderick, Giordano and Meager 2023). Here that happens after `r min(k_of("Pref warm arm", "k_insignificant"))`–`r max(k_of("Pref dry arm", "k_insignificant"))` countries for the warm and dry arms. The sign is much harder to move: `r min(k_of("Pref warm arm", "k_flip"))` or more countries for the warm arm and `r min(k_of("Pref dry arm", "k_flip"))` or more for the dry arm. The direction of both responses is solid; their size and precision depend on a small group of poor countries.
+
+**Income or the long-run temperature?** The two are related but far from collinear: across countries, log income and mean temperature correlate at between `r sprintf("%.2f", min(vapply(ir, function(r) r$cor_income_temp, 0)))` and `r sprintf("%.2f", max(vapply(ir, function(r) r$cor_income_temp, 0)))`. Their roles in the warm response are compared in three ways:
+
+- each alone, with the warm and cold arms interacted with income only or with climate only;
+- both together (M2b);
+- M2b without the countries that separate the two. These are the `r ifl$n_separate` countries richest for their climate and the `r ifl$n_separate` poorest for theirs: the largest and smallest residuals of mean log income regressed on mean temperature.
+
+With PWT × ERA5, the richest for their climate are `r paste(name_of(ir[[main_key]]$separate[[1]]), collapse = ", ")`. The poorest are `r paste(name_of(ir[[main_key]]$separate[[2]]), collapse = ", ")`.
+
+**Table 26. Income against climate as the moderator of the warm response: estimate (pp per SD per log point of income, or per °C) and p, by dataset.**
+
+```{r table26}
+est_p <- function(est, p, d) sprintf(paste0("%+.", d, "f (%s)"), 100 * est, pv(p))
+model_rows <- function(s, lab, d) vapply(ir, function(r) { f <- r$minimal[[s]]$path[1, ]; est_p(f$est, f$p, d) }, "")
+race_rows <- function(row, v, d) vapply(ir, function(r) est_p(r$race[row, paste0(v, "_est")], r$race[row, paste0(v, "_p")], d), "")
+tab <- rbind(
+  c("Income only", "warm × income", model_rows("Income only: warm x income", "", 2)),
+  c("Climate only", "warm × climate", model_rows("Climate only: warm x climate", "", 3)),
+  c("Both (M2b)", "warm × income", race_rows("none", "income", 2)),
+  c("Both (M2b)", "warm × climate", race_rows("none", "climate", 3)),
+  c("M2b without the rich for their climate", "warm × income", race_rows("rich for their climate", "income", 2)),
+  c("M2b without the rich for their climate", "warm × climate", race_rows("rich for their climate", "climate", 3)),
+  c("M2b without the poor for their climate", "warm × income", race_rows("poor for their climate", "income", 2)),
+  c("M2b without the poor for their climate", "warm × climate", race_rows("poor for their climate", "climate", 3)),
+  c("M2b without both", "warm × income", race_rows("both", "income", 2)),
+  c("M2b without both", "warm × climate", race_rows("both", "climate", 3)))
+tab <- as.data.frame(tab, stringsAsFactors = FALSE)
+names(tab) <- c("Model", "Gradient", names(ir))
+ft <- merge_v(flextable(tab), j = "Model")
+ft <- valign(ft, j = 1, valign = "top")
+autofit(bold(ft, part = "header"))
+```
+
+```{r race-numbers, include = FALSE}
+inc_sig <- function(row) sum(vapply(ir, function(r) r$race[row, "income_p"] < 0.05, TRUE))
+clim_loss <- function(row) sum(vapply(ir, function(r) r$race[row, "climate_p"] < 0.05 && r$race[row, "climate_est"] < 0, TRUE))
+alone <- function(s) vapply(ir, function(r) r$minimal[[s]]$path$p[1], 0)
+```
+
+**Result: income, not the long-run temperature, moderates the warm response.**
+
+- **Alone, climate does nothing.** With climate as the only moderator, the warm × climate gradient is significant in `r sum(alone("Climate only: warm x climate") < 0.05)` of 6 datasets. Where it is (WB × UDel), dropping `r max(k_of("Climate only: warm x climate", "k_insignificant"))` countries removes it. Income alone is significant in `r sum(alone("Income only: warm x income") < 0.05)` of 6 (p `r rng(alone("Income only: warm x income"), 3)`).
+- **Together, income wins.** In M2b the income gradient is significant in `r inc_sig("none")` of 6 datasets. The climate gradient is never a significant loss in hotter climates, and its sign is that of a smaller loss in hotter climates in `r sum(vapply(ir, function(r) r$race["none", "climate_est"] > 0, TRUE))` of 6.
+- **Not an artefact of a few unusual countries.** Without the rich-for-their-climate countries (mostly Gulf states, Singapore and small islands), the income gradient is significant in `r inc_sig("rich for their climate")` of 6 and usually larger. Without the poor-for-their-climate countries (Lesotho, Mongolia, the Central Asian and Himalayan states…), in `r inc_sig("poor for their climate")` of 6. Without both, in `r inc_sig("both")` of 6. Climate becomes a significant loss moderator in none of these samples.
+- **The significance of the income gradient is fragile, its sign is not.** In M2b it loses significance after `r rng(k_of("M2b warm x income", "k_insignificant"))` countries (Mozambique, Burkina Faso, Morocco, Mali, Zimbabwe, and Saudi Arabia among the rich), but needs `r rng(k_of("M2b warm x income", "k_flip"))` to flip. Making climate a significant loss moderator takes the removal of `r rng(k_of("M2b warm x climate", "k_significant"))` countries chosen for that purpose, comparable to what it takes to flip income. On this measure alone the comparison favours income only moderately. The stronger evidence is the previous two points: climate is null on its own and in every subsample.
+
+**What to take from Sections 14–15.**
+
+- The drought loss and its share gradient are the most robust results: significant under every error and every dataset, and the hardest to overturn by dropping countries.
+- The warm-year loss is moderated by income, not by the long-run temperature, in every dataset and every subsample tried.
+- The size and significance of the warm loss rest on a small group of poor southern- and east-African countries, roughly 10–25 effective clusters. Its bootstrap p-values (Table 22) are the ones to quote.
+
+# Notes
+
+- Sources: estimates from `handout_preferred_specification.R` (saved to `results/handout_preferred_specification/estimates.rds`), on the panel of the response explorer (`apps/response_explorer/build_models.R`). Projections from `handout_projections.R` (`projections.rds`), using the explorer's projection code and scenario data (`apps/response_explorer/build_scenarios.R`). This document: `handout_preferred_specification.Rmd`.
+- Section 12: the same script with `HANDOUT_GDP=WB` (folder `WB`) and with `HANDOUT_ROWS=common` for each source (folders `PWT_common`, `WB_common`); the comparison of the two sources in `handout_sources.R` (`sources.rds`). Section 13: `handout_xi_montecarlo.R` (`xi_montecarlo.rds`). The tables and figures of ξ: `handout_xi_figure.R`. The bootstraps are cached in `xi_bootstrap.rds` in each folder. Section 14: `handout_inference.R` (`inference.rds`). Section 15: `handout_influence.R` (`influence.rds`).
+- The estimates with ξ = 0.6, the previous preferred value, are kept in `estimates_xi06.rds`, `app_models_xi06.rds` and `projections_xi06.rds`.
+- All models use the same rows and include the level controls, so their fits are comparable.
+- The deviations use the trailing mean but the long-run SD. The response explorer's 20-year baseline uses the trailing SD instead, so its coefficients differ slightly from these.
+- Natural variability is an option of the response explorer's climate scenarios and termination shocks (none, independent years, joint years, joint 5-year blocks), with the noise pools built by `build_models.R`. The noise keeps its historical size under warming, and the pool has only `r e$horizon[2] - e$horizon[1] + 1` historical years, so the number of distinct global patterns is limited.
