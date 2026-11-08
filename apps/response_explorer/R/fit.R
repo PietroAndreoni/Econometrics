@@ -272,7 +272,11 @@ model_options <- function(o) {
   quad <- unlist(o$quad %||% "none")
   if (length(quad) == 1) quad <- c(TM = quad, RR = quad)
   o$quad <- c(TM = unname(quad[["TM"]]), RR = unname(quad[["RR"]]))
-  o$symmetric <- isTRUE(o$symmetric)
+  # Per variable (a single value: both): symmetric terms, the units of the
+  # deviations (SD or absolute) and the shape of the interactions.
+  o$symmetric <- vapply(per_variable_option(o$symmetric, FALSE), isTRUE, TRUE)
+  o$units <- per_variable_option(o$units, "SD")
+  o$shape <- per_variable_option(o$shape, "linear")
   # The style: the regression unit itself, or its first difference.
   o$diff <- identical(o$style, "diff") || isTRUE(o$diff)
   # "both": the terms of the unit and, with arms of their own, those of its
@@ -296,11 +300,7 @@ model_options <- function(o) {
   o$low_threshold <- if ("low" %in% unlist(o$inter)) as.numeric(o$low_threshold %||% NA)
   # The income scaling of T and of P (a single value: both), and its xi (in
   # XI_RANGE). Scaled terms with xi = 1 are the standard ones.
-  per_variable <- function(x, default) {
-    x <- unlist(x %||% default)
-    if (length(x) == 1) x <- c(TM = x, RR = x)
-    c(TM = unname(x[["TM"]]), RR = unname(x[["RR"]]))
-  }
+  per_variable <- per_variable_option
   # The arms of T and of P (a single value: both).
   o$form <- per_variable(o$form, "Linear arms")
   form <- per_variable(o$income_form, "standard")
@@ -320,9 +320,11 @@ interaction_key <- function(inter) {
 }
 model_key <- function(o, panels) {
   moderators <- if (o$share_trailing) "trailing + share" else o$moderators
-  paste(o$gdp, o$climate, o$baseline, o$weight, o$units,
-        paste0("T ", o$form[["TM"]], ", P ", o$form[["RR"]], if (o$symmetric) " (symmetric)"),
-        interaction_key(o$inter), o$shape,
+  per <- function(x) if (x[["TM"]] == x[["RR"]]) as.character(x[["TM"]]) else paste0("T ", x[["TM"]], ", P ", x[["RR"]])
+  paste(o$gdp, o$climate, o$baseline, o$weight, per(o$units),
+        paste0("T ", o$form[["TM"]], if (o$symmetric[["TM"]]) " (symmetric)",
+               ", P ", o$form[["RR"]], if (o$symmetric[["RR"]]) " (symmetric)"),
+        interaction_key(o$inter), per(o$shape),
         o$fe, moderators, o$outcome,
         sprintf("income T: %s %g, P: %s %g", o$income_form[["TM"]], o$xi[["TM"]], o$income_form[["RR"]], o$xi[["RR"]]),
         paste0("controls: ", if (length(o$controls)) paste(o$controls, collapse = "+") else "none"),
@@ -484,8 +486,8 @@ explorer_model <- function(o, panels) {
     has_inputs <- function(x) {
       ok <- rep(TRUE, nrow(x))
       for (v in c("TM", "RR")) {
-        ok <- ok & is.finite(deviation_values(x, v, window, panels$units_suffix[[o$units]], dev_fe, o$diff))
-        if (o$both) ok <- ok & is.finite(deviation_values(x, v, window, panels$units_suffix[[o$units]], dev_fe, TRUE))
+        ok <- ok & is.finite(deviation_values(x, v, window, panels$units_suffix[[o$units[[v]]]], dev_fe[[v]], o$diff))
+        if (o$both) ok <- ok & is.finite(deviation_values(x, v, window, panels$units_suffix[[o$units[[v]]]], dev_fe[[v]], TRUE))
         if ("clim" %in% o$inter[[v]]) ok <- ok & is.finite(x[[paste0("mean_", v, "_", clim_window)]])
         if ("lag" %in% o$inter[[v]]) ok <- ok & is.finite(x[[paste0(v, "_l1")]])
       }
@@ -505,7 +507,7 @@ explorer_model <- function(o, panels) {
   # climate of the panel's units (fixed or trailing), so that the arms' own
   # coefficients are the response at the median climate and at the mean income
   # and share of the rows (the cap of the app is relative to it).
-  units <- panels$units[[paste(o$gdp, o$climate, o$baseline, o$weight, o$units, sep = " | ")]]
+  units <- panels$units[[paste(o$gdp, o$climate, o$baseline, o$weight, o$units[["TM"]], sep = " | ")]]
   clim_median <- c(TM = stats::median(units$mean_T), RR = stats::median(units$mean_P))
   inc_level <- d[[inc_column]]
   agr_level <- d[[agr_column]]
@@ -518,11 +520,11 @@ explorer_model <- function(o, panels) {
   # the model's rows.
   with_moderators <- function(x) {
     for (v in c("TM", "RR")) {
-      dev <- deviation_values(x, v, window, panels$units_suffix[[o$units]], dev_fe, o$diff)
-      for (s in arm_suffixes(o$form[[v]], o$symmetric)) x[[paste0("dev", v, s)]] <- arm_value(s, dev)
+      dev <- deviation_values(x, v, window, panels$units_suffix[[o$units[[v]]]], dev_fe[[v]], o$diff)
+      for (s in arm_suffixes(o$form[[v]], o$symmetric[[v]])) x[[paste0("dev", v, s)]] <- arm_value(s, dev)
       if (o$both) {
-        dev_d <- deviation_values(x, v, window, panels$units_suffix[[o$units]], dev_fe, TRUE)
-        for (s in arm_suffixes(o$form[[v]], o$symmetric)) x[[paste0("dev", v, "_d", s)]] <- arm_value(s, dev_d)
+        dev_d <- deviation_values(x, v, window, panels$units_suffix[[o$units[[v]]]], dev_fe[[v]], TRUE)
+        for (s in arm_suffixes(o$form[[v]], o$symmetric[[v]])) x[[paste0("dev", v, "_d", s)]] <- arm_value(s, dev_d)
       }
       x[[paste0("clim_", v)]] <- x[[paste0("mean_", v, "_", clim_window)]] - clim_median[[v]]
       # Last year's and this year's value, centred in the same way.
@@ -650,7 +652,7 @@ explorer_model <- function(o, panels) {
   # The splines against the linear interactions (same rows): the Wald test of
   # the non-linear terms and the verdict by AIC / BIC / within adjusted R2.
   spline_test <- NULL
-  if (o$shape == "splines" && any(grepl("_nl", names(stats::coef(m))))) {
+  if (any_splines(o$shape) && any(grepl("_nl", names(stats::coef(m))))) {
     linear <- fit("linear")
     nl_p <- added_terms_p(m, linear)
     spline_test <- list(nonlinear_p = nl_p, verdict = fit_verdicts(m, linear, nested_p = nl_p),
@@ -705,7 +707,7 @@ explorer_model <- function(o, panels) {
     # stays at the country's value).
     inc_window = if (trailing) panels$trailing_income_years,
     share_window = if (o$share_trailing) panels$trailing_share_years,
-    knots = if (o$shape == "splines") knots, spline_test = spline_test
+    knots = if (any_splines(o$shape)) knots, spline_test = spline_test
   )
   model_cache[[key]] <- model
   model

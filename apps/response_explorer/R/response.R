@@ -42,7 +42,7 @@ offset_inputs <- function(x, off) {
 # unit effects), the country's long-run climate over the deviation's scale.
 # Effects are those of x + offset less those of the offset.
 deviation_offset <- function(model, country, v) {
-  if (!identical(model$window, "level") || isTRUE(model$diff) || !identical(model$dev_fe, "none")) return(0)
+  if (!identical(model$window, "level") || isTRUE(model$diff) || !identical(of_variable(model$dev_fe, v), "none")) return(0)
   (if (v == "TM") country$mean_T else country$mean_P) / deviation_scale(model, country, v)
 }
 # The effects of the years so far on log GDP: the sum of the effects on growth
@@ -129,7 +129,7 @@ modifier_columns <- function(model, country, clim_shift = list(TM = 0, RR = 0),
                inc = log(country$income) - model$inc_mean, agr = country$share - model$agr_mean,
                kap = if (is.null(model$kap_mean)) 0 else log(country$capital) - model$kap_mean,
                low = if (is.null(model$low_threshold)) 0 else as.numeric(country$income < model$low_threshold))
-  if (identical(model$shape, "splines")) {
+  if (!is.null(model$knots)) {
     for (z in names(model$knots)) {
       nl <- sweep(rcs_nonlinear(out[, z], model$knots[[z]]), 2, rcs_nonlinear(0, model$knots[[z]]))
       colnames(nl) <- paste0(z, "_nl", seq_len(ncol(nl)))
@@ -256,7 +256,7 @@ deviation_weights <- function(model, v, x, modifiers, years = NULL) {
 # for a model in SD, 1 for a model in absolute units (the deviation is the
 # anomaly itself).
 deviation_scale <- function(model, country, v) {
-  if (identical(model$units, "absolute")) return(1)
+  if (identical(of_variable(model$units, v), "absolute")) return(1)
   if (v == "TM") country$sd_T else country$sd_P
 }
 
@@ -306,6 +306,8 @@ coefficient_draws <- function(model) {
 # element at its own coefficients (a one-column matrix). With lags, as
 # deviation_weights() (`years`), each lag capped on its own.
 growth_matrix <- function(beta, model, v, x, modifiers, cap, paired = FALSE, years = NULL) {
+  # The cap of variable v (one value, or c(TM, RR)).
+  cap <- isTRUE(of_variable(cap, v))
   st <- model_structure(model)
   n <- n_inputs(x)
   all_mods <- as_modifier_matrix(modifiers, n)
@@ -368,6 +370,7 @@ point_beta <- function(model) matrix(model$coef, nrow = 1, dimnames = list(NULL,
 # whose value is the country's long-run climate plus the anomaly (x times the
 # deviation's scale), last year's at the long-run climate.
 response_curve <- function(model, v, x, country, cap = FALSE) {
+  cap <- isTRUE(of_variable(cap, v))
   modifiers <- modifier_matrix(model, country, v, rep(0, length(x)), cur = x * deviation_scale(model, country, v))
   off <- deviation_offset(model, country, v)
   # With style "both", a year at x after a year at zero: x is also its first
@@ -439,9 +442,10 @@ deviation_path <- function(a, sd, window, sd_mode = "fixed", from = 0) {
 # starts.
 gdp_path <- function(model, v, country, type, delta, horizon, sd_mode = "fixed",
                      clim_mode = "fixed", cap = FALSE, ramp_years = NULL) {
+  cap <- isTRUE(of_variable(cap, v))
   window <- EXPLORER_WINDOWS[[model$window]]
   sd <- deviation_scale(model, country, v)
-  if (identical(model$units, "absolute")) sd_mode <- "fixed"
+  if (identical(of_variable(model$units, v), "absolute")) sd_mode <- "fixed"
   a <- anomaly_path(type, delta, horizon, window, ramp_years)
   x <- if (identical(model$window, "nrk")) innovation_path(a, filter_lags(model, country, v), sd)
        else deviation_path(a, sd, window, sd_mode)

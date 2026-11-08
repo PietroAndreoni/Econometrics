@@ -105,9 +105,10 @@ form_of <- function(m, v) if (length(m$form) == 1) m$form else m$form[[v]]
 # The short label of the arms of T and P (one when they are the same).
 form_label <- function(form, symmetric = FALSE) {
   form <- c(TM = unname(form[[1]]), RR = unname(form[[length(form)]]))
-  out <- if (form[["TM"]] == form[["RR"]]) FORM_SHORT[[form[["TM"]]]]
-         else paste0("T ", FORM_SHORT[[form[["TM"]]]], ", P ", FORM_SHORT[[form[["RR"]]]])
-  if (isTRUE(symmetric)) paste(out, "(symmetric)") else out
+  symmetric <- c(TM = isTRUE(of_variable(symmetric, "TM")), RR = isTRUE(of_variable(symmetric, "RR")))
+  one <- function(v) paste0(FORM_SHORT[[form[[v]]]], if (symmetric[[v]]) " (symmetric)")
+  if (form[["TM"]] == form[["RR"]] && symmetric[["TM"]] == symmetric[["RR"]]) one("TM")
+  else paste0("T ", one("TM"), ", P ", one("RR"))
 }
 # The modifiers a variable's deviation terms can be interacted with (in the
 # order of build_models.R), their names in the inputs and in the labels.
@@ -219,8 +220,12 @@ spec_equation <- function(m) {
   powers_of <- function(column) {
     switch(form_of(m, column), "Quadratic arms" = "^{2}", "Linear + quadratic arms" = c("", "^{2}"), "")
   }
-  splines <- identical(m$shape, "splines")
-  symmetric <- isTRUE(m$symmetric)
+  # Per variable (v: "T" or "P"): symmetric terms and spline interactions; the
+  # level terms have splines when any variable does.
+  column_of <- function(v) if (v == "T") "TM" else "RR"
+  symmetric_of <- function(v) isTRUE(of_variable(m$symmetric, column_of(v)))
+  splines_of <- function(v) identical(of_variable(m$shape, column_of(v)), "splines")
+  splines <- any_splines(m$shape)
   # The own-climate modifiers of v (T, P): long-run climate, last year's and
   # this year's value (centred).
   own <- list(clim = sym$clim, lag = function(v) paste0(v, "_{i,t-1}"), cur = function(v) paste0(v, "_{it}"))
@@ -239,10 +244,10 @@ spec_equation <- function(m) {
       if (d) s <- paste0("\\breve{", s, "}")
       paste0(if (lags > 0) "{}^{k}", if (tilde) paste0("\\tilde{", s, "}") else s)
     }
-    a <- if (symmetric) (if (sq) "2" else "") else if (sq) "a,2" else "a"
+    a <- if (symmetric_of(v)) (if (sq) "2" else "") else if (sq) "a,2" else "a"
     sup <- if (nzchar(a)) paste0("^{", a, "}") else ""
     paste0(t("\\beta"), sup, "_{", v, "}", paste0(vapply(m$inter[[if (v == "T") "TM" else "RR"]], function(z) {
-      if (splines) paste0(" + ", t("g"), sup, "_{", v, ",", letter[[z]], "}\\!\\left(", z_of(v, z), "\\right)")
+      if (splines_of(v)) paste0(" + ", t("g"), sup, "_{", v, ",", letter[[z]], "}\\!\\left(", z_of(v, z), "\\right)")
       else paste0(" + ", t("\\gamma"), sup, "_{", v, ",", letter[[z]], "}\\, ", z_of(v, z))
     }, ""), collapse = ""))
   }
@@ -338,9 +343,12 @@ spec_definitions <- function(m) {
   start <- m$horizon[[1]]
   end <- m$horizon[[2]]
   w <- if (!trailing_window(m$window)) NA else sub("lag_", "", m$window)
-  absolute <- identical(m$units, "absolute")
+  # Per variable: the units of the deviations and symmetric terms.
+  units_v <- c(TM = of_variable(m$units, "TM"), RR = of_variable(m$units, "RR"))
+  absolute <- all(units_v == "absolute")
   nrk <- identical(m$window, "nrk")
-  symmetric <- isTRUE(m$symmetric)
+  symmetric_v <- c(TM = isTRUE(of_variable(m$symmetric, "TM")), RR = isTRUE(of_variable(m$symmetric, "RR")))
+  symmetric <- any(symmetric_v)
   level <- identical(m$window, "level")
   effects <- m$effects %||% "both"
   no_unit <- effects == "year"
@@ -401,9 +409,34 @@ spec_definitions <- function(m) {
   }
   powers_text <- per_form(c("Linear arms" = ", entering linearly", "Quadratic arms" = ", entering squared",
                             "Linear + quadratic arms" = ", entering linearly and squared"))
+  # How the deviations enter: unsplit (symmetric) or cut into arms.
+  arms_text <- function(sym) {
+    if (sym) {
+      sprintf(paste0("Symmetric: the deviation \\(x_{v,it}\\) enters unsplit and %s (one coefficient for both ",
+                     "sides%s)."),
+              if (nrk) "as it is" else "not demeaned",
+              per_form(c("Quadratic arms" = ": only its square, so years of the same size above and below the baseline have the same effect",
+                         "Linear + quadratic arms" = ", linearly and squared",
+                         "Linear arms" = ": a year \\(x\\) below the baseline has minus the effect of one \\(x\\) above")))
+    } else if (nrk || no_unit) {
+      sprintf(paste0("Not demeaned before the arms are cut (%s): arms ",
+                     "\\(D^{+}_{v,it} = \\max(x_{v,it}, 0)\\), \\(D^{-}_{v,it} = \\max(-x_{v,it}, 0)\\)%s."),
+              if (nrk) "the filter has country effects" else "no country effects", powers_text)
+    } else {
+      sprintf(paste0("Demeaned before the arms are cut: \\(d_{v,it} = x_{v,it} - (%s)\\), fitted by OLS for each ",
+                     "country over %d-%d; arms \\(D^{+}_{v,it} = \\max(d_{v,it}, 0)\\), ",
+                     "\\(D^{-}_{v,it} = \\max(-d_{v,it}, 0)\\)%s."),
+              trend, start - 10L, end, powers_text)
+    }
+  }
   out <- c(
     outcome,
     deviation,
+    if (units_v[["TM"]] != units_v[["RR"]]) {
+      sprintf("Units by variable: temperature deviations %s, precipitation deviations %s (as above for each).",
+              if (units_v[["TM"]] == "absolute") "in absolute units (C)" else "in SD",
+              if (units_v[["RR"]] == "absolute") "in absolute units (m a year)" else "in SD")
+    },
     if (isTRUE(m$diff)) {
       paste0("First order difference: below \\(x_{v,it}\\) stands for \\(x_{v,it} - x_{v,i,t-1}\\) of the unit above",
              if (level) " (with the level, as Kalkuhl and Wenz: this year's value less last year's)", ".")
@@ -421,23 +454,12 @@ spec_definitions <- function(m) {
     } else if (level) {
       "Demeaned like the deviations, the level is the same as the deviation from the horizon mean."
     },
-    if (symmetric) {
-      sprintf(paste0("Symmetric: the deviation \\(x_{v,it}\\) enters unsplit and %s (one coefficient for both ",
-                     "sides%s)."),
-              if (nrk) "as it is" else "not demeaned",
-              per_form(c("Quadratic arms" = ": only its square, so years of the same size above and below the baseline have the same effect",
-                         "Linear + quadratic arms" = ", linearly and squared",
-                         "Linear arms" = ": a year \\(x\\) below the baseline has minus the effect of one \\(x\\) above")))
-    } else if (nrk || no_unit) {
-      sprintf(paste0("Not demeaned before the arms are cut (%s): arms ",
-                     "\\(D^{+}_{v,it} = \\max(x_{v,it}, 0)\\), \\(D^{-}_{v,it} = \\max(-x_{v,it}, 0)\\)%s."),
-              if (nrk) "the filter has country effects" else "no country effects", powers_text)
-    } else {
-      sprintf(paste0("Demeaned before the arms are cut: \\(d_{v,it} = x_{v,it} - (%s)\\), fitted by OLS for each ",
-                     "country over %d-%d; arms \\(D^{+}_{v,it} = \\max(d_{v,it}, 0)\\), ",
-                     "\\(D^{-}_{v,it} = \\max(-d_{v,it}, 0)\\)%s."),
-              trend, start - 10L, end, powers_text)
-    }
+    # Symmetric (unsplit) or arms, per variable: one sentence when T and P
+    # agree, otherwise one for each.
+    if (all(symmetric_v) || !any(symmetric_v)) arms_text(symmetric_v[[1]])
+    else paste0(vapply(c("TM", "RR"), function(v) {
+      paste0(if (v == "TM") "Temperature: " else "Precipitation: ", arms_text(symmetric_v[[v]]))
+    }, ""), collapse = " ")
   )
   if (any(c("lag", "cur") %in% used)) {
     out <- c(out, sprintf(paste0(
@@ -536,13 +558,13 @@ spec_definitions <- function(m) {
       "sums the effects of the deviations of that year and the %d before."),
       m$lags, start - 10L, m$lags, m$lags))
   }
-  if (identical(m$shape, "splines")) {
+  if (any_splines(m$shape)) {
     out <- c(out, paste0("Splines:\\(g(z) = \\gamma z + \\sum_{j=1}^{2} \\gamma_j [r_j(z) - r_j(0)]\\), ",
                          "restricted cubic spline with knots at the 5, 35, 65 and 95th percentiles of the ",
                          "countries' values (linear beyond the outer knots); one set of coefficients per arm."))
   }
   if (nrow(m$levels)) {
-    out <- c(out, paste0("Level terms (\\(\\phi\\)", if (identical(m$shape, "splines")) ", \\(h\\)", "): the ",
+    out <- c(out, paste0("Level terms (\\(\\phi\\)", if (any_splines(m$shape)) ", \\(h\\)", "): the ",
                          if (no_unit) "characteristics" else "time-varying characteristics",
                          " that enter an interaction also enter on their own",
                          if (no_unit) " (without country effects the constant ones too, unlagged)", "."))
@@ -729,15 +751,16 @@ setting_ui <- function(id, n) {
       checkboxInput(ns("share_trailing"), "Trailing agricultural share too (5 years before)", value = FALSE),
       uiOutput(ns("share_warning"))
     ),
-    radioButtons(ns("shape"), "Shape of the interactions",
-                 c("Linear" = "linear",
-                   "Restricted cubic splines (knots at the 5, 35, 65, 95th percentiles of the countries)" =
-                     "splines"), selected = "linear"),
-    checkboxInput(ns("cap"), paste("Cap the income, share and capital interactions: they can bring the",
-                                   "non-climate response to zero but never create a benefit"),
-                  value = FALSE),
+    # The low-income threshold, in the GDP source's units (default: the World
+    # Bank's line, set for the source when it changes).
     conditionalPanel(
-      "['20-year', '30-year'].indexOf(input.baseline) > -1 && input.units == 'SD'", ns = ns,
+      "(input.inter_T || []).indexOf('low') > -1 || (input.inter_P || []).indexOf('low') > -1", ns = ns,
+      numericInput(ns("low_threshold"), "Low-income threshold (GDP per capita)",
+                   round(EXPLORER$low_income[["PWT"]]), min = 1, step = 50),
+      uiOutput(ns("low_threshold_note"))
+    ),
+    conditionalPanel(
+      "['20-year', '30-year'].indexOf(input.baseline) > -1 && (input.units_T == 'SD' || input.units_P == 'SD')", ns = ns,
       radioButtons(ns("sd_mode"), "SD of the trailing baseline in the GDP path",
                    c("Fixed at the country's SD" = "fixed",
                      "Moving (widened by the shift)" = "moving"), selected = "fixed")
@@ -837,7 +860,12 @@ setting_server <- function(id, n, default_country, first = NULL) {
         updateRadioButtons(session, "convergence", selected = m$convergence)
         updateRadioButtons(session, "style", selected = m$style %||% "simple")
         for (k in c("quad_T", "quad_P")) updateSelectInput(session, k, selected = m[[k]] %||% "none")
-        updateCheckboxInput(session, "symmetric", value = isTRUE(m$symmetric))
+        for (v in c("T", "P")) {
+          updateCheckboxInput(session, paste0("symmetric_", v), value = isTRUE(m[[paste0("symmetric_", v)]]))
+          updateRadioButtons(session, paste0("units_", v), selected = m[[paste0("units_", v)]])
+          updateRadioButtons(session, paste0("shape_", v), selected = m[[paste0("shape_", v)]])
+          updateCheckboxInput(session, paste0("cap_", v), value = isTRUE(m[[paste0("cap_", v)]]))
+        }
         updateCheckboxInput(session, "use_lags", value = isTRUE(m$use_lags))
         if (is.finite(m$lags %||% NA)) updateNumericInput(session, "lags", value = m$lags)
         for (v in c("T", "P")) {
@@ -885,25 +913,33 @@ setting_server <- function(id, n, default_country, first = NULL) {
 
     model_inputs <- reactive(list(gdp = input$gdp, climate = input$climate, outcome = input$outcome,
                                   baseline = input$baseline, style = input$style,
-                                  weight = input$weight, units = input$units, fe = input$fe,
+                                  weight = input$weight, units_T = input$units_T, units_P = input$units_P, fe = input$fe,
                                   effects = input$effects, convergence = input$convergence,
                                   quad_T = input$quad_T, quad_P = input$quad_P,
-                                  form_T = input$form_T, form_P = input$form_P, symmetric = input$symmetric,
+                                  form_T = input$form_T, form_P = input$form_P,
+                                  symmetric_T = input$symmetric_T, symmetric_P = input$symmetric_P,
                                   use_lags = input$use_lags, lags = input$lags,
                                   inter_T = input$inter_T, inter_P = input$inter_P,
                                   low_threshold = input$low_threshold,
                                   moderators = input$moderators, share_trailing = input$share_trailing,
                                   income_form_T = input$income_form_T, income_form_P = input$income_form_P,
                                   xi_T = input$xi_T, xi_P = input$xi_P,
+                                  exposure_mode = input$exposure_mode, exposure_channels = input$exposure_channels,
+                                  exp_hot_src = input$exp_hot_src, exp_hot_value = input$exp_hot_value,
+                                  exp_hot_measure = input$exp_hot_measure, exp_cold_src = input$exp_cold_src,
+                                  exp_cold_value = input$exp_cold_value, exp_cold_measure = input$exp_cold_measure,
+                                  exposure_mode_P = input$exposure_mode_P, exposure_channels_P = input$exposure_channels_P,
+                                  exp_wet_type = input$exp_wet_type, exp_wet_pct = input$exp_wet_pct,
+                                  exp_wet_abs = input$exp_wet_abs, exp_wet_measure = input$exp_wet_measure,
+                                  exp_dry_value = input$exp_dry_value, exp_dry_measure = input$exp_dry_measure,
                                   sd_mode = input$sd_mode, clim_mode = input$clim_mode,
-                                  cap = input$cap, shape = input$shape, controls = input$controls,
+                                  cap_T = input$cap_T, cap_P = input$cap_P, shape_T = input$shape_T, shape_P = input$shape_P,
+                                  controls = input$controls,
                                   drop_outliers = input$drop_outliers, outlier_tail = input$outlier_tail))
     active <- reactive(n == 1 || isTRUE(input$active))
     spec <- reactive({
       req(input$gdp, input$climate, input$baseline, input$form_T, input$form_P)
       form <- c(TM = input$form_T, RR = input$form_P)
-      req(is.finite(input$mean_T), isTRUE(input$sd_T > 0), is.finite(input$mean_P),
-          isTRUE(input$sd_P > 0), isTRUE(input$income > 0), isTRUE(input$share >= 0))
       # The PWT outcomes and capital only with PWT (model_options()); an
       # unticked group is NULL: no interaction for that variable.
       checked <- model_options(list(gdp = input$gdp, outcome = input$outcome %||% "log",
@@ -991,17 +1027,68 @@ setting_server <- function(id, n, default_country, first = NULL) {
                                        outcome = outcome, income_form = income$income_form, xi = income$xi,
                                        controls = controls, outliers = outliers, low_threshold = low_threshold),
                                   EXPLORER),
-           country = list(mean_T = input$mean_T, sd_T = input$sd_T, mean_P = input$mean_P / 1000,
-                          sd_P = input$sd_P / 1000, income = input$income, share = input$share / 100,
-                          capital = if (uses_kap) input$capital),
            sd_mode = sd_mode, clim_mode = clim_mode, cap = cap,
-           # The support of the deviations the model uses (symmetric or without
-           # unit effects: as they are).
-           support = EXPLORER$support[[paste(panel_key(), deviation_fe(fe, symmetric, effects),
-                                             if (identical(input$style, "diff")) "diff", sep = " | ")]],
+           # The support of the deviations the model uses, each variable's from
+           # its own units and demeaning (symmetric or without unit effects:
+           # as they are).
+           support = do.call(rbind, lapply(c("TM", "RR"), function(v) {
+             key <- paste(input$gdp, input$climate, input$baseline, weight, units_v[[v]],
+                          deviation_fe(fe, symmetric[[v]], effects),
+                          if (identical(input$style, "diff")) "diff", sep = " | ")
+             s <- EXPLORER$support[[key]]
+             s[s$variable == v, , drop = FALSE]
+           })),
            units = u, gdp = input$gdp)
     })
-    list(active = active, spec = spec, model_inputs = model_inputs)
+    list(active = active, spec = spec, model_inputs = model_inputs, units = units, gdp = reactive(input$gdp))
+  })
+}
+
+# Country k of the Single country page: its characteristics, the setting
+# whose model it uses, and its name. Presets from that setting's panel.
+country_server <- function(id, k, default_country, settings) {
+  moduleServer(id, function(input, output, session) {
+    setting_n <- reactive(as.integer(input$setting %||% k))
+    setting <- reactive(settings[[setting_n()]])
+    units <- reactive(setting()$units())
+    observeEvent(units(), {
+      u <- units()
+      current <- isolate(input$preset)
+      selected <- if (is.null(current)) default_country else current
+      if (!selected %in% c("", u$GID_0)) selected <- ""
+      choices <- c("Custom" = "", stats::setNames(u$GID_0, u$country)[order(u$country)])
+      updateSelectInput(session, "preset", choices = choices, selected = selected)
+    })
+    observeEvent(list(input$preset, units()), {
+      req(input$preset)
+      row <- units()[units()$GID_0 == input$preset, ]
+      req(nrow(row) == 1)
+      v <- preset_values(row)
+      for (z in names(v)[is.finite(v)]) updateNumericInput(session, z, value = v[[z]])
+    }, ignoreInit = TRUE)
+    output$income_units <- renderUI({
+      helpText(paste0("Long-run (sample mean) level, in ", EXPLORER$income_units[[setting()$gdp()]], "."))
+    })
+    active <- reactive(k == 1 || isTRUE(input$active))
+    # The country: its characteristics (P in m a year, share as a fraction),
+    # its preset's code (the exposure slopes; NULL: custom) and its name.
+    country <- reactive({
+      req(is.finite(input$mean_T), isTRUE(input$sd_T > 0), is.finite(input$mean_P),
+          isTRUE(input$sd_P > 0), isTRUE(input$income > 0), isTRUE(input$share >= 0))
+      u <- units()
+      row <- u[u$GID_0 == (input$preset %||% ""), ]
+      values <- c(mean_T = input$mean_T, sd_T = input$sd_T, mean_P = input$mean_P,
+                  sd_P = input$sd_P, income = input$income, share = input$share)
+      name <- if (nrow(row) == 1) {
+        if (isTRUE(all.equal(unname(values), unname(preset_values(row)[names(values)])))) row$country
+        else paste(row$country, "(edited)")
+      } else "custom"
+      list(GID_0 = if (nrow(row) == 1) row$GID_0, mean_T = input$mean_T, sd_T = input$sd_T,
+           mean_P = input$mean_P / 1000, sd_P = input$sd_P / 1000, income = input$income,
+           share = input$share / 100, capital = if (isTRUE(input$capital > 0)) input$capital,
+           name = name, user_label = trimws(input$label %||% ""))
+    })
+    list(active = active, setting_n = setting_n, country = country)
   })
 }
 
@@ -1481,7 +1568,7 @@ server <- function(input, output, session) {
         x <- shift(v) / deviation_scale(m, cn, v)
         q <- s$support[s$support$variable == v, ]
         if (x < q$q01 || x > q$q99) {
-          unit <- if (!identical(m$units, "absolute")) "SD" else if (v == "TM") "C" else "m"
+          unit <- if (!identical(of_variable(m$units, v), "absolute")) "SD" else if (v == "TM") "C" else "m"
           msgs <- c(msgs, sprintf(paste(
             "%sthe %s shift is %+.2f %s, beyond the 1st-99th percentile of the deviations in the",
             "data (%+.2f to %+.2f %s): its response is an extrapolation."),
@@ -2336,7 +2423,7 @@ server <- function(input, output, session) {
                             "(%s) on %s; %s rows, %s countries from %d; controls: %s; %s.%s%s%s"), s$label, m$gdp, m$climate,
                       baseline_label(m$baseline, model_style(m)), form_label(m$form, m$symmetric),
                       effects_text, interaction_label(m$inter),
-                      m$shape %||% "linear", moderators, format(m$nobs, big.mark = ","), m$countries,
+                      if (length(unique(m$shape %||% "linear")) == 1) (m$shape %||% "linear")[[1]] else paste0("T ", m$shape[["TM"]], ", P ", m$shape[["RR"]]), moderators, format(m$nobs, big.mark = ","), m$countries,
                       EXPLORER$start_year,
                       if (length(m$controls)) paste(CONTROL_SHORT[m$controls], collapse = ", ") else "none",
                       outlier_text(m$outliers, m$gdp), test, levels, convergence))
