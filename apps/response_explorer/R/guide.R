@@ -108,6 +108,18 @@ guide_ui <- function() {
       )
     ),
     guide_section(
+      "By characteristic",
+      tags$p("The effect on growth of one year k SD above (red) and below (blue) the baseline, in one chart for",
+             "temperature and one for precipitation (columns: the shown settings), each against a characteristic",
+             "of its own varying over the range of the setting's countries (rug): long-run temperature or",
+             "precipitation, GDP per capita, agricultural share or capital. The other characteristics, and the SD that sets the size of the anomaly, are those",
+             "of the reference country (one of the shown countries; circle). The heatmap shows the same effect over",
+             "two characteristics at once (axes chosen freely), for T or P and the +k or -k SD year, with the",
+             "setting's countries as dots (where the data are). With exposure-mediated terms, the",
+             "second chart shows the physical exposure curves: each country's slope of the indices and their smooth",
+             "in climate, with the reference country's climate dashed.")
+    ),
+    guide_section(
       "Coefficients",
       tags$p("Each setting's equation and definitions, its deviation terms with clustered SEs and stars (* 10%,",
              "** 5%, *** 1%), the fit (within adjusted R², AIC, BIC) and joint Wald tests (all terms of a variable,",
