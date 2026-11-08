@@ -701,20 +701,30 @@ theme_explorer <- function() {
 setting_ui <- function(id, n) {
   ns <- NS(id)
   tagList(
-    if (n > 1) checkboxInput(ns("active"), "Show this setting", value = FALSE),
-    textInput(ns("label"), "Label", placeholder = "automatic"),
-    tags$h6("Model", class = "mt-3"),
+    textInput(ns("label"), "Name", placeholder = paste("Setting", n)),
     if (n > 1) actionButton(ns("copy"), "Copy the model of setting 1",
                             class = "btn-sm btn-outline-secondary mb-2"),
+    helpText("A setting is shown (charts, coefficients, scenarios) when a shown country on the Single country",
+             "page uses it."),
+    accordion(
+      id = ns("model_sections"), open = "Common", multiple = TRUE,
+      accordion_panel("Common", common_ui(ns)),
+      accordion_panel("Temperature", variable_ui(ns, "T")),
+      accordion_panel("Precipitation", variable_ui(ns, "P"))
+    )
+  )
+}
+
+# The options common to both variables: data, outcome, the regression design,
+# sample, characteristics and the paths.
+common_ui <- function(ns) {
+  tagList(
     selectInput(ns("gdp"), "GDP data", c("PWT", "WB")),
     selectInput(ns("climate"), "Climate data", c("ERA5", "CRU TS", "UDelaware")),
     selectInput(ns("outcome"), "Outcome (capital and GDP per worker: PWT only)", OUTCOME_CHOICES, selected = "log"),
     radioButtons(ns("weight"), "Climate weights (estimation and CMIP6 downscaling)",
                  c("Population density" = "population", "Area (plain area average)" = "area"),
                  selected = "population", inline = TRUE),
-    radioButtons(ns("units"), "Deviations in",
-                 c("SD of the country's variability" = "SD", "Absolute units (C, m)" = "absolute"),
-                 selected = "SD", inline = TRUE),
     selectInput(ns("baseline"), "Regression unit", BASELINE_CHOICES, selected = "20-year"),
     conditionalPanel(
       "input.baseline == 'Level'", ns = ns,
@@ -726,8 +736,10 @@ setting_ui <- function(id, n) {
       "input.baseline == 'NRK filter'", ns = ns,
       helpText("The deviation is the innovation of the pooled AR(3) filter with lags times the country's",
                "mean climate (country effects, no year effects, fitted from 1950), not demeaned. The",
-               "country SDs below are those of the innovation.")
+               "country SDs are those of the innovation.")
     ),
+    radioButtons(ns("style"), "Regression style (first difference of the level: Kalkuhl and Wenz)",
+                 STYLE_CHOICES, selected = "simple"),
     checkboxInput(ns("use_lags"), paste("Lags: every deviation term also at t-1, ..., t-L, each interacted with the",
                                         "characteristics of its own year"), value = FALSE),
     conditionalPanel(
@@ -735,8 +747,6 @@ setting_ui <- function(id, n) {
       numericInput(ns("lags"), sprintf("Number of lags L (1-%d)", EXPLORER$max_lags %||% 10), 5,
                    min = 1, max = EXPLORER$max_lags %||% 10, step = 1)
     ),
-    radioButtons(ns("style"), "Regression style (first difference of the level: Kalkuhl and Wenz)",
-                 STYLE_CHOICES, selected = "simple"),
     radioButtons(ns("effects"), "Fixed effects", EFFECTS_CHOICES, selected = "both"),
     conditionalPanel(
       "input.effects != 'year'", ns = ns,
@@ -745,8 +755,6 @@ setting_ui <- function(id, n) {
     ),
     radioButtons(ns("convergence"), "Convergence control (on its own, whatever the interactions)",
                  CONVERGENCE_CHOICES, selected = "none"),
-    selectInput(ns("quad_T"), "Quadratic control of T (Z + Z², on its own)", QUAD_CHOICES, selected = "none"),
-    selectInput(ns("quad_P"), "Quadratic control of P (Z + Z², on its own)", QUAD_CHOICES, selected = "none"),
     checkboxGroupInput(ns("controls"), "Controls", CONTROL_CHOICES, selected = CONTROL_CHOICES, inline = TRUE),
     checkboxInput(ns("drop_outliers"), paste("Drop the growth outliers whose cause is not weather (annotated",
                                              "country-years in the tails of the GDP source's growth reversals",
@@ -757,40 +765,6 @@ setting_ui <- function(id, n) {
       radioButtons(ns("outlier_tail"), paste("Rule and tails (reversal: the change of growth from the year",
                                              "before, flagged in the second year)"), OUTLIER_CHOICES,
                    selected = DEFAULT_OUTLIERS)
-    ),
-    selectInput(ns("form_T"), "Arms of temperature", names(ARM_SUFFIXES), selected = "Quadratic arms"),
-    selectInput(ns("form_P"), "Arms of precipitation", names(ARM_SUFFIXES), selected = "Quadratic arms"),
-    checkboxInput(ns("symmetric"), paste("Symmetric: one coefficient for both sides (the deviations unsplit:",
-                                         "x, x^2 or both; not demeaned)"), value = FALSE),
-    checkboxGroupInput(ns("inter_T"), "Interactions of the temperature terms", MODIFIERS,
-                       selected = DEFAULT_MODIFIERS$inter_T, inline = TRUE),
-    checkboxGroupInput(ns("inter_P"), "Interactions of the precipitation terms", MODIFIERS,
-                       selected = DEFAULT_MODIFIERS$inter_P, inline = TRUE),
-    # The low-income threshold, in the GDP source's units (default: the World
-    # Bank's line, set for the source when it changes).
-    conditionalPanel(
-      "(input.inter_T || []).indexOf('low') > -1 || (input.inter_P || []).indexOf('low') > -1", ns = ns,
-      numericInput(ns("low_threshold"), "Low-income threshold (GDP per capita)",
-                   round(EXPLORER$low_income[["PWT"]]), min = 1, step = 50),
-      uiOutput(ns("low_threshold_note"))
-    ),
-    tagList(
-      helpText("Income scaling of the deviation terms (each arm and its ticked interactions), by variable:",
-               "the dollar loss per person of a scaled term is proportional to Y^xi (xi = 0: equal dollars;",
-               "xi = 1: equal %, the standard terms)."),
-      lapply(c(T = "temperature", P = "precipitation"), function(name) {
-        v <- if (name == "temperature") "T" else "P"
-        tagList(
-          # Default: T scaled with xi = 0.6 (the preferred specification), P standard.
-          radioButtons(ns(paste0("income_form_", v)), paste("Income scaling of the", name, "terms"),
-                       INCOME_FORMS, selected = if (v == "T") "dollars" else "standard"),
-          conditionalPanel(
-            sprintf("input.income_form_%s != 'standard'", v), ns = ns,
-            sliderInput(ns(paste0("xi_", v)), paste0("Elasticity xi of the scaled ", name, " terms"),
-                        min = XI_RANGE[1], max = XI_RANGE[2], value = if (v == "T") 0.6 else 0, step = 0.1)
-          )
-        )
-      })
     ),
     radioButtons(ns("moderators"), "Characteristics in the interactions (estimation)",
                  c("Fixed: sample means" = "fixed",
@@ -822,22 +796,129 @@ setting_ui <- function(id, n) {
                    c("Fixed at the sample mean" = "fixed",
                      "Follow the trailing baseline (climate; in the scenarios also income and share along the SSP)" =
                        "baseline"), selected = "baseline")
-    ),
-    tags$h6("Country", class = "mt-3"),
-    selectInput(ns("preset"), "Start from a country", choices = NULL),
-    numericInput(ns("mean_T"), "Long-run mean temperature (°C)", 25, step = 0.5),
-    numericInput(ns("sd_T"), "SD of annual temperature (°C)", 0.5, min = 0.01, step = 0.05),
-    numericInput(ns("mean_P"), "Long-run mean precipitation (mm a year)", 1000, min = 0, step = 50),
-    numericInput(ns("sd_P"), "SD of annual precipitation (mm)", 150, min = 1, step = 10),
-    numericInput(ns("income"), "GDP per capita", 5000, min = 100, step = 500),
-    uiOutput(ns("income_units")),
-    numericInput(ns("share"), "Agricultural share of value added (%)", 15, min = 0, max = 100, step = 1),
-    conditionalPanel(
-      "input.gdp == 'PWT'", ns = ns,
-      numericInput(ns("capital"), "Capital stock per capita", 20000, min = 100, step = 1000),
-      helpText(paste0("Long-run (sample mean) level, in ", EXPLORER$capital_units, "; used with the capital ",
-                      "interaction."))
     )
+  )
+}
+
+# The options of the terms of one variable ("T" or "P"), each on its own.
+variable_ui <- function(ns, v) {
+  name <- if (v == "T") "temperature" else "precipitation"
+  id <- function(x) ns(paste0(x, "_", v))
+  tagList(
+    radioButtons(id("units"), "Deviations in",
+                 stats::setNames(c("SD", "absolute"), c("SD of the country's variability",
+                                                         if (v == "T") "Absolute units (C)" else "Absolute units (m)")),
+                 selected = "SD", inline = TRUE),
+    selectInput(id("form"), "Arms", names(ARM_SUFFIXES), selected = "Quadratic arms"),
+    checkboxInput(id("symmetric"), paste("Symmetric: one coefficient for both sides (the deviations unsplit:",
+                                         "x, x², or both; not demeaned)"), value = FALSE),
+    checkboxGroupInput(id("inter"), "Interactions", MODIFIERS,
+                       selected = DEFAULT_MODIFIERS[[paste0("inter_", v)]], inline = TRUE),
+    radioButtons(id("shape"), "Shape of the interactions",
+                 c("Linear" = "linear",
+                   "Restricted cubic splines (knots at the 5, 35, 65, 95th percentiles of the countries)" =
+                     "splines"), selected = "linear"),
+    checkboxInput(id("cap"), paste("Cap the income, share and capital interactions: they can bring the",
+                                   "non-climate response to zero but never create a benefit"),
+                  value = FALSE),
+    # Default: T scaled with xi = 0.6 (the preferred specification), P standard.
+    radioButtons(id("income_form"), "Income scaling",
+                 INCOME_FORMS, selected = if (v == "T") "dollars" else "standard"),
+    conditionalPanel(
+      sprintf("input.income_form_%s != 'standard'", v), ns = ns,
+      sliderInput(id("xi"), "Elasticity xi of the scaled terms",
+                  min = XI_RANGE[1], max = XI_RANGE[2], value = if (v == "T") 0.6 else 0, step = 0.1),
+      helpText("The dollar loss per person of a scaled term is proportional to Y^xi (xi = 0: equal dollars;",
+               "xi = 1: equal %, the standard terms).")
+    ),
+    selectInput(id("quad"), "Quadratic climate control (Z + Z², on its own)", QUAD_CHOICES, selected = "none"),
+    if (v == "T") exposure_T_ui(ns) else exposure_P_ui(ns)
+  )
+}
+exposure_T_ui <- function(ns) {
+  tagList(
+    selectInput(ns("exposure_mode"), "Exposure", EXPOSURE_MODES, selected = "none"),
+    if (!exposure_available("TM")) {
+      helpText("No exposure histograms: run Rscript apps/exposure_explorer/build_exposure.R gadm0.")
+    },
+    conditionalPanel(
+      "input.exposure_mode != 'none'", ns = ns,
+      helpText(paste("Every temperature term (each arm and its ticked interactions, income scaling included)",
+                     "times the country's exposure slope of each index (the change of the index per 1 C of annual",
+                     "mean T), with no plain term; deviations in absolute units. Smooth: the slope as a function of",
+                     "the long-run climate, which follows the warming in the paths and scenarios.")),
+      radioButtons(ns("exposure_channels"), "Channels", EXPOSURE_CHANNELS, selected = "both", inline = TRUE),
+      tags$div(class = "d-flex gap-2",
+        selectInput(ns("exp_hot_src"), "Hot: daily series", EXPOSURE_SOURCES, selected = "tmpmax"),
+        numericInput(ns("exp_hot_value"), "above (C)", 29, step = 1)),
+      radioButtons(ns("exp_hot_measure"), NULL, EXPOSURE_MEASURES, selected = "dd", inline = TRUE),
+      tags$div(class = "d-flex gap-2",
+        selectInput(ns("exp_cold_src"), "Cold: daily series", EXPOSURE_SOURCES, selected = "tmpmin"),
+        numericInput(ns("exp_cold_value"), "below (C)", 0, step = 1)),
+      radioButtons(ns("exp_cold_measure"), NULL, EXPOSURE_MEASURES, selected = "dd", inline = TRUE)
+    )
+  )
+}
+exposure_P_ui <- function(ns) {
+  tagList(
+    selectInput(ns("exposure_mode_P"), "Exposure", EXPOSURE_MODES, selected = "none"),
+    conditionalPanel(
+      "input.exposure_mode_P != 'none'", ns = ns,
+      helpText(paste("Every precipitation term times the country's exposure slope of the wet and dry indices",
+                     "(their change per m of annual P). National daily P is a population-weighted average, which",
+                     "rarely exceeds fixed thresholds in large countries: the default wet index is relative, the mm",
+                     "beyond the country's 99th percentile of daily P.")),
+      radioButtons(ns("exposure_channels_P"), "Channels", EXPOSURE_VARS$RR$channels, selected = "both", inline = TRUE),
+      radioButtons(ns("exp_wet_type"), "Wet: threshold", c("Country percentile" = "pct", "Absolute (mm a day)" = "abs"),
+                   selected = "pct", inline = TRUE),
+      conditionalPanel("input.exp_wet_type == 'pct'", ns = ns,
+        selectInput(ns("exp_wet_pct"), "daily P above the country's", EXPOSURE_P_PCT, selected = 0.99)),
+      conditionalPanel("input.exp_wet_type == 'abs'", ns = ns,
+        selectInput(ns("exp_wet_abs"), "daily P above (mm)", EXPOSURE_P_EDGES[EXPOSURE_P_EDGES >= 1], selected = 20)),
+      radioButtons(ns("exp_wet_measure"), NULL, EXPOSURE_P_MEASURES, selected = "dd", inline = TRUE),
+      selectInput(ns("exp_dry_value"), "Dry: daily P below (mm)", EXPOSURE_P_EDGES[EXPOSURE_P_EDGES > 0 & EXPOSURE_P_EDGES <= 10],
+                  selected = 1),
+      radioButtons(ns("exp_dry_measure"), NULL, c("Days" = "days", "mm short" = "dd"), selected = "days", inline = TRUE)
+    )
+  )
+}
+
+# Country k of the Single country page: whether it is shown, its name, the
+# setting whose model it uses, and its characteristics.
+country_ui <- function(id, k) {
+  ns <- NS(id)
+  tagList(
+    layout_columns(
+      col_widths = c(3, 3, 3, 3),
+      if (k > 1) checkboxInput(ns("active"), "Show this country", value = FALSE)
+      else helpText("Country 1 is always shown."),
+      textInput(ns("label"), "Name", placeholder = paste("Country", k)),
+      selectInput(ns("setting"), "Model: setting", stats::setNames(seq_len(N_SETTINGS), paste("Setting", seq_len(N_SETTINGS))),
+                  selected = 1),
+      selectInput(ns("preset"), "Start from a country", choices = NULL)
+    ),
+    layout_columns(
+      col_widths = c(3, 3, 3, 3),
+      numericInput(ns("mean_T"), "Long-run mean temperature (°C)", 25, step = 0.5),
+      numericInput(ns("sd_T"), "SD of annual temperature (°C)", 0.5, min = 0.01, step = 0.05),
+      numericInput(ns("mean_P"), "Long-run mean precipitation (mm a year)", 1000, min = 0, step = 50),
+      numericInput(ns("sd_P"), "SD of annual precipitation (mm)", 150, min = 1, step = 10)
+    ),
+    layout_columns(
+      col_widths = c(4, 4, 4),
+      tagList(numericInput(ns("income"), "GDP per capita", 5000, min = 100, step = 500), uiOutput(ns("income_units"))),
+      numericInput(ns("share"), "Agricultural share of value added (%)", 15, min = 0, max = 100, step = 1),
+      tagList(numericInput(ns("capital"), "Capital stock per capita (PWT)", 20000, min = 100, step = 1000),
+              helpText(paste0("Long-run (sample mean) level, in ", EXPLORER$capital_units, "; used with the capital ",
+                              "interaction.")))
+    )
+  )
+}
+country_tab <- function(k) {
+  nav_panel(
+    title = tags$span(tags$span("●", style = paste0("color:", SETTING_COLOURS[k], ";")), paste("Country", k)),
+    value = paste0("c", k),
+    country_ui(paste0("c", k), k)
   )
 }
 
@@ -856,25 +937,11 @@ setting_server <- function(id, n, default_country, first = NULL) {
     panel_key <- reactive({
       req(input$gdp, input$climate, input$baseline)
       paste(input$gdp, input$climate, input$baseline, input$weight %||% "population",
-            input$units %||% "SD", sep = " | ")
+            input$units_T %||% "SD", sep = " | ")
     })
+    # The countries of the setting's panel (the presets of the countries that
+    # use it, on the Single country page).
     units <- reactive(EXPLORER$units[[panel_key()]])
-
-    observeEvent(panel_key(), {
-      u <- units()
-      current <- isolate(input$preset)
-      selected <- if (is.null(current)) default_country else current
-      if (!selected %in% c("", u$GID_0)) selected <- ""
-      choices <- c("Custom" = "", stats::setNames(u$GID_0, u$country)[order(u$country)])
-      updateSelectInput(session, "preset", choices = choices, selected = selected)
-    })
-    observeEvent(list(input$preset, panel_key()), {
-      req(input$preset)
-      row <- units()[units()$GID_0 == input$preset, ]
-      req(nrow(row) == 1)
-      v <- preset_values(row)
-      for (k in names(v)[is.finite(v)]) updateNumericInput(session, k, value = v[[k]])
-    }, ignoreInit = TRUE)
     # The PWT outcomes and the capital interaction only with PWT GDP.
     observeEvent(input$gdp, {
       pwt <- input$gdp == "PWT"
@@ -1008,7 +1075,6 @@ setting_server <- function(id, n, default_country, first = NULL) {
       inter <- checked$inter
       income <- checked
       uses_kap <- "kap" %in% unlist(inter)
-      req(!uses_kap || isTRUE(input$capital > 0))
       uses_low <- "low" %in% unlist(inter)
       req(!uses_low || isTRUE(input$low_threshold > 0))
       low_threshold <- if (uses_low) input$low_threshold
@@ -1190,163 +1256,188 @@ setting_tab <- function(n) {
   )
 }
 
-ui <- page_sidebar(
+ui <- page_navbar(
   title = "Weather response explorer",
+  id = "page",
   # Scroll rather than squeeze the charts into the window's height (a short
   # window would leave them too small to draw).
   fillable = FALSE,
   theme = bs_theme(version = 5, bg = SURFACE, fg = INK, primary = SETTING_COLOURS[1]),
+  # The settings (model and country), common to every page.
   sidebar = sidebar(
-    width = 360,
+    width = 380,
     downloadButton("save_page", "Save the page as HTML", class = "btn-sm btn-outline-secondary"),
     helpText("The shown settings, charts, tables and notes; the climate scenarios and the termination",
              "shocks only if run (their last run)."),
     tags$hr(),
-    tags$h6("Permanent shift (common to all settings)"),
-    numericInput("shock_T", "Temperature (°C)", 1, step = 0.5),
-    numericInput("shock_P", "Precipitation (mm a year)", 100, step = 25),
-    sliderInput("horizon", "Years shown in the GDP paths", 10, 100, 50, step = 5),
-    numericInput("ramp_years", paste("Year X: the gradual shift reaches its full size (dashed) and",
-                                     "the sudden late one starts (dotted)"), 50, min = 1, step = 5),
-    checkboxGroupInput("gdp_lines", "Shifts shown in the GDP paths",
-                       c("Immediate (solid)" = "permanent", "Gradual until year X (dashed)" = "gradual",
-                         "Sudden in year X (dotted)" = "delayed",
-                         "Transitory: year 0 only (dot-dash; the response over the lags)" = "one-off"),
-                       selected = "gradual"),
-    tags$hr(),
     do.call(navset_pill, c(lapply(seq_len(N_SETTINGS), setting_tab), list(id = "setting_tabs")))
   ),
-  uiOutput("warnings"),
-  layout_columns(
-    col_widths = c(6, 6),
-    card(card_header("Temperature: growth response to an annual anomaly"),
-         plotOutput("response_T", height = 380, hover = hoverOpts("hover_response_T", delay = 80)),
-         uiOutput("readout_response_T")),
-    card(card_header("Precipitation: growth response to an annual anomaly"),
-         plotOutput("response_P", height = 380, hover = hoverOpts("hover_response_P", delay = 80)),
-         uiOutput("readout_response_P"))
+  # The warnings of the settings, above every page.
+  header = uiOutput("warnings"),
+  nav_panel(
+    "Single country",
+    card(
+      card_header("Shift (common to all settings)"),
+      layout_columns(
+        col_widths = c(2, 2, 3, 2, 3),
+        numericInput("shock_T", "Temperature (°C)", 1, step = 0.5),
+        numericInput("shock_P", "Precipitation (mm a year)", 100, step = 25),
+        sliderInput("horizon", "Years shown in the GDP paths", 10, 100, 50, step = 5),
+        numericInput("ramp_years", "Year X", 50, min = 1, step = 5),
+        checkboxGroupInput("gdp_lines", "Shifts shown in the GDP paths",
+                           c("Immediate (solid)" = "permanent", "Gradual until year X (dashed)" = "gradual",
+                             "Sudden in year X (dotted)" = "delayed",
+                             "Transitory: year 0 only (dot-dash; the response over the lags)" = "one-off"),
+                           selected = "gradual")
+      ),
+      helpText("Year X: the gradual shift reaches its full size there (dashed) and the sudden late one starts",
+               "(dotted).")
+    ),
+    card(
+      card_header("Countries: each with its characteristics and the setting whose model it uses"),
+      do.call(navset_pill, c(lapply(seq_len(N_SETTINGS), country_tab), list(id = "country_tabs")))
+    ),
+    layout_columns(
+      col_widths = c(6, 6),
+      card(card_header("Temperature: growth response to an annual anomaly"),
+           plotOutput("response_T", height = 380, hover = hoverOpts("hover_response_T", delay = 80)),
+           uiOutput("readout_response_T")),
+      card(card_header("Precipitation: growth response to an annual anomaly"),
+           plotOutput("response_P", height = 380, hover = hoverOpts("hover_response_P", delay = 80)),
+           uiOutput("readout_response_P"))
+    ),
+    layout_columns(
+      col_widths = c(6, 6),
+      card(card_header(textOutput("gdp_header_T", inline = TRUE)),
+           plotOutput("gdp_T", height = 430, hover = hoverOpts("hover_gdp_T", delay = 80)),
+           uiOutput("readout_gdp_T")),
+      card(card_header(textOutput("gdp_header_P", inline = TRUE)),
+           plotOutput("gdp_P", height = 430, hover = hoverOpts("hover_gdp_P", delay = 80)),
+           uiOutput("readout_gdp_P"))
+    )
   ),
-  layout_columns(
-    col_widths = c(6, 6),
-    card(card_header(textOutput("gdp_header_T", inline = TRUE)),
-         plotOutput("gdp_T", height = 430, hover = hoverOpts("hover_gdp_T", delay = 80)),
-         uiOutput("readout_gdp_T")),
-    card(card_header(textOutput("gdp_header_P", inline = TRUE)),
-         plotOutput("gdp_P", height = 430, hover = hoverOpts("hover_gdp_P", delay = 80)),
-         uiOutput("readout_gdp_P"))
+  nav_panel(
+    "Coefficients",
+    card(card_header("Each setting's model: specification, coefficients, fit and joint tests"),
+         withMathJax(uiOutput("spec_math")),
+         tableOutput("coef_table"),
+         uiOutput("coef_notes"))
   ),
-  card(card_header("Each setting's model: specification, coefficients, fit and joint tests"),
-       withMathJax(uiOutput("spec_math")),
-       tableOutput("coef_table"),
-       uiOutput("coef_notes")),
-  card(
-    card_header("Climate scenarios: GDP losses under each setting's model, 2025-2100"),
-    layout_columns(
-      col_widths = c(6, 6),
-      checkboxGroupInput("scen_sel", "Forcing: the global warming path", SCENARIO_CHOICES,
-                         selected = SCENARIO_CHOICES, inline = TRUE),
-      radioButtons("econ_ssp", paste("Economic development: income, population and agricultural",
-                                     "share (Follow SSP-RCP: each forcing with its own SSP)"),
-                   ECONOMY_CHOICES, selected = "follow", inline = TRUE)
-    ),
-    layout_columns(
-      col_widths = c(6, 3),
-      selectInput("scen_noise", "Natural variability (each country's detrended historical T and P)",
-                  VARIABILITY_CHOICES, selected = "none"),
-      selectInput("scen_noise_n", "Noise paths", NOISE_PATH_CHOICES, selected = "200")
-    ),
-    layout_columns(
-      col_widths = c(4, 3, 5),
-      selectInput("map_setting", "Maps: setting", choices = NULL),
-      selectInput("map_scenario", "Maps: forcing", choices = NULL),
-      radioButtons("map_component", "GDP maps: impact of",
-                   c("T and P" = "loss", "T only" = "loss_T", "P only" = "loss_P"),
-                   selected = "loss", inline = TRUE)
-    ),
-    div(class = "d-flex align-items-center gap-3 mb-2",
-        actionButton("run_scenarios", "Run the climate scenarios", class = "btn-primary"),
-        uiOutput("scenario_status")),
-    radioButtons("global_measure", "Global chart", MEASURE_CHOICES, selected = "loss", inline = TRUE),
-    layout_columns(
-      col_widths = c(4, 8),
-      plotOutput("gmt_plot", height = 380),
-      plotOutput("global_plot", height = 380, hover = hoverOpts("hover_global", delay = 80))
-    ),
-    uiOutput("readout_global"),
-    layout_columns(
-      col_widths = c(6, 6),
-      plotOutput("map_2050", height = 340),
-      plotOutput("map_2100", height = 340)
-    ),
-    tags$h6("Physical drivers: the change of each country's climate in the scenario", class = "mt-3"),
-    layout_columns(
-      col_widths = c(6, 6),
-      plotOutput("driver_T_2050", height = 320),
-      plotOutput("driver_T_2100", height = 320)
-    ),
-    layout_columns(
-      col_widths = c(6, 6),
-      plotOutput("driver_P_2050", height = 320),
-      plotOutput("driver_P_2100", height = 320)
-    ),
-    tableOutput("global_table"),
-    uiOutput("scenario_notes")
+  nav_panel(
+    "Climate scenarios",
+    card(
+      card_header("Climate scenarios: GDP losses under each setting's model, 2025-2100"),
+      layout_columns(
+        col_widths = c(6, 6),
+        checkboxGroupInput("scen_sel", "Forcing: the global warming path", SCENARIO_CHOICES,
+                           selected = SCENARIO_CHOICES, inline = TRUE),
+        radioButtons("econ_ssp", paste("Economic development: income, population and agricultural",
+                                       "share (Follow SSP-RCP: each forcing with its own SSP)"),
+                     ECONOMY_CHOICES, selected = "follow", inline = TRUE)
+      ),
+      layout_columns(
+        col_widths = c(6, 3),
+        selectInput("scen_noise", "Natural variability (each country's detrended historical T and P)",
+                    VARIABILITY_CHOICES, selected = "none"),
+        selectInput("scen_noise_n", "Noise paths", NOISE_PATH_CHOICES, selected = "200")
+      ),
+      layout_columns(
+        col_widths = c(4, 3, 5),
+        selectInput("map_setting", "Maps: setting", choices = NULL),
+        selectInput("map_scenario", "Maps: forcing", choices = NULL),
+        radioButtons("map_component", "GDP maps: impact of",
+                     c("T and P" = "loss", "T only" = "loss_T", "P only" = "loss_P"),
+                     selected = "loss", inline = TRUE)
+      ),
+      div(class = "d-flex align-items-center gap-3 mb-2",
+          actionButton("run_scenarios", "Run the climate scenarios", class = "btn-primary"),
+          uiOutput("scenario_status")),
+      radioButtons("global_measure", "Global chart", MEASURE_CHOICES, selected = "loss", inline = TRUE),
+      layout_columns(
+        col_widths = c(4, 8),
+        plotOutput("gmt_plot", height = 380),
+        plotOutput("global_plot", height = 380, hover = hoverOpts("hover_global", delay = 80))
+      ),
+      uiOutput("readout_global"),
+      layout_columns(
+        col_widths = c(6, 6),
+        plotOutput("map_2050", height = 340),
+        plotOutput("map_2100", height = 340)
+      ),
+      tags$h6("Physical drivers: the change of each country's climate in the scenario", class = "mt-3"),
+      layout_columns(
+        col_widths = c(6, 6),
+        plotOutput("driver_T_2050", height = 320),
+        plotOutput("driver_T_2100", height = 320)
+      ),
+      layout_columns(
+        col_widths = c(6, 6),
+        plotOutput("driver_P_2050", height = 320),
+        plotOutput("driver_P_2100", height = 320)
+      ),
+      tableOutput("global_table"),
+      uiOutput("scenario_notes")
+    )
   ),
-  card(
-    card_header("Termination shocks: perfect geoengineering, 2025-2100"),
-    layout_columns(
-      col_widths = c(3, 3, 6),
-      selectInput("ts_forcing", "Background forcing (the warming without geoengineering)",
-                  SCENARIO_CHOICES, selected = "ssp245"),
-      radioButtons("ts_held", "Geoengineering holds global warming at",
-                   c("1.5 C" = "1.5", "1.0 C" = "1.0"), selected = "1.5", inline = TRUE),
-      checkboxGroupInput("ts_years", "Termination years", as.character(seq(2040, 2090, by = 10)),
-                         selected = c("2040", "2060", "2080"), inline = TRUE)
-    ),
-    layout_columns(
-      col_widths = c(3, 9),
-      numericInput("ts_tau", "Catch-up time after termination, tau (years)", 4, min = 0.5, step = 0.5),
-      radioButtons("ts_econ", "Economic development (Follow SSP-RCP: the forcing's own SSP)",
-                   ECONOMY_CHOICES, selected = "follow", inline = TRUE)
-    ),
-    layout_columns(
-      col_widths = c(6, 3),
-      selectInput("ts_noise", "Natural variability (each country's detrended historical T and P)",
-                  VARIABILITY_CHOICES, selected = "none"),
-      selectInput("ts_noise_n", "Noise paths", NOISE_PATH_CHOICES, selected = "200")
-    ),
-    div(class = "d-flex align-items-center gap-3 mb-2",
-        actionButton("run_termination", "Run the termination scenarios", class = "btn-primary"),
-        uiOutput("ts_status")),
-    radioButtons("ts_measure", "Global chart", MEASURE_CHOICES, selected = "loss", inline = TRUE),
-    layout_columns(
-      col_widths = c(3, 3, 3, 3),
-      selectInput("ts_ref", "Exceedances: reference climate", EXCEEDANCE_REFERENCES, selected = "20"),
-      numericInput("ts_k_gmt", "Warming chart: band above k SD, k =", 3, min = 0.5, step = 0.5),
-      numericInput("ts_k_lat", "Latitude chart: events beyond k SD, k =", 2.5, min = 0.5, step = 0.5),
-      radioButtons("ts_sign", "Latitude chart: events", c("Warm (above +k SD)" = "warm",
-                                                          "Either sign (beyond +-k SD)" = "both"),
-                   selected = "warm")
-    ),
-    layout_columns(
-      col_widths = c(4, 8),
-      plotOutput("ts_gmt_plot", height = 460),
-      plotOutput("ts_global_plot", height = 460, hover = hoverOpts("hover_ts", delay = 80))
-    ),
-    uiOutput("readout_ts"),
-    layout_columns(
-      col_widths = c(6, 6),
-      selectInput("ts_map_setting", "Map and exceedances: setting (its panel's climate data)", choices = NULL),
-      selectInput("ts_map_year", "Map: termination year", choices = NULL)
-    ),
-    plotOutput("ts_map", height = 380),
-    selectInput("ts_lat_paths", "Latitude chart: warming paths", choices = NULL, multiple = TRUE,
-                width = "100%"),
-    plotOutput("ts_lat_plot", height = 420),
-    tableOutput("ts_table"),
-    uiOutput("ts_notes")
+  nav_panel(
+    "Termination",
+    card(
+      card_header("Termination shocks: perfect geoengineering, 2025-2100"),
+      layout_columns(
+        col_widths = c(3, 3, 6),
+        selectInput("ts_forcing", "Background forcing (the warming without geoengineering)",
+                    SCENARIO_CHOICES, selected = "ssp245"),
+        radioButtons("ts_held", "Geoengineering holds global warming at",
+                     c("1.5 C" = "1.5", "1.0 C" = "1.0"), selected = "1.5", inline = TRUE),
+        checkboxGroupInput("ts_years", "Termination years", as.character(seq(2040, 2090, by = 10)),
+                           selected = c("2040", "2060", "2080"), inline = TRUE)
+      ),
+      layout_columns(
+        col_widths = c(3, 9),
+        numericInput("ts_tau", "Catch-up time after termination, tau (years)", 4, min = 0.5, step = 0.5),
+        radioButtons("ts_econ", "Economic development (Follow SSP-RCP: the forcing's own SSP)",
+                     ECONOMY_CHOICES, selected = "follow", inline = TRUE)
+      ),
+      layout_columns(
+        col_widths = c(6, 3),
+        selectInput("ts_noise", "Natural variability (each country's detrended historical T and P)",
+                    VARIABILITY_CHOICES, selected = "none"),
+        selectInput("ts_noise_n", "Noise paths", NOISE_PATH_CHOICES, selected = "200")
+      ),
+      div(class = "d-flex align-items-center gap-3 mb-2",
+          actionButton("run_termination", "Run the termination scenarios", class = "btn-primary"),
+          uiOutput("ts_status")),
+      radioButtons("ts_measure", "Global chart", MEASURE_CHOICES, selected = "loss", inline = TRUE),
+      layout_columns(
+        col_widths = c(3, 3, 3, 3),
+        selectInput("ts_ref", "Exceedances: reference climate", EXCEEDANCE_REFERENCES, selected = "20"),
+        numericInput("ts_k_gmt", "Warming chart: band above k SD, k =", 3, min = 0.5, step = 0.5),
+        numericInput("ts_k_lat", "Latitude chart: events beyond k SD, k =", 2.5, min = 0.5, step = 0.5),
+        radioButtons("ts_sign", "Latitude chart: events", c("Warm (above +k SD)" = "warm",
+                                                            "Either sign (beyond +-k SD)" = "both"),
+                     selected = "warm")
+      ),
+      layout_columns(
+        col_widths = c(4, 8),
+        plotOutput("ts_gmt_plot", height = 460),
+        plotOutput("ts_global_plot", height = 460, hover = hoverOpts("hover_ts", delay = 80))
+      ),
+      uiOutput("readout_ts"),
+      layout_columns(
+        col_widths = c(6, 6),
+        selectInput("ts_map_setting", "Map and exceedances: setting (its panel's climate data)", choices = NULL),
+        selectInput("ts_map_year", "Map: termination year", choices = NULL)
+      ),
+      plotOutput("ts_map", height = 380),
+      selectInput("ts_lat_paths", "Latitude chart: warming paths", choices = NULL, multiple = TRUE,
+                  width = "100%"),
+      plotOutput("ts_lat_plot", height = 420),
+      tableOutput("ts_table"),
+      uiOutput("ts_notes")
+    )
   ),
-  card(card_header("Models and assumptions"), uiOutput("notes"))
+  nav_panel("Models and assumptions", card(card_header("Models and assumptions"), uiOutput("notes"))),
+  nav_panel("Guide", guide_ui())
 )
 
 server <- function(input, output, session) {
@@ -1355,18 +1446,49 @@ server <- function(input, output, session) {
     setting_server(paste0("s", n), n, DEFAULT_COUNTRIES[n], first = settings[[1]])
   }))
 
-  # The shown settings, with unique labels.
+  # The countries of the Single country page, each with the setting it uses.
+  countries <- lapply(seq_len(N_SETTINGS), function(k) {
+    country_server(paste0("c", k), k, DEFAULT_COUNTRIES[k], settings)
+  })
+  shown_k <- reactive(which(vapply(countries, function(cn) cn$active(), TRUE)))
+  # The shown settings: those a shown country uses (in setting order), with
+  # unique labels.
+  used_settings <- reactive(sort(unique(vapply(countries[shown_k()], function(cn) cn$setting_n(), 0L))))
   specs <- reactive({
-    out <- lapply(Filter(function(s) s$active(), settings), function(s) s$spec())
+    out <- lapply(settings[used_settings()], function(s) s$spec())
     labels <- vapply(out, `[[`, "", "label")
     dup <- duplicated(labels) | duplicated(labels, fromLast = TRUE)
     for (i in which(dup)) out[[i]]$label <- paste0(labels[i], " (setting ", out[[i]]$n, ")")
     out
   })
-  # The colour of each shown setting by its label (in setting order).
+  # The pairs of the single-country charts: each shown country with the
+  # specification of its setting, labelled "Country k - Setting n" with the
+  # user's names where given, and coloured by the country.
+  pairs <- reactive({
+    out <- lapply(shown_k(), function(k) {
+      cn <- countries[[k]]
+      s <- settings[[cn$setting_n()]]$spec()
+      country <- cn$country()
+      validate(need(!s$uses_kap || !is.null(country$capital),
+                    sprintf("Country %d: its setting has the capital interaction; enter its capital per capita.", k)))
+      country_name <- if (nzchar(country$user_label)) country$user_label else paste("Country", k)
+      setting_name <- if (nzchar(s$user_label)) s$user_label else paste("Setting", s$n)
+      s$country <- country
+      s$setting_label <- s$label
+      s$label <- paste(country_name, "-", setting_name)
+      s$colour_n <- k
+      s
+    })
+    # Unique labels (the user's names may repeat).
+    labels <- vapply(out, `[[`, "", "label")
+    dup <- duplicated(labels) | duplicated(labels, fromLast = TRUE)
+    for (i in which(dup)) out[[i]]$label <- paste0(labels[i], " (country ", out[[i]]$colour_n, ")")
+    out
+  })
+  # The colour of each shown country's curves by its label (in country order).
   colours <- reactive({
-    sp <- specs()
-    stats::setNames(SETTING_COLOURS[vapply(sp, `[[`, 0, "n")], vapply(sp, `[[`, "", "label"))
+    pr <- pairs()
+    stats::setNames(SETTING_COLOURS[vapply(pr, `[[`, 0, "colour_n")], vapply(pr, `[[`, "", "label"))
   })
   as_setting <- function(x) factor(x, levels = names(colours()))
   shift <- function(v) if (v == "TM") input$shock_T else input$shock_P / 1000
@@ -1380,7 +1502,7 @@ server <- function(input, output, session) {
     reactive({
       delta <- shift(v)
       req(is.finite(delta))
-      do.call(rbind, lapply(specs(), function(s) {
+      do.call(rbind, lapply(pairs(), function(s) {
         sd <- sd_of(s, v)
         reach <- max(3, 1.1 * abs(delta) / sd)
         x <- seq(-reach, reach, length.out = 241)
@@ -1399,7 +1521,7 @@ server <- function(input, output, session) {
   responses_T <- responses("TM")
   responses_P <- responses("RR")
   shift_points <- function(v) {
-    do.call(rbind, lapply(specs(), function(s) {
+    do.call(rbind, lapply(pairs(), function(s) {
       d <- response_curve(s$model, v, shift(v) / deviation_scale(s$model, s$country, v), s$country, s$cap)
       d$anomaly <- shift(v) * to_display(v)
       d$setting <- s$label
@@ -1427,7 +1549,7 @@ server <- function(input, output, session) {
     reactive({
       delta <- shift(v)
       req(is.finite(delta), input$horizon, isTRUE(input$ramp_years >= 1))
-      do.call(rbind, lapply(specs(), function(s) {
+      do.call(rbind, lapply(pairs(), function(s) {
         do.call(rbind, lapply(names(scenarios()), function(type) {
           cbind(setting = s$label, scenario = scenarios()[[type]],
                 gdp_path(s$model, v, s$country, type, delta, input$horizon, s$sd_mode,
@@ -1454,7 +1576,7 @@ server <- function(input, output, session) {
       scale_colour_manual(values = colours(), name = NULL, labels = wrap_label) +
       scale_fill_manual(values = colours(), guide = "none") +
       labs(x = paste0("Annual anomaly against the baseline (", unit, ")"),
-           y = if (any(vapply(specs(), function(s) (s$model$lags %||% 0L) > 0, TRUE))) {
+           y = if (any(vapply(pairs(), function(s) (s$model$lags %||% 0L) > 0, TRUE))) {
              "Effect on growth (pp; lags summed)"
            } else "Effect on growth that year (pp)",
            subtitle = paste0("Bands: 95% CI. Dashed: beyond the 1st-99th percentile of the ",
@@ -1479,7 +1601,7 @@ server <- function(input, output, session) {
 
   gdp_header <- function(v) {
     sprintf("Effect on %s of a %+g %s shift in %s: immediate, gradual or sudden in year %d, or for one year",
-            quantity_of(specs()), if (v == "TM") input$shock_T else input$shock_P, if (v == "TM") "°C" else "mm",
+            quantity_of(pairs()), if (v == "TM") input$shock_T else input$shock_P, if (v == "TM") "°C" else "mm",
             if (v == "TM") "temperature" else "precipitation", as.integer(input$ramp_years))
   }
   output$gdp_header_T <- renderText(gdp_header("TM"))
@@ -1508,7 +1630,7 @@ server <- function(input, output, session) {
       guides(colour = guide_legend(order = 1),
              linetype = guide_legend(order = 2, direction = "horizontal", nrow = 1,
                                      override.aes = list(colour = INK_MUTED))) +
-      labs(x = "Years after the shift starts (0 = first year)", y = paste(first_upper(quantity_of(specs())), "against no shift (%)"),
+      labs(x = "Years after the shift starts (0 = first year)", y = paste(first_upper(quantity_of(pairs())), "against no shift (%)"),
            subtitle = paste(strwrap(paste(c(captions[names(scenarios())], "Bands: 95% CI."),
                                           collapse = " "), width = 110), collapse = "\n")) +
       theme_explorer() +
@@ -1634,7 +1756,7 @@ server <- function(input, output, session) {
   # sample, and a shift beyond the deviations in the data.
   warnings_ui <- function() {
     msgs <- character(0)
-    for (s in specs()) {
+    for (s in pairs()) {
       cn <- s$country
       u <- s$units
       m <- s$model
@@ -2706,10 +2828,20 @@ server <- function(input, output, session) {
     card <- function(title, ...) tags$section(class = "card", tags$h2(title), ...)
     # The common shift and, for each shown setting, its label.
     sp <- specs()
-    settings <- tags$ul(lapply(sp, function(s) {
-      tags$li(tags$span("●", style = paste0("color:", SETTING_COLOURS[s$n], ";")),
-              tags$strong(paste0(" Setting ", s$n, ": ")), s$label)
-    }))
+    settings <- tagList(
+      tags$ul(lapply(sp, function(s) {
+        tags$li(tags$span("●", style = paste0("color:", SETTING_COLOURS[s$n], ";")),
+                tags$strong(paste0(" Setting ", s$n, ": ")), s$label)
+      })),
+      # The countries of the single-country charts and the setting each uses.
+      tags$ul(lapply(pairs(), function(p) {
+        cn <- p$country
+        tags$li(tags$span("●", style = paste0("color:", SETTING_COLOURS[p$colour_n], ";")),
+                tags$strong(paste0(" ", p$label, ": ")),
+                sprintf("%s; mean T %.1f °C (SD %.2f), mean P %.0f mm (SD %.0f), GDP per capita %s, agricultural share %.1f%%",
+                        cn$name, cn$mean_T, cn$sd_T, 1000 * cn$mean_P, 1000 * cn$sd_P,
+                        format(round(cn$income), big.mark = ","), 100 * cn$share))
+      })))
     shift_text <- sprintf(paste("Permanent shift: %+g °C in temperature, %+g mm a year in precipitation; GDP paths",
                                 "over %d years; year X = %d; shifts shown: %s."),
                           input$shock_T, input$shock_P, as.integer(input$horizon), as.integer(input$ramp_years),

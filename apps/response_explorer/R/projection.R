@@ -321,7 +321,7 @@ project_setting <- function(spec, scen_data, scenario, ssp = NULL, gmt = NULL,
   share_history <- scen_data$history$share
   for (i in seq_len(nrow(countries))) {
     cn <- countries[i, ]
-    country <- list(mean_T = cn$mean_T, sd_T = cn$sd_T, mean_P = cn$mean_P, sd_P = cn$sd_P,
+    country <- list(GID_0 = cn$GID_0, mean_T = cn$mean_T, sd_T = cn$sd_T, mean_P = cn$mean_P, sd_P = cn$sd_P,
                     income = cn$income, share = cn$share, capital = cn$capital)
     anomalies <- list(TM = cn$t_slope * warming, RR = cn$p_rel_slope * cn$mean_P * warming)
     income <- share <- NULL
