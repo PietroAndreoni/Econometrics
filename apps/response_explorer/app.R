@@ -26,6 +26,16 @@ APP_DIR <- local({
 source(file.path(APP_DIR, "R", "response.R"), local = environment())
 source(file.path(APP_DIR, "R", "projection.R"), local = environment())
 source(file.path(APP_DIR, "R", "fit.R"), local = environment())
+# The exposure-mediated terms, from the exposure explorer's histograms; the
+# bin edges and percentiles of daily P they offer.
+source(file.path(APP_DIR, "R", "exposure.R"), local = environment())
+# The guide page.
+source(file.path(APP_DIR, "R", "guide.R"), local = environment())
+EXPOSURE_P_EDGES <- if (exposure_available("RR")) exposure_hist("pre")$lo else c(0, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20)
+EXPOSURE_P_PCT <- local({
+  p <- if (exposure_available("RR")) exposure_hist("pre")$pct$wet$probs else c(0.9, 0.95, 0.99, 0.999)
+  stats::setNames(p, paste0(format(100 * p, trim = TRUE), "th pct"))
+})
 
 PANELS_FILE <- normalizePath(file.path(APP_DIR, "..", "..", "results", "response_explorer", "panels.rds"),
                              mustWork = FALSE)
@@ -185,7 +195,9 @@ term_label <- function(term) {
   } else {
     parts <- strsplit(term, ":", fixed = TRUE)[[1]]
     scaled <- "idol" %in% parts
-    parts <- parts[parts != "idol"]
+    # The exposure channel of a term (R/exposure.R).
+    expo <- intersect(parts, EXPOSURE_COLUMNS)
+    parts <- parts[!parts %in% c("idol", EXPOSURE_COLUMNS)]
     arm <- substring(parts[[1]], 4)
     # The first-difference terms of style "both".
     differenced <- grepl("^(TM|RR)_d_", arm)
@@ -193,6 +205,7 @@ term_label <- function(term) {
     out <- ARM_LABELS[[sub("2$", "", arm)]]
     if (differenced) out <- paste(out, "of the first difference")
     if (endsWith(arm, "2")) out <- paste(out, "(squared)")
+    if (length(expo)) out <- paste(out, "×", EXPOSURE_COLUMN_LABELS[[expo]], "exposure (per 100)")
     if (length(parts) > 1) out <- paste(out, "×", characteristic_label(parts[[2]]))
     if (scaled) out <- paste0(out, " × (Ybar / Y)^(1 - xi_", if (startsWith(arm, "TM")) "T" else "P", ")")
     out
@@ -271,13 +284,19 @@ spec_equation <- function(m) {
                       dollars = paste0("\\Big(", inner_of(v, TRUE, sq, d), "\\Big) ", ratio),
                       both = paste0("\\Big[\\Big(", inner_of(v, FALSE, sq, d), "\\Big) + \\Big(", inner_of(v, TRUE, sq, d),
                                     "\\Big) ", ratio, "\\Big]"))
-      paste0(inner, if (symmetric) paste0(" \\, ", delta, "x_{", v, ",it}")
+      paste0(inner, if (symmetric_of(v)) paste0(" \\, ", delta, "x_{", v, ",it}")
              else paste0(" \\big(D^{a}_{", delta, v, ",it}\\big)"), power)
     }
     terms <- vapply(powers, one, "")
-    out <- if (symmetric) paste(terms, collapse = " + ") else {
+    out <- if (symmetric_of(v)) paste(terms, collapse = " + ") else {
       paste0("\\sum_{a \\in \\{+,-\\}} ",
              if (length(terms) > 1) paste0("\\Big\\{", paste(terms, collapse = " + "), "\\Big\\}") else terms)
+    }
+    # Exposure: the terms through each channel's exposure slope, with
+    # coefficients of their own.
+    if (exposure_on(m$exposure, column)) {
+      chans <- c(exh = "H", exc = "C", exw = "W", exd = "D")[exposure_columns(m$exposure, column)]
+      out <- paste0("\\sum_{e \\in \\{", paste(chans, collapse = ", "), "\\}} \\frac{s^{e}_{i}}{100} \\Big[", out, "\\Big]^{e}")
     }
     over_lags(out)
   }
@@ -591,6 +610,37 @@ spec_definitions <- function(m) {
       } else paste0("With country effects it is a within-country ", if (growth) "coefficient" else "rate",
                     ", with a Nickell bias of order 1/T (T about 50 years).")))
   }
+  for (ev_v in c("TM", "RR")) {
+    if (!exposure_on(m$exposure, ev_v)) next
+    e <- m$exposure[[ev_v]]
+    spec <- EXPOSURE_VARS[[ev_v]]
+    chans <- exposure_columns(m$exposure, ev_v)
+    sym <- c(exh = "H", exc = "C", exw = "W", exd = "D")
+    name <- if (ev_v == "TM") "T" else "P"
+    index_text <- function(k) {
+      x <- e[[k]]
+      above <- k == "hi"
+      what <- if (x$measure == "days") "days" else if (ev_v == "TM") "degree days" else "mm"
+      thr <- if (x$type == "pct") sprintf("the country's %gth percentile of its daily values (1970-2023, all days)", 100 * x$value)
+             else paste(format(x$value), spec$unit)
+      sprintf("\\(%s_{it}\\) = %s of the %s %s %s (%s)", sym[[spec$cols[[k]]]], what, EXPOSURE_SOURCE_SHORT[[x$src]],
+              if (above) "above" else "below", thr,
+              if (x$measure == "days") "count of the days" else if (above) "sum of the daily excess" else "sum of the daily shortfall")
+    }
+    ks <- names(spec$cols)[spec$cols %in% chans]
+    out <- c(out, paste0(
+      "Exposure of the ", name, " terms: every ", name, " deviation term times \\(s^{e}_{i}/100\\) for each channel ",
+      paste(vapply(ks, function(k) sprintf("\\(e = %s\\) (%s)", sym[[spec$cols[[k]]]], spec$sides[[k]]), ""), collapse = " and "),
+      ", with no plain term, so that a deviation acts through the change of the index it brings. Indices (ERA5 ",
+      "daily, population weights 2015): ", paste(vapply(ks, index_text, ""), collapse = "; "),
+      ". \\(s^{e}_{i}\\): the within-country OLS slope of the index's deviation from its 20-year trailing mean on ",
+      "that of the ", spec$annual, ", 1970-2023 (climate data only), per ", if (ev_v == "TM") "C" else "m a year",
+      if (e$mode == "smooth") paste0(", smoothed in climate: the loess (span 0.5) of the country slopes on the ",
+                                     "countries' 1970-2023 ", spec$annual, ", at the country's long-run value (plus the ",
+                                     "shift in the paths and scenarios, so that the exposure follows the climate)")
+      else "; the country's own slope (the smooth at the country's climate for a country without one)",
+      ". The deviations are in absolute units (C, m)."))
+  }
   quad <- m$quad %||% c(TM = "none", RR = "none")
   for (v in names(quad)[quad != "none"]) {
     s <- if (v == "TM") "T" else "P"
@@ -873,24 +923,30 @@ setting_server <- function(id, n, default_country, first = NULL) {
           updateSliderInput(session, paste0("xi_", v), value = m[[paste0("xi_", v)]])
         }
         updateCheckboxInput(session, "share_trailing", value = isTRUE(m$share_trailing))
+        for (k in c("exposure_mode", "exp_hot_src", "exp_cold_src", "exposure_mode_P", "exp_wet_pct", "exp_wet_abs",
+                    "exp_dry_value")) updateSelectInput(session, k, selected = m[[k]])
+        for (k in c("exposure_channels", "exp_hot_measure", "exp_cold_measure", "exposure_channels_P", "exp_wet_type",
+                    "exp_wet_measure", "exp_dry_measure")) updateRadioButtons(session, k, selected = m[[k]])
+        for (k in c("exp_hot_value", "exp_cold_value")) if (is.finite(m[[k]] %||% NA)) updateNumericInput(session, k, value = m[[k]])
         for (k in c("inter_T", "inter_P")) {
           updateCheckboxGroupInput(session, k, selected = m[[k]] %||% character(0))
         }
         if (is.finite(m$low_threshold %||% NA)) updateNumericInput(session, "low_threshold", value = m$low_threshold)
         updateRadioButtons(session, "weight", selected = m$weight)
-        updateRadioButtons(session, "units", selected = m$units)
         updateRadioButtons(session, "sd_mode", selected = m$sd_mode)
         updateRadioButtons(session, "clim_mode", selected = m$clim_mode)
-        updateCheckboxInput(session, "cap", value = isTRUE(m$cap))
-        updateRadioButtons(session, "shape", selected = m$shape)
         updateCheckboxGroupInput(session, "controls", selected = m$controls %||% character(0))
         updateCheckboxInput(session, "drop_outliers", value = isTRUE(m$drop_outliers))
         updateRadioButtons(session, "outlier_tail", selected = m$outlier_tail)
       })
     }
-    output$income_units <- renderUI({
-      helpText(paste0("Long-run (sample mean) level, in ", EXPLORER$income_units[[input$gdp]], "."))
-    })
+    # Exposure terms are in the index per C or m: absolute deviations.
+    observeEvent(input$exposure_mode, {
+      if (input$exposure_mode != "none") updateRadioButtons(session, "units_T", selected = "absolute")
+    }, ignoreInit = TRUE)
+    observeEvent(input$exposure_mode_P, {
+      if (input$exposure_mode_P != "none") updateRadioButtons(session, "units_P", selected = "absolute")
+    }, ignoreInit = TRUE)
     # The characteristics estimated as trailing means are those the country has
     # as its climate changes: by default they follow the baseline in the paths.
     observeEvent(input$moderators, {
@@ -962,40 +1018,68 @@ setting_server <- function(id, n, default_country, first = NULL) {
       convergence <- input$convergence %||% "none"
       quad <- c(TM = input$quad_T %||% "none", RR = input$quad_P %||% "none")
       u <- units()
-      # The country's capital only with the capital interaction.
-      values <- c(mean_T = input$mean_T, sd_T = input$sd_T, mean_P = input$mean_P,
-                  sd_P = input$sd_P, income = input$income, share = input$share,
-                  capital = if (uses_kap) input$capital)
-      row <- u[u$GID_0 == (input$preset %||% ""), ]
-      name <- if (nrow(row) == 1) {
-        if (isTRUE(all.equal(unname(values), unname(preset_values(row)[names(values)])))) row$country
-        else paste(row$country, "(edited)")
-      } else "Custom country"
       trailing <- input$baseline %in% c("20-year", "30-year")
-      symmetric <- isTRUE(input$symmetric)
+      # Per variable: symmetric terms.
+      symmetric <- c(TM = isTRUE(input$symmetric_T), RR = isTRUE(input$symmetric_P))
       # The lags of the regressors (none unless ticked; 1 to the build's maximum).
       lags <- if (isTRUE(input$use_lags)) {
         req(is.finite(input$lags))
         as.integer(min(max(round(input$lags), 1), EXPLORER$max_lags %||% 10))
       } else 0L
       weight <- input$weight %||% "population"
-      absolute <- identical(input$units, "absolute")
+      # Exposure of the T terms (R/exposure.R): thresholds on the histogram's
+      # bin edges (whole degrees within the source's range).
+      exposure_T <- if (!identical(input$exposure_mode %||% "none", "none")) {
+        validate(need(exposure_available("TM"), "No exposure histograms: run Rscript apps/exposure_explorer/build_exposure.R gadm0"))
+        index <- function(src, value, measure) {
+          lo <- exposure_hist(src)$lo
+          validate(need(is.finite(value) && value == round(value) && value %in% lo[-1],
+                        sprintf("The %s threshold must be a whole degree from %g to %g C.",
+                                EXPOSURE_SOURCE_SHORT[[src]], lo[2], max(lo))))
+          list(src = src, type = "abs", value = value, measure = measure)
+        }
+        list(mode = input$exposure_mode, channels = input$exposure_channels %||% "both",
+             hi = index(input$exp_hot_src %||% "tmpmax", input$exp_hot_value, input$exp_hot_measure %||% "dd"),
+             lo = index(input$exp_cold_src %||% "tmpmin", input$exp_cold_value, input$exp_cold_measure %||% "dd"))
+      }
+      exposure_P <- if (!identical(input$exposure_mode_P %||% "none", "none")) {
+        validate(need(exposure_available("RR"), "No exposure histograms: run Rscript apps/exposure_explorer/build_exposure.R gadm0"))
+        wet_type <- input$exp_wet_type %||% "pct"
+        list(mode = input$exposure_mode_P, channels = input$exposure_channels_P %||% "both",
+             hi = list(src = "pre", type = wet_type, measure = input$exp_wet_measure %||% "dd",
+                       value = as.numeric(if (wet_type == "pct") input$exp_wet_pct %||% 0.99 else input$exp_wet_abs %||% 20)),
+             lo = list(src = "pre", type = "abs", value = as.numeric(input$exp_dry_value %||% 1),
+                       measure = input$exp_dry_measure %||% "days"))
+      }
+      exposure <- if (!is.null(exposure_T) || !is.null(exposure_P)) {
+        list(TM = exposure_T %||% list(mode = "none"), RR = exposure_P %||% list(mode = "none"))
+      }
+      # Per variable: the units of the deviations (absolute with exposure).
+      units_v <- c(TM = if (!is.null(exposure_T)) "absolute" else input$units_T %||% "SD",
+                   RR = if (!is.null(exposure_P)) "absolute" else input$units_P %||% "SD")
+      absolute <- units_v == "absolute"
       moderators <- input$moderators %||% "fixed"
       share_trailing <- moderators == "trailing" && input$gdp == "WB" && isTRUE(input$share_trailing)
-      # Absolute deviations have no SD.
-      sd_mode <- if (trailing && !absolute) input$sd_mode else "fixed"
+      # Absolute deviations have no SD (the paths keep it fixed for them).
+      sd_mode <- if (trailing && !all(absolute)) input$sd_mode %||% "fixed" else "fixed"
       # With the horizon baseline the climate stays at the horizon mean, but
       # trailing income and share can still follow the SSP.
       clim_mode <- if (trailing || moderators == "trailing") input$clim_mode %||% "fixed" else "fixed"
-      # The cap matters only with an income, share or capital interaction.
-      cap <- isTRUE(input$cap) && any(c("inc", "agr", "kap", "low") %in% unlist(inter))
-      # Splines matter only with an interaction.
-      shape <- if (length(unlist(inter))) input$shape %||% "linear" else "linear"
+      # Per variable: the cap (only with an income, share or capital
+      # interaction) and the shape (splines only with an interaction).
+      capped <- function(v, ticked) isTRUE(ticked) && any(c("inc", "agr", "kap", "low") %in% inter[[v]])
+      cap <- c(TM = capped("TM", input$cap_T), RR = capped("RR", input$cap_P))
+      shape <- c(TM = if (length(inter$TM)) input$shape_T %||% "linear" else "linear",
+                 RR = if (length(inter$RR)) input$shape_P %||% "linear" else "linear")
+      # A per-variable option in the label: "x" for both, "x (T)" for one.
+      which_vars <- function(on, text) {
+        if (all(on)) paste0(" · ", text) else if (any(on)) paste0(" · ", text, " (", c(TM = "T", RR = "P")[on], ")")
+      }
       # Controls (none ticked: none) and the growth outliers dropped.
       controls <- intersect(CONTROL_CHOICES, input$controls %||% character(0))
       outliers <- if (isTRUE(input$drop_outliers)) input$outlier_tail %||% DEFAULT_OUTLIERS else "none"
       # The label names the options only where they differ from the default.
-      auto <- paste0(name, " · ", input$gdp, " × ", input$climate, " · ", baseline_label(input$baseline, input$style %||% "simple"),
+      auto <- paste0(input$gdp, " × ", input$climate, " · ", baseline_label(input$baseline, input$style %||% "simple"),
                      " · ", form_label(form, symmetric), if (lags > 0) sprintf(" · %d lag%s", lags, if (lags > 1) "s" else ""),
                      " · ", interaction_label(inter),
                      if (uses_low) paste0(" (below ", format(round(low_threshold), big.mark = ","), ")"),
@@ -1003,6 +1087,7 @@ setting_server <- function(id, n, default_country, first = NULL) {
                      if (!is.null(income_form_label(income$income_form, income$xi))) {
                        paste0(" · ", income_form_label(income$income_form, income$xi))
                      },
+                     if (!is.null(exposure)) paste0(" · ", exposure_label(exposure_options(exposure))),
                      if (effects != "both") paste0(" · ", EFFECTS_SHORT[[effects]]),
                      if (effects != "year" && fe != "quadratic") paste0(" · ", FE_SHORT[[fe]]),
                      if (convergence != "none") paste0(" · convergence: ", CONVERGENCE_SHORT[[convergence]]),
@@ -1011,15 +1096,19 @@ setting_server <- function(id, n, default_country, first = NULL) {
                      if (moderators == "trailing") " · trailing characteristics",
                      if (share_trailing) " (with share)",
                      if (weight == "area") " · area weights",
-                     if (absolute) " · absolute units",
-                     if (shape == "splines") " · splines",
-                     if (cap) " · capped",
+                     which_vars(absolute, "absolute units"),
+                     which_vars(shape == "splines", "splines"),
+                     which_vars(cap, "capped"),
                      if (sd_mode == "moving") " · moving SD",
                      if (clim_mode == "baseline") " · characteristics follow baseline",
                      if (!is.null(sample_label(controls, outliers))) paste0(" · ", sample_label(controls, outliers)))
-      list(n = n, label = if (nzchar(trimws(input$label))) trimws(input$label) else auto,
+      # The user's name of the setting (empty: none; the charts of the
+      # countries then say "Setting n").
+      user_label <- trimws(input$label %||% "")
+      list(n = n, label = if (nzchar(user_label)) user_label else auto, user_label = user_label, uses_kap = uses_kap,
            model = explorer_model(list(gdp = input$gdp, climate = input$climate, weight = weight,
-                                       units = input$units %||% "SD", baseline = input$baseline,
+                                       units = units_v,
+                                       baseline = input$baseline, exposure = exposure,
                                        style = input$style %||% "simple",
                                        form = form, symmetric = symmetric, lags = lags, inter = inter, shape = shape, fe = fe,
                                        effects = effects, convergence = convergence, quad = quad,
@@ -1687,7 +1776,7 @@ server <- function(input, output, session) {
                     n_paths = noise$n)
   }
   projection_of <- function(s, scenario, ssp, noise) {
-    key <- paste(s$model$key, s$sd_mode, s$clim_mode, s$cap, scenario, ssp, noise_key(noise), sep = " | ")
+    key <- paste(s$model$key, s$sd_mode, s$clim_mode, paste(s$cap, collapse = "/"), scenario, ssp, noise_key(noise), sep = " | ")
     if (is.null(projection_cache[[key]])) {
       projection_cache[[key]] <- project_with(s, scenario, ssp, noise)
     }
@@ -1703,7 +1792,7 @@ server <- function(input, output, session) {
          noise = noise_of(input$scen_noise, input$scen_noise_n))
   })
   run_key <- function(sp, scenarios, economy, noise) {
-    paste(c(vapply(sp, function(s) paste(s$label, s$model$key, s$sd_mode, s$clim_mode, s$cap), ""),
+    paste(c(vapply(sp, function(s) paste(s$label, s$model$key, s$sd_mode, s$clim_mode, paste(s$cap, collapse = "/")), ""),
             scenarios, economy, noise_key(noise)), collapse = " || ")
   }
   # The label of a forcing of the last run, with its economy.
@@ -2035,7 +2124,7 @@ server <- function(input, output, session) {
          economy = input$ts_econ %||% "follow", noise = noise_of(input$ts_noise, input$ts_noise_n))
   })
   ts_key <- function(sp, forcing, held, years, tau, economy, noise) {
-    paste(c(vapply(sp, function(s) paste(s$label, s$model$key, s$sd_mode, s$clim_mode, s$cap), ""),
+    paste(c(vapply(sp, function(s) paste(s$label, s$model$key, s$sd_mode, s$clim_mode, paste(s$cap, collapse = "/")), ""),
             forcing, held, years, tau, economy, noise_key(noise)), collapse = " || ")
   }
   ts_status <- function() {
@@ -2086,7 +2175,7 @@ server <- function(input, output, session) {
         s <- r$specs[[jobs$i[j]]]
         path <- jobs$path[j]
         incProgress(1 / nrow(jobs), detail = paste(s$label, "-", path))
-        key <- paste(s$model$key, s$sd_mode, s$clim_mode, s$cap, r$forcing, ssp, r$held, r$tau, path,
+        key <- paste(s$model$key, s$sd_mode, s$clim_mode, paste(s$cap, collapse = "/"), r$forcing, ssp, r$held, r$tau, path,
                      noise_key(r$noise), sep = " | ")
         if (is.null(projection_cache[[key]])) {
           projection_cache[[key]] <- project_with(s, r$forcing, ssp, r$noise, gmt = paths[[path]])

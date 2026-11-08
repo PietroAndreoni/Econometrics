@@ -139,7 +139,17 @@ modifier_columns <- function(model, country, clim_shift = list(TM = 0, RR = 0),
   # (Ybar / Y)^(1 - xi) of the scaled terms of T and P (Ybar: the geometric
   # mean income of the rows, exp(inc_mean)).
   xi <- model$xi %||% c(TM = 0, RR = 0)
-  cbind(out, idol_TM = exp(-(1 - xi[["TM"]]) * out[, "inc"]), idol_RR = exp(-(1 - xi[["RR"]]) * out[, "inc"]))
+  out <- cbind(out, idol_TM = exp(-(1 - xi[["TM"]]) * out[, "inc"]), idol_RR = exp(-(1 - xi[["RR"]]) * out[, "inc"]))
+  # The exposure of the terms (R/exposure.R): the country's slopes, or the
+  # smooth at its long-run climate plus the shift (so that it follows the
+  # climate in the paths and projections).
+  for (v in c("TM", "RR")) {
+    if (!exposure_on(model$exposure, v)) next
+    clim <- (if (v == "TM") country$mean_T else country$mean_P) + clim_shift[[v]]
+    out <- cbind(out, exposure_values(model$exposure[[v]], v, model$exposure_table[[v]], country$GID_0,
+                                      rep_len(clim, nrow(out))))
+  }
+  out
 }
 
 # The cumulative effect `x` (sum of the growth effects of the years so far, as
@@ -164,8 +174,14 @@ model_structure <- function(model) {
     lag[lagged] <- as.integer(sub(".*\\.l", "", arm[lagged]))
     parts <- lapply(parts, function(p) sub("\\.l[0-9]+$", "", p))
     arm <- sub("\\.l[0-9]+$", "", arm)
+    # The exposure channel of a term ("exh", "exc", "exw", "exd"; R/exposure.R; NA:
+    # none), a factor like the income scaling, not a modifier.
+    expo <- vapply(parts, function(p) {
+      e <- intersect(p, EXPOSURE_COLUMNS)
+      if (length(e)) e else NA_character_
+    }, "")
     modifier <- vapply(parts, function(p) {
-      other <- p[!grepl("^dev", p) & p != "idol"]
+      other <- p[!grepl("^dev", p) & !p %in% c("idol", EXPOSURE_COLUMNS)]
       if (length(other)) other else NA_character_
     }, "")
     # The first-difference terms of style "both" (dev<v>_d_<arm>).
@@ -175,7 +191,7 @@ model_structure <- function(model) {
       term = names(model$coef), arm = arm, variable = substr(arm, 4, 5), suffix = sub("^_d_", "_", suffix),
       diff = diff, lag = lag,
       modifier = modifier, climate = !is.na(modifier) & grepl("^(clim|lag|cur)_", modifier),
-      scaled = vapply(parts, function(p) "idol" %in% p, TRUE),
+      scaled = vapply(parts, function(p) "idol" %in% p, TRUE), expo = expo,
       stringsAsFactors = FALSE)
   }
   structure_cache[[key]]
@@ -246,7 +262,8 @@ deviation_weights <- function(model, v, x, modifiers, years = NULL) {
     for (j in which(st$variable == v & st$lag == k)) {
       G[, j] <- arm_value(st$suffix[[j]], term_inputs(at$x, st$diff[[j]])) *
         (if (is.na(st$modifier[[j]])) 1 else at$mods[, st$modifier[[j]]]) *
-        (if (st$scaled[[j]]) at$mods[, paste0("idol_", v)] else 1)
+        (if (st$scaled[[j]]) at$mods[, paste0("idol_", v)] else 1) *
+        (if (is.na(st$expo[[j]])) 1 else at$mods[, st$expo[[j]]])
     }
   }
   G
@@ -322,7 +339,9 @@ growth_matrix <- function(beta, model, v, x, modifiers, cap, paired = FALSE, yea
   # both, and the cap applies to their sum at each x.
   # With style "both", the terms of the unit and those of its first difference
   # form blocks of their own.
-  side <- paste0(sub("2$", "", st$suffix), ifelse(st$diff, "_d", ""))
+  # With exposure (T), each channel's terms form blocks of their own too, then
+  # times the channel's exposure.
+  side <- paste0(sub("2$", "", st$suffix), ifelse(st$diff, "_d", ""), ifelse(is.na(st$expo), "", paste0(":", st$expo)))
   for (k in unique(st$lag[st$variable == v])) {
     at <- lagged_inputs(x, all_mods, k, years)
     mods <- at$mods
@@ -351,6 +370,7 @@ growth_matrix <- function(beta, model, v, x, modifiers, cap, paired = FALSE, yea
       if (cap) nonclim_total <- pmin(nonclim_total, pmax(own_total, 0))
       total <- nonclim_total + clim_total
       if (scaled) total <- total * mods[, paste0("idol_", v)]
+      if (!is.na(block$expo[[1]])) total <- total * mods[, block$expo[[1]]]
       out <- out + total
     }
   }

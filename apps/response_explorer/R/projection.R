@@ -140,12 +140,14 @@ project_country_noise <- function(model, country, anomalies, noise, sd_mode, cli
   years <- as.integer(names(anomalies$TM))
   rows <- which(years >= PROJECTION_FROM)
   n <- ncol(noise$TM)
-  if (identical(model$units, "absolute")) sd_mode <- "fixed"
+  # (Absolute deviations of a variable: no SD to move; see growth().)
   paired <- draws[rep(seq_len(n), each = length(rows)), , drop = FALSE]
   if (!is.null(income)) income <- rep(income, times = n)
   if (!is.null(share)) share <- rep(share, times = n)
   growth <- function(v, A) {
     sd <- deviation_scale(model, country, v)
+    # Absolute deviations of v: no SD to move (local to this variable).
+    if (identical(of_variable(model$units, v), "absolute")) sd_mode <- "fixed"
     # The baseline means M and deviations X of the rows r.
     deviations_at <- function(r) {
       if (identical(model$window, "nrk")) {
@@ -206,7 +208,8 @@ project_country <- function(model, country, anomalies, sd_mode, clim_mode, cap, 
   for (v in c("TM", "RR")) {
     a <- anomalies[[v]]
     sd <- deviation_scale(model, country, v)
-    if (identical(model$units, "absolute")) sd_mode <- "fixed"
+    # Absolute deviations of v: no SD to move (this variable only).
+    sd_mode_v <- if (identical(of_variable(model$units, v), "absolute")) "fixed" else sd_mode
     # First differences: from the year before PROJECTION_FROM (its deviation
     # from the history), each year less the year before.
     # (Style "both": the deviations and their first differences.)
@@ -214,7 +217,7 @@ project_country <- function(model, country, anomalies, sd_mode, clim_mode, cap, 
     from <- PROJECTION_FROM - differenced
     x <- if (identical(model$window, "nrk")) {
       innovation_path(a, filter_lags(model, country, v), sd, from = from)
-    } else deviation_path(a, sd, window, sd_mode, from = from)
+    } else deviation_path(a, sd, window, sd_mode_v, from = from)
     if (isTRUE(model$both)) x <- list(x = x[-1], d = diff(x)) else if (differenced) x <- diff(x)
     n <- n_inputs(x)
     shift <- if (clim_mode == "baseline") baseline_shift(a, window, PROJECTION_FROM) else rep(0, n)

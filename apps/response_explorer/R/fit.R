@@ -310,8 +310,30 @@ model_options <- function(o) {
   xi[form == "standard"] <- 1
   o$income_form <- form
   o$xi <- xi
+  # The exposure-mediated T terms (R/exposure.R; none without it): they are in
+  # degree days, so the deviations are in absolute units.
+  o$exposure <- if (exists("exposure_options", mode = "function")) exposure_options(o$exposure) else list(mode = "none")
+  for (v in c("TM", "RR")) if (exposure_on(o$exposure, v)) o$units[[v]] <- "absolute"
   o
 }
+# A per-variable option c(TM, RR) from one value (both) or two.
+per_variable_option <- function(x, default) {
+  x <- unlist(x %||% default)
+  if (length(x) == 1) x <- c(TM = x, RR = x)
+  c(TM = unname(x[["TM"]]), RR = unname(x[["RR"]]))
+}
+# A model's value of a per-variable option for variable v (models fitted
+# before the option was per variable hold one value).
+of_variable <- function(x, v) if (length(x) > 1) x[[v]] else x[[1]]
+# Whether any variable of a model has spline interactions.
+any_splines <- function(shape) any(shape == "splines")
+# Whether a model's options (or a fitted model) have exposure-mediated terms:
+# of variable v ("TM", "RR"), or of either. The columns of the exposure
+# channels (R/exposure.R): hot, cold (T), wet, dry (P).
+exposure_on <- function(e, v = c("TM", "RR")) {
+  !is.null(e) && any(vapply(v, function(z) !identical(e[[z]]$mode %||% "none", "none"), TRUE))
+}
+EXPOSURE_COLUMNS <- c("exh", "exc", "exw", "exd")
 # The key of a pair of subsets of interactions, e.g. "T: clim+inc, P: clim+agr"
 # ("none": no interaction).
 interaction_key <- function(inter) {
@@ -334,7 +356,8 @@ model_key <- function(o, panels) {
         if (o$diff) "first differences", if (o$both) "unit and first differences",
         if (o$effects != "both") paste0("effects: ", o$effects),
         if (o$convergence != "none") paste0("convergence: ", o$convergence),
-        if (any(o$quad != "none")) paste0("quadratic control T: ", o$quad[["TM"]], ", P: ", o$quad[["RR"]]), sep = " | ")
+        if (any(o$quad != "none")) paste0("quadratic control T: ", o$quad[["TM"]], ", P: ", o$quad[["RR"]]),
+        if (exposure_on(o$exposure)) exposure_key(o$exposure), sep = " | ")
 }
 # The short label of the controls and outliers of a model (NULL: the
 # notebook's, all controls and the 5% reversal outliers dropped).
@@ -385,6 +408,13 @@ joint_tests <- function(m, inter, xi = c(TM = 0, RR = 0)) {
     if (any(differenced)) {
       sets[[paste0(short, ": first-difference terms (zero: the unit only)")]] <- own[differenced]
       sets[[paste0(short, ": terms of the unit (zero: first differences only)")]] <- own[!differenced]
+    }
+    # Exposure: the terms of each channel zero.
+    for (col in EXPOSURE_COLUMNS) {
+      chan <- own[grepl(paste0(":", col, "(\\.l[0-9]+)?(:|$)"), own)]
+      if (length(chan) && length(chan) < length(own)) {
+        sets[[paste0(short, ": ", c(exh = "hot", exc = "cold", exw = "wet", exd = "dry")[[col]], " exposure terms")]] <- chan
+      }
     }
     # With lags: the lagged terms zero (no lags).
     lagged <- grepl("^dev[^:]*\\.l[0-9]+", own)
@@ -452,10 +482,28 @@ explorer_model <- function(o, panels) {
   window <- panels$baselines[[o$baseline]]
   trailing <- o$moderators == "trailing"
   d <- model_rows(o, panels)
-  dev_fe <- deviation_fe(o$fe, o$symmetric, o$effects)
+  # The demeaning of the deviations of each variable (symmetric ones as they are).
+  dev_fe <- c(TM = deviation_fe(o$fe, o$symmetric[["TM"]], o$effects), RR = deviation_fe(o$fe, o$symmetric[["RR"]], o$effects))
+  # Exposure: the slopes of each variable's indices (R/exposure.R), on the
+  # rows of the countries that have them (in both versions, so that the two
+  # run on the same rows); the smooth at the unit's long-run (horizon) climate.
+  uses_exposure <- exposure_on(o$exposure)
+  exposure_vars <- Filter(function(v) exposure_on(o$exposure, v), c("TM", "RR"))
+  exposure_tab <- NULL
+  if (uses_exposure) {
+    exposure_tab <- lapply(stats::setNames(exposure_vars, exposure_vars), function(v) exposure_table(o$exposure[[v]], v))
+    for (v in exposure_vars) d <- d[d$GID_0 %in% exposure_tab[[v]]$units$GID_0, ]
+    unit_climate <- panel$rows[!duplicated(panel$rows$GID_1), c("GID_1", "GID_0", "mean_TM_all", "mean_RR_all")]
+  }
+  exposure_of <- function(x) {
+    u <- unit_climate[match(x$GID_1, unit_climate$GID_1), ]
+    do.call(cbind, lapply(exposure_vars, function(v) {
+      exposure_values(o$exposure[[v]], v, exposure_tab[[v]], u$GID_0, u[[paste0("mean_", v, "_all")]])
+    }))
+  }
   # First differences: the rows whose year before has the climate.
   if (o$diff || o$both) {
-    for (v in c("TM", "RR")) d <- d[is.finite(deviation_values(d, v, window, panels$units_suffix[[o$units]], dev_fe, TRUE)), ]
+    for (v in c("TM", "RR")) d <- d[is.finite(deviation_values(d, v, window, panels$units_suffix[[o$units[[v]]]], dev_fe[[v]], TRUE)), ]
   }
 
   # The outcome (see the header).
@@ -538,6 +586,11 @@ explorer_model <- function(o, panels) {
     x$low <- if (uses_low) as.numeric(x[[inc_column]] < log(o$low_threshold)) else 0
     # (Ybar / Y_i)^(1 - xi_v), Ybar the geometric mean income of the rows.
     for (v in c("TM", "RR")) x[[paste0("idol_", v)]] <- exp(-(1 - o$xi[[v]]) * x$inc)
+    # The exposure of the terms (per 100 of the index per unit of deviation).
+    if (uses_exposure) {
+      ev <- exposure_of(x)
+      for (z in colnames(ev)) x[[z]] <- ev[, z]
+    }
     x
   }
   d <- with_moderators(d)
@@ -562,7 +615,7 @@ explorer_model <- function(o, panels) {
     pool <- with_splines_of(with_moderators(pool))
     lag_columns <- c(grep("^dev(TM|RR)_", names(d), value = TRUE),
                      intersect(c(spline_columns, grep("_nl[0-9]+$", names(d), value = TRUE)), names(pool)),
-                     "low", "idol_TM", "idol_RR")
+                     "low", "idol_TM", "idol_RR", if (uses_exposure) intersect(EXPOSURE_COLUMNS, names(d)))
     for (k in seq_len(o$lags)) {
       at <- match(paste(d$GID_1, d$year - k), pool_key)
       for (z in lag_columns) d[[paste0(z, ".l", k)]] <- pool[[z]][at]
@@ -614,13 +667,18 @@ explorer_model <- function(o, panels) {
   lag_of <- function(x, k) {
     vapply(strsplit(x, ":", fixed = TRUE), function(p) paste(paste0(p, ".l", k), collapse = ":"), "")
   }
-  varying_levels <- function(shape) c(with_splines(varying, shape), varying_idol)
-  levels_of <- function(shape) c(varying_levels(shape), with_splines(constant, shape), constant_idol)
+  # The level terms have spline terms when any variable has spline interactions.
+  varying_levels <- function(shape) c(with_splines(varying, if (any_splines(shape)) "splines" else "linear"), varying_idol)
+  levels_of <- function(shape) c(varying_levels(shape), with_splines(constant, if (any_splines(shape)) "splines" else "linear"), constant_idol)
   terms_of <- function(shape) {
     deviation <- unlist(lapply(c("TM", "RR"), function(v) {
-      arms <- paste0("dev", v, arm_suffixes(o$form[[v]], o$symmetric))
-      if (o$both) arms <- c(arms, paste0("dev", v, "_d", arm_suffixes(o$form[[v]], o$symmetric)))
-      modifiers <- with_splines(vapply(o$inter[[v]], modifier_column, "", v, USE.NAMES = FALSE), shape)
+      arms <- paste0("dev", v, arm_suffixes(o$form[[v]], o$symmetric[[v]]))
+      if (o$both) arms <- c(arms, paste0("dev", v, "_d", arm_suffixes(o$form[[v]], o$symmetric[[v]])))
+      # Exposure: every arm through the exposure of each of the variable's
+      # channels (T: hot, cold; P: wet, dry), no plain arm; the interactions
+      # then multiply the exposed arms.
+      if (v %in% exposure_vars) arms <- unlist(lapply(exposure_columns(o$exposure, v), function(e) paste0(arms, ":", e)))
+      modifiers <- with_splines(vapply(o$inter[[v]], modifier_column, "", v, USE.NAMES = FALSE), of_variable(shape, v))
       plain <- c(arms, unlist(lapply(modifiers, function(z) paste0(arms, ":", z))))
       switch(o$income_form[[v]], standard = plain, dollars = paste0(plain, ":idol"),
              both = c(plain, paste0(plain, ":idol")))
@@ -688,6 +746,8 @@ explorer_model <- function(o, panels) {
       c(estimate = ct["conv_gdp", 1], se = ct["conv_gdp", 2], p = ct["conv_gdp", 4])
     },
     outcome = o$outcome, income_form = o$income_form, xi = o$xi, controls = o$controls, outliers = o$outliers,
+    # The exposure of the T terms and its table of slopes (NULL: none).
+    exposure = o$exposure, exposure_table = exposure_tab,
     coef = coefs[keep], vcov = V[keep, keep, drop = FALSE],
     # The coefficients' p-values (clustered), the fit, the joint tests, and
     # what the noise tests of differences in fit need (its rows of the panel).
