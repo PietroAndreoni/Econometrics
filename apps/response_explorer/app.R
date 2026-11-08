@@ -31,6 +31,8 @@ source(file.path(APP_DIR, "R", "fit.R"), local = environment())
 source(file.path(APP_DIR, "R", "exposure.R"), local = environment())
 # The guide page.
 source(file.path(APP_DIR, "R", "guide.R"), local = environment())
+# The "By characteristic" page.
+source(file.path(APP_DIR, "R", "moderation.R"), local = environment())
 EXPOSURE_P_EDGES <- if (exposure_available("RR")) exposure_hist("pre")$lo else c(0, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20)
 EXPOSURE_P_PCT <- local({
   p <- if (exposure_available("RR")) exposure_hist("pre")$pct$wet$probs else c(0.9, 0.95, 0.99, 0.999)
@@ -1317,6 +1319,46 @@ ui <- page_navbar(
     )
   ),
   nav_panel(
+    "By characteristic",
+    card(
+      card_header("Effect of a year k SD above and below the baseline, against a characteristic of the country"),
+      layout_columns(
+        col_widths = c(3, 3, 3, 3),
+        selectInput("mod_x_T", "Temperature: characteristic on the horizontal axis", MODERATION_CHOICES,
+                    selected = "mean_T"),
+        selectInput("mod_x_P", "Precipitation: characteristic on the horizontal axis", MODERATION_CHOICES,
+                    selected = "mean_P"),
+        selectInput("mod_ref", "Other characteristics at (and the SD of)", choices = c("Country 1" = "1")),
+        numericInput("mod_k", "Size of the anomaly, k (SD of the reference country)", 1, min = 0.1, step = 0.5)
+      ),
+      plotOutput("mod_plot_T", height = 380),
+      plotOutput("mod_plot_P", height = 380),
+      uiOutput("mod_notes")
+    ),
+    card(
+      card_header("Heatmap: the effect over two characteristics at once"),
+      layout_columns(
+        col_widths = c(3, 3, 3, 3),
+        radioButtons("heat_var", "Variable", c("Temperature" = "TM", "Precipitation" = "RR"), selected = "TM",
+                     inline = TRUE),
+        radioButtons("heat_sign", "Anomaly", c("+k SD (warmer / wetter)" = "1", "-k SD (cooler / drier)" = "-1"),
+                     selected = "1"),
+        selectInput("heat_x", "Horizontal axis", MODERATION_CHOICES, selected = "mean_T"),
+        selectInput("heat_y", "Vertical axis", MODERATION_CHOICES, selected = "income")
+      ),
+      plotOutput("heat_plot", height = 520),
+      helpText("Colour: the effect on growth of one year at the anomaly (red: a loss, blue: a gain), over the range of",
+               "the setting's countries on both axes, the other characteristics (and k, the SD) at the reference",
+               "country above (circle). Dots: the setting's countries, where the data are; away from them the map",
+               "extrapolates. Point estimates (no CI); with exposure, the smooth at each climate.")
+    ),
+    card(
+      card_header("Physical exposure: how the indices change with the annual value, by the country's climate"),
+      plotOutput("exposure_plot", height = 460),
+      uiOutput("exposure_notes")
+    )
+  ),
+  nav_panel(
     "Coefficients",
     card(card_header("Each setting's model: specification, coefficients, fit and joint tests"),
          withMathJax(uiOutput("spec_math")),
@@ -1650,6 +1692,109 @@ server <- function(input, output, session) {
   }
   output$readout_gdp_T <- renderUI(gdp_readout(paths_T(), input$hover_gdp_T))
   output$readout_gdp_P <- renderUI(gdp_readout(paths_P(), input$hover_gdp_P))
+
+  # "By characteristic": the reference country is one of the shown countries.
+  observe({
+    k <- shown_k()
+    names(k) <- vapply(k, function(i) {
+      cn <- tryCatch(countries[[i]]$country(), error = function(e) NULL)
+      lab <- if (!is.null(cn) && nzchar(cn$user_label)) cn$user_label else paste("Country", i)
+      if (!is.null(cn)) paste0(lab, " (", cn$name, ")") else lab
+    }, "")
+    current <- isolate(input$mod_ref)
+    updateSelectInput(session, "mod_ref", choices = k, selected = if (!is.null(current) && current %in% k) current else k[[1]])
+  })
+  mod_reference <- reactive({
+    i <- as.integer(input$mod_ref %||% shown_k()[[1]])
+    req(i %in% shown_k())
+    countries[[i]]$country()
+  })
+  # One chart per variable, each against its own characteristic.
+  mod_results <- function(v) {
+    reactive({
+      x <- input[[paste0("mod_x_", if (v == "TM") "T" else "P")]]
+      k <- input$mod_k
+      req(is.finite(k), k > 0, x)
+      ref <- mod_reference()
+      sp <- specs()
+      d <- do.call(rbind, lapply(sp, function(s) {
+        r <- moderation_data(s, ref, x, k, vars = v)
+        if (!is.null(r)) r$setting <- s$label
+        r
+      }))
+      validate(need(!is.null(d) && nrow(d) > 0, "No setting to show for this characteristic (capital needs PWT GDP)."))
+      rugs <- do.call(rbind, lapply(sp, function(s) {
+        z <- s$units[[x]]
+        data.frame(setting = s$label, value = z[is.finite(z)])
+      }))
+      list(d = d, rugs = rugs[rugs$setting %in% d$setting, ], x = x)
+    })
+  }
+  mod_results_T <- mod_results("TM")
+  mod_results_P <- mod_results("RR")
+  mod_plot_of <- function(r) {
+    k <- input$mod_k
+    colours <- stats::setNames(c("#c0392b", "#2a78d6"),
+                               c(sprintf("+%g SD (warmer / wetter)", k), sprintf("-%g SD (cooler / drier)", k)))
+    moderation_plot(r$d, r$rugs, r$x, k, colours)
+  }
+  output$mod_plot_T <- renderPlot(mod_plot_of(mod_results_T()), bg = SURFACE)
+  output$mod_plot_P <- renderPlot(mod_plot_of(mod_results_P()), bg = SURFACE)
+  # The heatmap over two characteristics.
+  heat_results <- reactive({
+    x <- input$heat_x; y <- input$heat_y; k <- input$mod_k
+    req(x, y, is.finite(k), k > 0)
+    validate(need(x != y, "Choose two different characteristics for the axes."))
+    ref <- mod_reference()
+    sp <- specs()
+    v <- input$heat_var %||% "TM"
+    sign <- as.numeric(input$heat_sign %||% "1")
+    d <- do.call(rbind, lapply(sp, function(s) heat_data(s, ref, v, sign, k, x, y)))
+    validate(need(!is.null(d) && nrow(d) > 0, "No setting to show for these characteristics (capital needs PWT GDP)."))
+    pts <- do.call(rbind, lapply(sp, function(s) {
+      u <- s$units
+      ok <- is.finite(u[[x]]) & is.finite(u[[y]])
+      data.frame(setting = s$label, xv = u[[x]][ok], yv = u[[y]][ok])
+    }))
+    refs <- do.call(rbind, lapply(sp, function(s) {
+      b <- moderation_base(s, ref)
+      if (is.null(b[[x]]) || is.null(b[[y]])) return(NULL)
+      data.frame(setting = s$label, xv = b[[x]], yv = b[[y]])
+    }))
+    keep <- unique(d$setting)
+    title <- sprintf("%s: a year %s%g SD of the reference country", if (v == "TM") "Temperature" else "Precipitation",
+                     if (sign > 0) "+" else "-", k)
+    list(d = d, pts = pts[pts$setting %in% keep, ], refs = refs[refs$setting %in% keep, , drop = FALSE],
+         x = x, y = y, title = title)
+  })
+  output$heat_plot <- renderPlot({
+    r <- heat_results()
+    heat_plot(r$d, r$pts, r$refs, r$x, r$y, r$title)
+  }, bg = SURFACE)
+  output$mod_notes <- renderUI(helpText(
+    "Each panel: the effect on growth of one year at +k or -k SD of the reference country's annual T (or P) from its",
+    "baseline, as the characteristic on the horizontal axis varies over the range of the setting's countries (rug),",
+    "with the other characteristics at the reference country (circle: the reference country itself, with its own",
+    "exposure slopes). Along the curve the country has no preset, so exposure is the smooth at its climate. With",
+    "climate on the axis, the long-run climate of the interactions and the climate of this year's and last year's",
+    "value move together. 95% bands; with the cap, from draws of the coefficients."))
+  exposure_results <- reactive({
+    d <- exposure_curve_data(specs())
+    validate(need(!is.null(d), "No shown setting has exposure-mediated terms (Temperature or Precipitation > Exposure)."))
+    ref <- mod_reference()
+    marks <- unique(d[c("setting", "variable", "channel")])
+    marks$clim <- ifelse(marks$variable == "TM", ref$mean_T, 1000 * ref$mean_P)
+    list(d = d, marks = marks)
+  })
+  output$exposure_plot <- renderPlot({
+    r <- exposure_results()
+    exposure_curve_plot(r$d, r$marks)
+  }, bg = SURFACE)
+  output$exposure_notes <- renderUI(helpText(
+    "For each setting with exposure and each channel: every country's slope (points; the change of the index per",
+    "1 C of annual mean T, or per m of annual P, from ERA5 daily data 1970-2023) and the smooth in climate (line),",
+    "which the smooth version uses and which follows the climate in the paths and scenarios. Dashed: the reference",
+    "country's long-run climate."))
 
   # The equation of each shown setting's model and the definitions of its terms.
   # The parts of the page that are more than a call are functions, used by
