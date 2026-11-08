@@ -122,7 +122,8 @@ country_modifiers <- function(model, country, clim_shift = c(TM = 0, RR = 0)) {
 modifier_columns <- function(model, country, clim_shift = list(TM = 0, RR = 0),
                              cur = list(TM = 0, RR = 0), lag = list(TM = 0, RR = 0)) {
   median <- model$clim_median %||% c(TM = 0, RR = 0)
-  level <- c(TM = country$mean_T, RR = country$mean_P) - median
+  # (A list, so that the climates can be vectors: one per row.)
+  level <- list(TM = country$mean_T - median[["TM"]], RR = country$mean_P - median[["RR"]])
   out <- cbind(clim_TM = level[["TM"]] + clim_shift$TM, clim_RR = level[["RR"]] + clim_shift$RR,
                lag_TM = level[["TM"]] + (lag$TM %||% 0), lag_RR = level[["RR"]] + (lag$RR %||% 0),
                cur_TM = level[["TM"]] + (cur$TM %||% 0), cur_RR = level[["RR"]] + (cur$RR %||% 0),
