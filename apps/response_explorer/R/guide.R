@@ -58,7 +58,7 @@ guide_ui <- function() {
         guide_item("Deviations in:", "SD of the country's variability, or absolute units (C, m a year). Exposure",
                    "(below) needs absolute units and sets them."),
         guide_item("Regression unit:", "the level of T and P, the deviation from the horizon mean or from the trailing",
-                   "20 or 30-year mean (years t-20..t-1; default 20), or the innovation of the Nath-Ramey-Klenow AR(3)",
+                   "5, 10, 20 or 30-year mean (years t-k..t-1; default 20), or the innovation of the Nath-Ramey-Klenow AR(3)",
                    "filter. Lags add every deviation term at t-1..t-L."),
         guide_item("Regression style:", "the unit itself, its first difference (with the level: Kalkuhl and Wenz), or both."),
         guide_item("Fixed effects and trends:", "year and unit effects (default), unit only or year only; unit linear and",

@@ -25,7 +25,7 @@
 # Moderators: "fixed", the horizon mean of the climate, long-run income,
 # long-run share and (PWT) long-run capital per capita (constant within a unit,
 # so they have no level terms of their own); "trailing", the climate of the
-# deviation's own baseline (its trailing 20 or 30 year mean, the horizon mean
+# deviation's own baseline (its trailing 5, 10, 20 or 30 year mean, the horizon mean
 # with the horizon baseline), the log of the mean income and (PWT) of the mean
 # capital per capita of the panels$trailing_income_years years before, and
 # with `share_trailing` (WB GDP only) the mean share of the
@@ -84,10 +84,13 @@ deviation_values <- function(d, v, window, u, fe, diff = FALSE) {
 # The regression unit (the baseline of the deviations; values: the keys of
 # panels$baselines) and the style of the regression: the unit itself, or its
 # first difference (with the level: Kalkuhl and Wenz).
-BASELINE_CHOICES <- c("Level" = "Level", "Deviation (horizon)" = "Horizon", "Deviation 20 years" = "20-year",
+BASELINE_CHOICES <- c("Level" = "Level", "Deviation (horizon)" = "Horizon", "Deviation 5 years" = "5-year",
+                      "Deviation 10 years" = "10-year", "Deviation 20 years" = "20-year",
                       "Deviation 30 years" = "30-year", "Filter (Nath-Ramey-Klenow AR(3) innovation)" = "NRK filter")
 STYLE_CHOICES <- c("Simple (the variable only)" = "simple", "First order difference" = "diff",
                    "Both (the variable and its first difference)" = "both")
+# The regression units with a trailing baseline (their labels).
+TRAILING_BASELINES <- c("5-year", "10-year", "20-year", "30-year")
 FE_CHOICES <- c("No unit trends" = "unit", "Unit linear trends" = "linear",
                 "Unit linear and quadratic trends" = "quadratic")
 FE_SHORT <- c(unit = "no unit trends", linear = "unit linear trends",

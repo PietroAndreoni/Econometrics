@@ -855,13 +855,13 @@ common_ui <- function(ns) {
       uiOutput(ns("low_threshold_note"))
     ),
     conditionalPanel(
-      "['20-year', '30-year'].indexOf(input.baseline) > -1 && (input.units_T == 'SD' || input.units_P == 'SD')", ns = ns,
+      "['5-year', '10-year', '20-year', '30-year'].indexOf(input.baseline) > -1 && (input.units_T == 'SD' || input.units_P == 'SD')", ns = ns,
       radioButtons(ns("sd_mode"), "SD of the trailing baseline in the GDP path",
                    c("Fixed at the country's SD" = "fixed",
                      "Moving (widened by the shift)" = "moving"), selected = "fixed")
     ),
     conditionalPanel(
-      "['20-year', '30-year'].indexOf(input.baseline) > -1 || input.moderators == 'trailing'", ns = ns,
+      "['5-year', '10-year', '20-year', '30-year'].indexOf(input.baseline) > -1 || input.moderators == 'trailing'", ns = ns,
       radioButtons(ns("clim_mode"),
                    "Long-run characteristics of the interactions (GDP paths and climate scenarios)",
                    c("Fixed at the sample mean" = "fixed",
@@ -1141,7 +1141,7 @@ setting_server <- function(id, n, default_country, first = NULL) {
       convergence <- input$convergence %||% "none"
       quad <- c(TM = input$quad_T %||% "none", RR = input$quad_P %||% "none")
       u <- units()
-      trailing <- input$baseline %in% c("20-year", "30-year")
+      trailing <- input$baseline %in% TRAILING_BASELINES
       # Per variable: symmetric terms.
       symmetric <- c(TM = isTRUE(input$symmetric_T), RR = isTRUE(input$symmetric_P))
       # The lags of the regressors (none unless ticked; 1 to the build's maximum).
@@ -3111,7 +3111,7 @@ server <- function(input, output, session) {
         "year, dropped from every panel of that source; the weather-driven ones (droughts,",
         "storms, floods, harvests) always stay. Characteristics in the interactions: fixed",
         "(the sample means: long-run climate, log income and share, constant within a country) or",
-        "trailing (the mean climate of the deviation's own baseline, the trailing 20 or 30 years, or",
+        "trailing (the mean climate of the deviation's own baseline, the trailing 5, 10, 20 or 30 years, or",
         "the horizon mean with the horizon baseline; log of the mean GDP per capita of the 5 years",
         "before, from the whole GDP history of the source; with WB GDP optionally the mean",
         "agricultural share of the 5 years before). Trailing characteristics in an interaction also",

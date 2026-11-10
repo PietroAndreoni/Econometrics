@@ -141,8 +141,12 @@ EXPLORER_WEIGHTS <- list(population = list(weight = "population density", year =
 # The units of the deviations: SD of the variability (the notebook's), or
 # absolute (the suffix of the unstandardized columns).
 EXPLORER_UNITS <- c(SD = "", absolute = "_unstd")
-EXPLORER_BASELINES <- c("Level" = "level", "Horizon" = "all", "20-year" = "lag_20", "30-year" = "lag_30",
+EXPLORER_BASELINES <- c("Level" = "level", "Horizon" = "all", "5-year" = "lag_5", "10-year" = "lag_10",
+                        "20-year" = "lag_20", "30-year" = "lag_30",
                         "NRK filter" = "nrk")
+# The trailing windows shorter than the notebook's 20 and 30 years: optional
+# for a row (the rows are those with the 20 and 30-year deviations).
+SHORT_WINDOWS <- c("lag_5", "lag_10")
 # The SD of the level is the country's horizon SD.
 baseline_sd_window <- function(b) if (b == "level") "all" else b
 # The unit slopes of each style of fixed effects, in the regression and in the
@@ -265,7 +269,10 @@ add_explorer_deviations <- function(p) {
   for (v in c("TM", "RR")) for (b in setdiff(EXPLORER_BASELINES, "nrk")) for (u in EXPLORER_UNITS) {
     raw <- if (b == "level") data[[v]] else data[[v]] - data[[paste0("mean_", v, "_", b)]]
     if (u == "") raw <- raw / data[[paste0("sd_", v, "_", baseline_sd_window(b))]]
-    if (b == "level") extra <- c(extra, demean(raw, b)) else cols <- c(cols, demean(raw, b))
+    # (A short window can have no variability, e.g. CRU TS fill values: those
+    # deviations are NA, and the rows stay those of the longer windows.)
+    raw[!is.finite(raw)] <- NA_real_
+    if (b %in% c("level", SHORT_WINDOWS)) extra <- c(extra, demean(raw, b)) else cols <- c(cols, demean(raw, b))
     fd <- raw - raw[last_row]
     data[[paste0("fd_", v, "_", b, u)]] <- fd
     extra <- c(extra, demean(fd, paste0(b, "_d")), paste0("fd_", v, "_", b, u))
@@ -283,7 +290,7 @@ add_explorer_deviations <- function(p) {
   history <- data %>%
     filter(year >= p$start_year - MAX_LAGS, year <= p$end_year, GID_1 %in% rows$GID_1,
            !paste(GID_1, year) %in% paste(rows$GID_1, rows$year)) %>%
-    select(GID_0, GID_1, year, TM, RR, matches("^(mean|sd)_(TM|RR)_(all|lag_20|lag_30)$"), all_of(c(cols, extra)))
+    select(GID_0, GID_1, year, TM, RR, matches("^(mean|sd)_(TM|RR)_(all|lag_5|lag_10|lag_20|lag_30)$"), all_of(c(cols, extra)))
   list(rows = rows, history = history)
 }
 
@@ -424,7 +431,7 @@ explorer_rows <- function(p) {
   list(rows = d %>%
          select(GID_0, GID_1, year, t, t2, TM, RR, TM_l1, RR_l1, all_of(OUTCOME), dlk_pc, dly_worker, all_of(control_columns),
                 starts_with("outlier_"),
-                matches("^(mean|sd)_(TM|RR)_(all|lag_20|lag_30)$"), starts_with("dm_") & ends_with(names(EXPLORER_FE_SLOPES)),
+                matches("^(mean|sd)_(TM|RR)_(all|lag_5|lag_10|lag_20|lag_30)$"), starts_with("dm_") & ends_with(names(EXPLORER_FE_SLOPES)),
                 starts_with("fd_"), inc_level, inc_trailing, lgdp_pc, gdp_l1, growth_l1, growth_l2, agr_level, agr_trailing, kap_level, kap_trailing),
        history = as.data.frame(history))
 }

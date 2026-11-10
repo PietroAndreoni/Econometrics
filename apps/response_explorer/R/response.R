@@ -7,7 +7,7 @@
 
 # The years of the baselines (the level and the NRK filter have no baseline
 # mean that moves: as the horizon's).
-EXPLORER_WINDOWS <- c(level = Inf, all = Inf, lag_20 = 20, lag_30 = 30, nrk = Inf)
+EXPLORER_WINDOWS <- c(level = Inf, all = Inf, lag_5 = 5, lag_10 = 10, lag_20 = 20, lag_30 = 30, nrk = Inf)
 
 # The first differences of deviations x (series of `years` years stacked by
 # path; NULL: one series), with no deviation before the first year of a path.
