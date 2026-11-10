@@ -52,6 +52,58 @@ if (!file.exists(SCENARIOS_FILE)) {
   stop("No ", SCENARIOS_FILE, ": run Rscript apps/response_explorer/build_scenarios.R from the project root.")
 }
 SCEN <- readRDS(SCENARIOS_FILE)
+# Historical growth of world GDP in PWT 11.0, for the growth charts of the
+# scenarios and termination shocks: in each year the growth of the sum of
+# rgdpna (constant national prices, millions of 2021 US$) over the countries
+# with it in that year and the year before (no interpolation), from the
+# estimation horizon's first year on; its median, interquartile range and
+# range over those years.
+HISTORY_FROM <- 1971L
+PWT_WORLD_GROWTH <- local({
+  file <- file.path(APP_DIR, "..", "..", "data", "pwt110.xlsx")
+  if (!file.exists(file)) return(NULL)
+  d <- readxl::read_excel(file, sheet = "Data")
+  d <- data.frame(GID_0 = d$countrycode, year = as.integer(d$year), gdp = suppressWarnings(as.numeric(d$rgdpna)))
+  d <- d[is.finite(d$gdp) & d$gdp > 0, ]
+  key <- paste(d$GID_0, d$year)
+  before <- d$gdp[match(paste(d$GID_0, d$year - 1L), key)]
+  ok <- is.finite(before)
+  g <- tapply(d$gdp[ok], d$year[ok], sum) / tapply(before[ok], d$year[ok], sum)
+  out <- data.frame(year = as.integer(names(g)), growth = 100 * (as.numeric(g) - 1),
+                    countries = as.integer(table(d$year[ok])[names(g)]))
+  out[out$year >= HISTORY_FROM, ]
+})
+PWT_GROWTH_SUMMARY <- if (!is.null(PWT_WORLD_GROWTH)) {
+  q <- stats::quantile(PWT_WORLD_GROWTH$growth, c(0, 0.25, 0.5, 0.75, 1), names = FALSE)
+  data.frame(min = q[1], q25 = q[2], median = q[3], q75 = q[4], max = q[5])
+}
+# The layers of the historical growth on a growth chart: the annual series up
+# to its last year (left) and, right of the projections, its range (thin),
+# interquartile range (thick) and median (point), labelled.
+history_growth_layers <- function() {
+  if (is.null(PWT_WORLD_GROWTH)) return(NULL)
+  s <- PWT_GROWTH_SUMMARY
+  x <- PROJECTION_TO + 8
+  list(
+    geom_line(data = PWT_WORLD_GROWTH, mapping = aes(year, growth), inherit.aes = FALSE,
+              colour = INK_MUTED, linewidth = 0.6),
+    geom_segment(data = s, mapping = aes(x = x, xend = x, y = min, yend = max), inherit.aes = FALSE,
+                 colour = INK_MUTED, linewidth = 0.5),
+    geom_segment(data = s, mapping = aes(x = x, xend = x, y = q25, yend = q75), inherit.aes = FALSE,
+                 colour = INK_MUTED, linewidth = 3),
+    geom_point(data = s, mapping = aes(x = x, y = median), inherit.aes = FALSE,
+               colour = SURFACE, fill = INK, shape = 21, size = 2.6, stroke = 0.8),
+    geom_text(data = s, mapping = aes(x = x + 2.5, y = median, label = sprintf("%.1f", median)),
+              inherit.aes = FALSE, colour = INK_MUTED, size = 3.2, hjust = 0)
+  )
+}
+history_growth_note <- function() {
+  if (is.null(PWT_WORLD_GROWTH)) return("")
+  s <- PWT_GROWTH_SUMMARY
+  sprintf(paste0("; grey line: historical growth of world GDP in PWT 11.0 (%d-%d); right: its median %.1f%%, ",
+                 "interquartile range %.1f to %.1f%% (thick) and range %.1f to %.1f%% (thin)"),
+          min(PWT_WORLD_GROWTH$year), max(PWT_WORLD_GROWTH$year), s$median, s$q25, s$q75, s$min, s$max)
+}
 # The maps draw the sf borders of SCEN$world.
 loadNamespace("sf")
 # Each country's area by 5-degree latitude band, for the exposure chart of the
@@ -1411,7 +1463,10 @@ ui <- page_navbar(
       div(class = "d-flex align-items-center gap-3 mb-2",
           actionButton("run_scenarios", "Run the climate scenarios", class = "btn-primary"),
           uiOutput("scenario_status")),
+      radioButtons("scen_gmt_measure", "Warming chart", WARMING_CHOICES, selected = "level", inline = TRUE),
       radioButtons("global_measure", "Global chart", MEASURE_CHOICES, selected = "loss", inline = TRUE),
+      conditionalPanel("input.global_measure == 'growth'",
+        checkboxInput("scen_history", "Show the historical growth of world GDP (PWT 11.0, 1971-2023: series, median, IQR, range)", value = TRUE)),
       layout_columns(
         col_widths = c(4, 8),
         plotOutput("gmt_plot", height = 380),
@@ -2210,6 +2265,7 @@ server <- function(input, output, session) {
       geom_ribbon(aes(ymin = low, ymax = high), alpha = 0.10, colour = NA) +
       noise_lines(d) +
       baseline +
+      (if (measure == "growth" && isTRUE(input$scen_history)) history_growth_layers()) +
       geom_line(linewidth = 0.9) +
       facet_wrap(~setting, ncol = min(3, nlevels(d$setting)), scales = "free_y",
                  labeller = labeller(setting = function(x) wrap_label(x, 50))) +
@@ -2221,7 +2277,7 @@ server <- function(input, output, session) {
              "Best guess (median warming, CMIP6-median pattern, estimated coefficients",
              if (run()$noise$type != "none") ", mean over the noise paths", "); ",
              band_label(run()$noise),
-             if (measure == "growth") "; dashed: the SSP's growth without climate change"), 110)) +
+             if (measure == "growth") paste0("; dashed: the SSP's growth without climate change", if (isTRUE(input$scen_history)) history_growth_note())), 110)) +
       theme_explorer() +
       theme(strip.text = element_text(colour = INK_MUTED, size = 9.5, hjust = 0))
   }
