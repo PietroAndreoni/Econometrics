@@ -2079,16 +2079,17 @@ server <- function(input, output, session) {
     else sprintf("%s, %d noise paths", tolower(names(VARIABILITY_CHOICES)[VARIABILITY_CHOICES == noise$type]), noise$n)
   }
   # A setting's projection with the natural variability of its panel.
-  project_with <- function(s, scenario, ssp, noise, gmt = NULL) {
+  project_with <- function(s, scenario, ssp, noise, gmt = NULL, no_gains = FALSE) {
     m <- s$model
     variability <- EXPLORER$variability[[paste(m$gdp, m$climate, m$weight %||% "population", sep = " | ")]]
     project_setting(s, SCEN, scenario, ssp, gmt = gmt, variability = variability, noise = noise$type,
-                    n_paths = noise$n)
+                    n_paths = noise$n, no_gains = no_gains)
   }
-  projection_of <- function(s, scenario, ssp, noise) {
-    key <- paste(s$model$key, s$sd_mode, s$clim_mode, paste(s$cap, collapse = "/"), scenario, ssp, noise_key(noise), sep = " | ")
+  projection_of <- function(s, scenario, ssp, noise, no_gains = FALSE) {
+    key <- paste(s$model$key, s$sd_mode, s$clim_mode, paste(s$cap, collapse = "/"), scenario, ssp, noise_key(noise),
+                 if (no_gains) "no gains", sep = " | ")
     if (is.null(projection_cache[[key]])) {
-      projection_cache[[key]] <- project_with(s, scenario, ssp, noise)
+      projection_cache[[key]] <- project_with(s, scenario, ssp, noise, no_gains = no_gains)
     }
     projection_cache[[key]]
   }
@@ -2099,11 +2100,11 @@ server <- function(input, output, session) {
   run <- eventReactive(input$run_scenarios, {
     validate(need(length(input$scen_sel) > 0, "Select at least one forcing."))
     list(specs = specs(), scenarios = input$scen_sel, economy = input$econ_ssp %||% "follow",
-         noise = noise_of(input$scen_noise, input$scen_noise_n))
+         noise = noise_of(input$scen_noise, input$scen_noise_n), no_gains = isTRUE(input$scen_no_gains))
   })
-  run_key <- function(sp, scenarios, economy, noise) {
+  run_key <- function(sp, scenarios, economy, noise, no_gains) {
     paste(c(vapply(sp, function(s) paste(s$label, s$model$key, s$sd_mode, s$clim_mode, paste(s$cap, collapse = "/")), ""),
-            scenarios, economy, noise_key(noise)), collapse = " || ")
+            scenarios, economy, noise_key(noise), no_gains), collapse = " || ")
   }
   # The label of a forcing of the last run, with its economy.
   run_label <- function(scenario) scenario_label(scenario, run()$economy)
@@ -2111,14 +2112,15 @@ server <- function(input, output, session) {
     if (input$run_scenarios == 0) return(helpText(class = "mb-0", "Not run yet."))
     r <- run()
     current <- run_key(specs(), input$scen_sel, input$econ_ssp %||% "follow",
-                       noise_of(input$scen_noise, input$scen_noise_n))
-    if (!identical(current, run_key(r$specs, r$scenarios, r$economy, r$noise))) {
+                       noise_of(input$scen_noise, input$scen_noise_n), isTRUE(input$scen_no_gains))
+    if (!identical(current, run_key(r$specs, r$scenarios, r$economy, r$noise, r$no_gains))) {
       return(helpText(class = "mb-0 text-warning-emphasis",
                       "Settings or scenarios changed since the last run: press Run to update."))
     }
     helpText(class = "mb-0", sprintf("Up to date: %d setting(s) x %d forcing(s), economy: %s; %s.",
                                      length(r$specs), length(r$scenarios),
-                                     names(ECONOMY_CHOICES)[ECONOMY_CHOICES == r$economy], noise_label(r$noise)))
+                                     names(ECONOMY_CHOICES)[ECONOMY_CHOICES == r$economy],
+                                     paste0(noise_label(r$noise), if (r$no_gains) "; gains ignored in the world aggregate")))
   }
   output$scenario_status <- renderUI(scenario_status())
   # The colours of the settings of the last run (in setting order).
@@ -2138,7 +2140,7 @@ server <- function(input, output, session) {
         incProgress(1 / nrow(jobs), detail = paste(s$label, "-", scenario_label(scenario, r$economy)))
         list(setting = s$label, n = s$n, scenario = scenario,
              label = scenario_label(scenario, r$economy),
-             result = projection_of(s, scenario, economy_of(scenario, r$economy), r$noise))
+             result = projection_of(s, scenario, economy_of(scenario, r$economy), r$noise, r$no_gains))
       })
     })
   })
@@ -2168,15 +2170,25 @@ server <- function(input, output, session) {
     req(length(input$scen_sel) > 0)
     g <- SCEN$gmt[SCEN$gmt$scenario %in% input$scen_sel & SCEN$gmt$year >= 1970, ]
     g$scenario <- factor(g$scenario, levels = names(SCEN$scenarios))
+    rate <- identical(input$scen_gmt_measure, "rate")
+    if (rate) {
+      # The rate of the median path (the 5-95% range of a rate is not that of
+      # the levels: not shown).
+      g <- g[order(g$scenario, g$year), ]
+      g$median <- unlist(lapply(split(g, g$scenario, drop = TRUE), function(x) warming_rate(x$year, x$median)))
+      g <- g[is.finite(g$median), ]
+    }
     ggplot(g, aes(year, median, colour = scenario, fill = scenario)) +
       geom_vline(xintercept = PROJECTION_FROM, colour = GRID, linewidth = 0.5) +
-      geom_ribbon(aes(ymin = p05, ymax = p95), alpha = 0.10, colour = NA) +
+      (if (rate) geom_hline(yintercept = 0, colour = INK_MUTED, linewidth = 0.4)
+       else geom_ribbon(aes(ymin = p05, ymax = p95), alpha = 0.10, colour = NA)) +
       geom_line(linewidth = 0.9) +
       scale_colour_manual(values = SCENARIO_COLOURS, labels = FORCING_LABELS, name = NULL,
                           guide = guide_legend(direction = "horizontal", nrow = 1)) +
       scale_fill_manual(values = SCENARIO_COLOURS, guide = "none") +
-      labs(x = NULL, y = "Global warming above 1850-1900 (°C)",
-           subtitle = "FaIR (AR6-calibrated): median and 5-95% range") +
+      labs(x = NULL, y = if (rate) RATE_AXIS else "Global warming above 1850-1900 (°C)",
+           subtitle = if (rate) wrap_label(paste("FaIR (AR6-calibrated) median:", RATE_TEXT), 70)
+                      else "FaIR (AR6-calibrated): median and 5-95% range") +
       theme_explorer()
   }
   output$gmt_plot <- renderPlot(gmt_plot(), bg = SURFACE)
@@ -2236,7 +2248,8 @@ server <- function(input, output, session) {
     req(input$map_setting, input$map_scenario)
     s <- Filter(function(x) as.character(x$n) == input$map_setting, run()$specs)
     req(length(s) == 1)
-    r <- projection_of(s[[1]], input$map_scenario, economy_of(input$map_scenario, run()$economy), run()$noise)
+    r <- projection_of(s[[1]], input$map_scenario, economy_of(input$map_scenario, run()$economy), run()$noise,
+                       run()$no_gains)
     list(setting = s[[1]]$label, label = run_label(input$map_scenario),
          countries = r$countries[r$countries$year %in% c(2050, 2100), ])
   })
