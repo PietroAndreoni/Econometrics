@@ -1,0 +1,26 @@
+GID_0,year,cause,category,confidence,weather
+AZE,2000,"Oil output growth from the first Contract of the Century fields (Chirag) and higher oil prices","Oil & gas: price or output rise",medium,no
+BEN,1996,"No strong candidate (cotton and re-export trade after the 1994 CFA franc devaluation?)","Unidentified",low,no
+CHN,1995,"Boom after Deng's Southern Tour","Investment / reform / sector boom",high,no
+CHN,2010,"Stimulus-driven investment boom after the global financial crisis","Investment / reform / sector boom",high,no
+CYM,1988,"No strong candidate (offshore finance and tourism?)","Unidentified",low,no
+DMA,1978,"No strong candidate (banana exports; independence in November 1978?)","Unidentified",low,no
+ETH,2011,"Public-investment-led growth (Growth and Transformation Plan, 2010-15)","Investment / reform / sector boom",medium,no
+GNQ,1973,"No strong candidate (cocoa price boom of 1973-74?; early data)","Unidentified",low,no
+GRC,2021,"Post-COVID rebound (tourism)","Post-COVID rebound",high,no
+IRL,1997,"Celtic Tiger boom (foreign direct investment and exports)","Investment / reform / sector boom",high,no
+KNA,1988,"No strong candidate (tourism and construction expansion?)","Unidentified",low,no
+KNA,2005,"No strong candidate (tourism and construction as the sugar industry closed in 2005?)","Unidentified",low,no
+KOR,1986,"'Three lows' boom (low oil prices, dollar and interest rates)","Investment / reform / sector boom",high,no
+KOR,1991,"Construction boom (two-million-homes programme, 1988-92)","Investment / reform / sector boom",medium,no
+LVA,2004,"Pre-crisis credit boom; EU accession (May 2004)","Investment / reform / sector boom",high,no
+MDA,2008,"Harvest recovery after the 2007 drought; remittance-fuelled demand","Harvest recovery / good rains",medium,yes
+MLT,2017,"Services-export boom (remote gaming, financial services) and construction","Investment / reform / sector boom",medium,no
+MMR,2009,"Official growth statistics widely regarded as overstated; gas exports","Data artifact / statistical",medium,no
+MSR,1979,"No identified event","Unidentified",low,no
+PAN,2007,"Construction and investment boom (Panama Canal expansion begins, 2007)","Investment / reform / sector boom",high,no
+ROU,1976,"No strong candidate (communist-era industrialization; official statistics)","Unidentified",low,no
+SYR,1992,"Rising oil output (Deir ez-Zor light-crude fields) and private investment after Investment Law No. 10 (1991)","Oil & gas: price or output rise",medium,no
+TCD,1983,"No strong candidate (recovery after the 1979-82 civil war?)","Unidentified",low,no
+TUR,2011,"Credit-fuelled boom after the 2009 recession","Investment / reform / sector boom",high,no
+TWN,2010,"Rebound after the global financial crisis","Recovery after economic crisis",high,no

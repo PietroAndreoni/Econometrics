@@ -19,4 +19,7 @@ data/kummu2025/cache
 
 *.html
 
-data/
+# The data are not versioned, except the hand-made annotations of the growth
+# outliers (plain git, no LFS).
+data/*
+!data/growth_outlier_causes*.csv

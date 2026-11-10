@@ -1,0 +1,623 @@
+GID_0,year,cause,category,confidence,weather
+ABW,2010,"Partial recovery after the 2009 tourism slump and refinery shutdown","Recovery after economic crisis",medium,no
+ABW,2022,"Post-COVID rebound slows after the 2021 jump","Post-COVID rebound",high,no
+AFG,2003,"Slower growth after the 2002 post-Taliban rebound","Post-conflict recovery",medium,no
+AFG,2011,"2011 drought in the north: wheat harvest falls","Drought / harvest failure",high,yes
+AFG,2012,"Bumper harvest after the 2011 drought","Harvest recovery / good rains",high,yes
+AGO,1994,"Civil war continues; smaller fall after the 1993 collapse","War / armed conflict",medium,no
+AGO,2003,"Slowdown after the 2002 post-war rebound: oil output stagnates","Oil & gas: price or output fall",medium,no
+AIA,1993,"No identified event (slowdown after the 1992 rebound; very small economy)","Unidentified",low,no
+AIA,1995,"Hurricane Luis (September 1995)","Storm / flood (weather)",high,yes
+AIA,2003,"Recovery after the 2001-02 tourism slump","Recovery after economic crisis",medium,no
+AIA,2008,"Global financial crisis: end of the tourism and construction boom","Global financial crisis 2008-09",high,no
+AIA,2010,"Continued contraction after the 2009 collapse (smaller fall)","Global financial crisis 2008-09",medium,no
+AIA,2018,"Reconstruction after Hurricane Irma (September 2017)","Storm / flood (weather)",high,yes
+AIA,2023,"End of the post-COVID tourism rebound","Post-COVID rebound",high,no
+ALB,1989,"No strong candidate (late-communist statistics)","Unidentified",low,no
+ALB,1998,"Recovery after the 1997 pyramid-scheme collapse","Recovery after economic crisis",high,no
+AND,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+ARE,1974,"Slowdown after the 1973 jump in the early WB estimates (PWT +2.1)","Data artifact / statistical",low,no
+ARE,1981,"Start of the oil glut: OPEC output cuts","Oil & gas: price or output fall",high,no
+ARE,1987,"Partial oil-price recovery after the 1986 collapse","Oil & gas: price or output rise",medium,no
+ARE,1989,"Oil-price recovery and higher OPEC quotas","Oil & gas: price or output rise",medium,no
+ARE,1991,"Oil price falls back after the Gulf war","Oil & gas: price or output fall",medium,no
+ARE,2001,"Oil price fall and OPEC output cuts","Oil & gas: price or output fall",medium,no
+ARE,2010,"Recovery after the 2009 oil-price fall and the Dubai debt crisis","Recovery after economic crisis",medium,no
+ARG,1978,"Recession under the 1978 stabilization (Martinez de Hoz)","Macroeconomic mismanagement / recession",medium,no
+ARG,1979,"Recovery boom (tablita, capital inflows)","Recovery after economic crisis",medium,no
+ARG,1986,"Recovery after the Austral Plan stabilization","Recovery after economic crisis",high,no
+ARG,1991,"Convertibility Plan (April 1991) ends hyperinflation","Recovery after economic crisis",high,no
+ARG,2003,"Recovery after the 2001-02 crisis","Recovery after economic crisis",high,no
+ARG,2009,"Global financial crisis and the 2008-09 Pampas drought (soy and wheat harvests fall)","Drought / harvest failure",high,yes
+ARG,2010,"Recovery from the crisis and record harvest after the 2008-09 drought","Harvest recovery / good rains",high,yes
+ARM,1993,"Post-Soviet collapse continues (smaller fall after 1992)","Post-communist transition",high,no
+ARM,1994,"Recovery begins after the Karabakh ceasefire (May 1994)","Post-conflict recovery",high,no
+ARM,2010,"Recovery after the 2009 construction collapse","Recovery after economic crisis",medium,no
+ARM,2020,"COVID-19 and the 2020 Karabakh war","COVID-19 pandemic",high,no
+ARM,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+ATG,1977,"No identified event","Unidentified",low,no
+ATG,1995,"Hurricane Luis (September 1995)","Storm / flood (weather)",high,yes
+ATG,1996,"Reconstruction after Hurricane Luis","Storm / flood (weather)",high,yes
+ATG,2001,"Tourism slump after September 11","Tourism / external demand shock",medium,no
+ATG,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+AUT,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+AZE,1996,"Post-Soviet collapse ends: stabilization","Post-communist transition",high,no
+AZE,2008,"Slower growth after the 2005-07 oil-output surge (ACG plateau)","Oil & gas: price or output fall",medium,no
+AZE,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+BDI,1971,"No strong candidate (after the 1970 coffee year)","Unidentified",low,no
+BDI,1973,"Recovery after the 1972 massacres?","Unidentified",low,no
+BDI,1974,"No identified event","Unidentified",low,no
+BDI,1976,"Coffee price boom after the 1975 Brazilian frost","Commodity / mining shock (non-oil)",medium,no
+BDI,1978,"Coffee price fall","Commodity / mining shock (non-oil)",medium,no
+BDI,1981,"No strong candidate (coffee harvest?)","Unidentified",low,no
+BDI,1982,"No strong candidate (coffee prices?)","Unidentified",low,no
+BDI,1985,"No strong candidate (coffee harvest?)","Unidentified",low,no
+BEL,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+BEN,1983,"1983 drought, Nigerian recession and expulsion of migrants","Drought / harvest failure",medium,yes
+BEN,1984,"Harvest recovery after the 1983 drought","Harvest recovery / good rains",medium,yes
+BEN,1990,"Recovery after the 1989 banking and fiscal collapse (National Conference, 1990)","Recovery after economic crisis",medium,no
+BFA,1973,"PWT-only jump in 1972 reversed (WB +0.6 and -1.3)","Data artifact / statistical",low,no
+BFA,1974,"Harvest recovery after the 1972-73 Sahel drought","Harvest recovery / good rains",medium,yes
+BFA,1979,"PWT-only swing (WB +2.0 and +1.0)","Data artifact / statistical",low,no
+BFA,1985,"Harvest recovery after the 1983-84 Sahel drought","Harvest recovery / good rains",high,yes
+BGD,1973,"Recovery after the 1971 Liberation War","Post-conflict recovery",high,no
+BGD,1975,"1974 floods and famine (aman crop of 1974/75) and the August 1975 coup","Storm / flood (weather)",medium,yes
+BGR,1989,"Late-communist crisis; exodus of about 300,000 ethnic Turks (May-August 1989)","Political crisis / coup / revolution",medium,no
+BGR,1998,"Recovery after the 1996-97 crisis (currency board)","Recovery after economic crisis",high,no
+BGR,2000,"Recovery after the 1999 fall (no strong candidate for 1999)","Unidentified",low,no
+BGR,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+BHR,1977,"Slower growth after the 1976 offshore-banking boom","Investment / reform / sector boom",low,no
+BHR,1983,"No identified event","Unidentified",low,no
+BHR,1986,"Oil glut continues; smaller fall after the PWT-only 1985 collapse (WB -8.5)","Oil & gas: price or output fall",low,no
+BHR,1994,"No identified event","Unidentified",low,no
+BHS,1973,"No identified event (independence, July 1973)","Unidentified",low,no
+BHS,1976,"Tourism recovery after the 1974-75 slump","Recovery after economic crisis",medium,no
+BHS,1980,"No strong candidate (slowdown after the 1979 tourism boom)","Unidentified",low,no
+BHS,1982,"No strong candidate (recovery after the 1981 fall)","Unidentified",low,no
+BIH,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+BLR,1996,"Post-Soviet collapse ends: stabilization","Post-communist transition",high,no
+BLZ,1981,"Sugar price fall after the 1980 spike","Commodity / mining shock (non-oil)",medium,no
+BMU,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+BOL,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+BRA,1981,"Recession under monetary tightening before the debt crisis","Financial / currency / debt crisis",high,no
+BRB,2021,"COVID-19: tourism stays collapsed (smaller fall)","COVID-19 pandemic",high,no
+BRB,2023,"End of the post-COVID tourism rebound","Post-COVID rebound",high,no
+BRN,1975,"Oil output fall","Oil & gas: price or output fall",medium,no
+BRN,1982,"Oil output stabilizes after the 1980-81 conservation cuts","Oil & gas: price or output fall",medium,no
+BRN,1987,"Partial oil-price recovery after the 1986 collapse","Oil & gas: price or output rise",medium,no
+BRN,1999,"Recovery after the Asian crisis and the Amedeo collapse","Recovery after economic crisis",medium,no
+BTN,1976,"No identified event; early data","Unidentified",low,no
+BTN,1982,"No identified event; early data","Unidentified",low,no
+BTN,1988,"Slower growth after the 1987 Chukha hydropower jump","Investment / reform / sector boom",medium,no
+BTN,1992,"No strong candidate (unrest in the south, 1990-92?)","Unidentified",low,no
+BTN,2008,"Slower growth after the 2007 Tala hydropower jump","Investment / reform / sector boom",high,no
+BTN,2021,"Partial recovery from the 2020 COVID-19 collapse","Post-COVID rebound",high,no
+BWA,1974,"Slower growth after the start-up of the mines","Commodity / mining shock (non-oil)",medium,no
+BWA,1990,"Slower growth after the 1989 diamond boom (PWT +25.9, WB +9.5)","Commodity / mining shock (non-oil)",medium,no
+BWA,2010,"Diamond demand recovers after the global financial crisis","Commodity / mining shock (non-oil)",high,no
+BWA,2013,"Diamond output recovers","Commodity / mining shock (non-oil)",medium,no
+BWA,2015,"Diamond demand slump: Debswana output cut","Commodity / mining shock (non-oil)",high,no
+BWA,2016,"Diamond output recovers","Commodity / mining shock (non-oil)",high,no
+CAF,1984,"No identified event (recovery after 1983)","Unidentified",low,no
+CAF,1997,"Recovery after the 1996 army mutinies (Bangui agreements, January 1997)","Post-conflict recovery",medium,no
+CAF,2004,"Stabilization after the 2003 Bozize coup","Post-conflict recovery",medium,no
+CAF,2014,"Civil war continues; no further collapse after 2013","War / armed conflict",high,no
+CAN,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+CHL,1972,"Economic crisis under the Allende government","Macroeconomic mismanagement / recession",high,no
+CHL,1976,"Recovery after the 1975 crash","Recovery after economic crisis",high,no
+CHL,1983,"Banking crisis continues (smaller fall after 1982)","Financial / currency / debt crisis",high,no
+CHN,1971,"Slower growth after the 1970 recovery from the Cultural Revolution","Recovery after economic crisis",medium,no
+CIV,1981,"Commodity-price and debt crisis continues (smaller fall after 1980)","Commodity / mining shock (non-oil)",medium,no
+CIV,1989,"PWT-only jump (WB -1.0)","Data artifact / statistical",medium,no
+CIV,1990,"PWT-only 1989 jump reversed (WB -1.0 and -5.0); cocoa price collapse and adjustment","Data artifact / statistical",medium,no
+CMR,1979,"Slower growth after the start of oil production","Oil & gas: price or output rise",medium,no
+CMR,1994,"CFA franc devaluation (January 1994) after the 1993 fall","Financial / currency / debt crisis",medium,no
+COG,1974,"PWT-only swing (WB +4.8 and +4.5)","Data artifact / statistical",medium,no
+COG,1978,"No identified event (recovery after 1977)","Unidentified",low,no
+COG,1983,"Oil boom slows (1983 oil price fall)","Oil & gas: price or output fall",medium,no
+COG,1999,"Civil war in Brazzaville and the Pool (1998-99)","War / armed conflict",high,no
+COG,2000,"Recovery after the December 1999 ceasefire; higher oil prices","Post-conflict recovery",high,no
+COG,2008,"Oil output recovers","Oil & gas: price or output rise",medium,no
+COG,2013,"Oil output fall","Oil & gas: price or output fall",medium,no
+COM,1992,"No identified event","Unidentified",low,no
+COM,2008,"PWT-only fall in 2007 reversed (WB -1.2)","Data artifact / statistical",medium,no
+CPV,1976,"Stabilization after the 1975 independence and drought shock","Independence / decolonization",low,yes
+CPV,1978,"No strong candidate (recovery after the 1977 drought?)","Unidentified",low,no
+CPV,2001,"WB-only swing (PWT +5.5 and +5.7)","Data artifact / statistical",medium,no
+CPV,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+CPV,2023,"End of the post-COVID tourism rebound","Post-COVID rebound",high,no
+CRI,1983,"Stabilization after the 1981-82 debt crisis","Recovery after economic crisis",high,no
+CRI,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+CUB,1994,"Special Period bottoms out (1993-94 reforms)","Recovery after economic crisis",high,no
+CUB,2021,"Partial post-COVID rebound","Post-COVID rebound",high,no
+CUW,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+CYM,1991,"US recession (tourism)?","Unidentified",low,no
+CYM,1999,"No identified event (after the 1998 jump)","Unidentified",low,no
+CZE,1992,"Post-communist stabilization (smaller fall after 1991)","Post-communist transition",high,no
+CZE,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+DJI,1975,"No identified event","Unidentified",low,no
+DJI,1979,"No strong candidate (end of the Ogaden war, March 1978?)","Unidentified",low,no
+DJI,1992,"No identified event (Afar insurgency)","Unidentified",low,no
+DJI,1994,"No identified event (Afar insurgency)","Unidentified",low,no
+DMA,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+DZA,1973,"Slower growth after the 1972 oil-output rebound","Oil & gas: price or output rise",medium,no
+ECU,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+EGY,1971,"PWT-only jump in 1970 reversed (WB +3.1 and +1.7)","Data artifact / statistical",medium,no
+ERI,1995,"No identified event","Unidentified",low,no
+ERI,2001,"Recovery after the 1998-2000 war with Ethiopia","Post-conflict recovery",medium,no
+ERI,2009,"No identified event","Unidentified",low,no
+ESP,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+EST,1993,"Post-Soviet stabilization (kroon, 1992)","Post-communist transition",high,no
+EST,2008,"Global financial crisis: end of the Baltic credit boom","Global financial crisis 2008-09",high,no
+EST,2010,"Recovery after the 2009 collapse","Recovery after economic crisis",high,no
+ETH,1979,"PWT-only swing (WB +1.0 and -2.6) after the Ogaden war","Data artifact / statistical",low,no
+ETH,1984,"Start of the 1984-85 drought and famine; civil war","Drought / harvest failure",high,yes
+ETH,1986,"Harvest recovery after the 1984-85 drought","Harvest recovery / good rains",high,yes
+ETH,1988,"Civil war intensifies (Afabet, 1988) and the 1987-88 drought in the north","War / armed conflict",medium,yes
+ETH,1990,"PWT-only swing (WB -4.2 and -1.0) during the civil war","Data artifact / statistical",low,no
+ETH,1993,"Recovery after the civil war","Post-conflict recovery",high,no
+ETH,1997,"Poor 1997 rains: harvest fall","Drought / harvest failure",medium,yes
+FIN,2010,"Recovery after the 2009 export collapse","Recovery after economic crisis",high,no
+FJI,1980,"No strong candidate (Cyclone Wally, April 1980?)","Unidentified",low,no
+FJI,1984,"Sugar harvest recovery after the 1983 drought and Cyclone Oscar","Harvest recovery / good rains",medium,yes
+FJI,1985,"Cyclones Eric and Nigel (January 1985)","Storm / flood (weather)",medium,yes
+FJI,1986,"Recovery after the 1985 cyclones","Storm / flood (weather)",medium,yes
+FJI,1991,"No identified event","Unidentified",low,no
+FJI,2000,"May 2000 coup","Political crisis / coup / revolution",high,no
+FJI,2021,"COVID-19: tourism stays collapsed (smaller fall)","COVID-19 pandemic",high,no
+FJI,2023,"End of the post-COVID tourism rebound","Post-COVID rebound",high,no
+FRA,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+FSM,1975,"Early estimates of the Trust Territory economy","Data artifact / statistical",low,no
+FSM,1981,"Early estimates of the Trust Territory economy","Data artifact / statistical",low,no
+FSM,1982,"Early estimates of the Trust Territory economy","Data artifact / statistical",low,no
+GAB,1979,"Austerity continues; smaller fall after 1978","Oil & gas: price or output fall",medium,no
+GBR,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+GEO,1995,"Post-war stabilization (lari, 1995)","Post-conflict recovery",high,no
+GEO,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+GHA,1979,"June 1979 coup (Rawlings, AFRC)","Political crisis / coup / revolution",high,no
+GHA,1984,"Harvest recovery after the 1983 drought; Economic Recovery Programme","Harvest recovery / good rains",high,yes
+GIN,1971,"No identified event","Unidentified",low,no
+GIN,1977,"No identified event","Unidentified",low,no
+GIN,1978,"No identified event","Unidentified",low,no
+GMB,1982,"Slower growth after the 1981 harvest recovery (July 1981 coup attempt)","Harvest recovery / good rains",low,yes
+GMB,1983,"Sources disagree (PWT -7.3, WB +6.6); 1983 Sahel drought?","Data artifact / statistical",low,no
+GMB,2003,"Harvest recovery after the 2002 crop failure","Harvest recovery / good rains",medium,yes
+GMB,2005,"No identified event","Unidentified",low,no
+GMB,2012,"Harvest recovery after the 2011 crop failure","Harvest recovery / good rains",high,yes
+GNB,1971,"War of independence continues (smaller fall)","War / armed conflict",low,no
+GNB,1972,"No identified event (war of independence)","Unidentified",low,no
+GNB,1978,"Harvest recovery after the 1977 Sahel drought","Harvest recovery / good rains",medium,yes
+GNB,1982,"WB-only jump in 1981 reversed (PWT -2.1 and +2.5)","Data artifact / statistical",medium,no
+GNB,1984,"No identified event","Unidentified",low,no
+GNB,2000,"Slower growth after the 1999 post-war rebound","Post-conflict recovery",medium,no
+GNQ,1978,"No strong candidate (Macias dictatorship?)","Unidentified",low,no
+GNQ,1985,"No strong candidate (entry into the CFA franc zone, 1985?)","Unidentified",low,no
+GNQ,1986,"No identified event","Unidentified",low,no
+GNQ,1993,"WB-only jump with the start of oil output in 1992 (PWT +8.8)","Oil & gas: price or output rise",medium,no
+GNQ,2009,"Global financial crisis: oil price fall","Oil & gas: price or output fall",high,no
+GNQ,2011,"Oil price recovery after the 2010 output fall","Oil & gas: price or output rise",medium,no
+GRC,1974,"Oil shock, the Cyprus crisis and the fall of the junta","Political crisis / coup / revolution",high,no
+GRC,1975,"Recovery after the 1974 crisis","Recovery after economic crisis",high,no
+GRD,2006,"End of the post-Ivan reconstruction boom","Storm / flood (weather)",medium,yes
+GRD,2007,"No strong candidate (Cricket World Cup construction?)","Unidentified",low,no
+GRD,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+GRL,1991,"End of the fall after the Black Angel mine closure","Commodity / mining shock (non-oil)",low,no
+GRL,1994,"No identified event","Unidentified",low,no
+GUM,2021,"Partial post-COVID rebound","Post-COVID rebound",high,no
+HRV,1994,"Stabilization programme (October 1993) during the war","Recovery after economic crisis",high,no
+HTI,1981,"No identified event","Unidentified",low,no
+HTI,2010,"January 2010 earthquake","Natural disaster (non-weather)",high,no
+HTI,2011,"Recovery after the 2010 earthquake","Natural disaster (non-weather)",high,no
+HUN,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+IDN,1999,"Asian crisis bottoms out (smaller fall after 1998)","Recovery after economic crisis",high,no
+IMN,2021,"Partial post-COVID rebound","Post-COVID rebound",high,no
+IND,1980,"Harvest recovery after the 1979 monsoon failure","Harvest recovery / good rains",high,yes
+IND,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+IRL,2016,"Slower growth after the 2015 relocation of multinationals' intellectual property","Data artifact / statistical",high,no
+IRN,1977,"End of the oil boom: austerity and power shortages","Oil & gas: price or output fall",medium,no
+IRN,1987,"Iran-Iraq War continues; smaller fall after the 1986 oil collapse","War / armed conflict",medium,no
+IRN,1989,"Recovery after the August 1988 ceasefire","Post-conflict recovery",high,no
+IRQ,1972,"Oil exports cut before and after the June 1972 IPC nationalization","Oil & gas: price or output fall",medium,no
+IRQ,1977,"No strong candidate (oil output dip?)","Unidentified",low,no
+IRQ,1982,"Iran-Iraq War; smaller fall after the PWT-only 1981 collapse (WB -3.7)","War / armed conflict",medium,no
+IRQ,1984,"Iran-Iraq War continues; smaller fall after 1983","War / armed conflict",medium,no
+IRQ,1988,"Slower growth after the 1987 oil-export recovery; end of the Iran-Iraq War","Oil & gas: price or output fall",low,no
+IRQ,2001,"WB-only jump in 2000 reversed (PWT -1.9)","Data artifact / statistical",medium,no
+IRQ,2005,"End of the post-invasion rebound; insurgency","Post-conflict recovery",high,no
+IRQ,2017,"OPEC+ output cuts and the war against the Islamic State","Oil & gas: price or output fall",high,no
+IRQ,2021,"Partial recovery from COVID-19 under OPEC+ cuts","Post-COVID rebound",medium,no
+IRQ,2023,"Halt of the Kurdistan-Turkey oil pipeline (March 2023) and OPEC+ cuts","Oil & gas: price or output fall",high,no
+ISL,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+ISR,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+ITA,1971,"PWT-only jump in 1970 reversed (WB +4.6 and +1.3)","Data artifact / statistical",medium,no
+JAM,1971,"No identified event","Unidentified",low,no
+JAM,1973,"No strong candidate (oil shock?)","Unidentified",low,no
+JAM,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+JOR,1971,"Black September fighting ends (July 1971); smaller fall","War / armed conflict",medium,no
+JOR,1992,"Rebound after the Gulf crisis: returnees from Kuwait and construction boom","Recovery after economic crisis",high,no
+JPN,2010,"Recovery after the 2009 export collapse","Recovery after economic crisis",high,no
+KEN,1973,"WB-only jump in 1972 reversed (PWT +1.4 and +1.6)","Data artifact / statistical",medium,no
+KGZ,1995,"Post-Soviet collapse continues (smaller fall)","Post-communist transition",high,no
+KGZ,1996,"Recovery after the post-Soviet collapse","Post-communist transition",high,no
+KGZ,2013,"Kumtor gold output recovers after the 2012 fall","Commodity / mining shock (non-oil)",high,no
+KGZ,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+KHM,1974,"Civil war continues (smaller fall)","War / armed conflict",medium,no
+KHM,1978,"Khmer Rouge period (unreliable estimates)","Data artifact / statistical",low,no
+KHM,1989,"No strong candidate (Vietnamese withdrawal and loss of Soviet-bloc aid?)","Unidentified",low,no
+KHM,1995,"WB series break in 1994 reversed (PWT +0.4)","Data artifact / statistical",high,no
+KHM,2020,"COVID-19: collapse of tourism and garment exports","COVID-19 pandemic",high,no
+KIR,1975,"End of the phosphate price boom","Commodity / mining shock (non-oil)",medium,no
+KIR,1977,"Smaller fall after the 1976 phosphate price fall","Commodity / mining shock (non-oil)",medium,no
+KIR,1980,"Smaller fall after the end of phosphate mining (1979)","Commodity / mining shock (non-oil)",medium,no
+KIR,1986,"No identified event","Unidentified",low,no
+KIR,1993,"No identified event","Unidentified",low,no
+KIR,2000,"No identified event","Unidentified",low,no
+KNA,2009,"Global financial crisis: tourism and construction fall","Global financial crisis 2008-09",high,no
+KNA,2021,"COVID-19: tourism stays collapsed (small rise)","COVID-19 pandemic",high,no
+KOR,1980,"Political crisis after Park's assassination, the second oil shock and the 1980 cold-summer rice harvest failure","Political crisis / coup / revolution",high,yes
+KOR,1998,"Asian financial crisis","Financial / currency / debt crisis",high,no
+KWT,1976,"Oil output cuts pause","Oil & gas: price or output fall",medium,no
+KWT,1978,"Oil output stabilizes after the 1977 cuts","Oil & gas: price or output rise",low,no
+KWT,1983,"Stabilization after the 1982 oil cuts and the Souk Al-Manakh crash","Oil & gas: price or output rise",medium,no
+KWT,1986,"Oil output rises in the 1986 price war","Oil & gas: price or output rise",medium,no
+KWT,1990,"Iraqi invasion (August 1990)","War / armed conflict",high,no
+KWT,1994,"Post-war recovery slows","Post-conflict recovery",high,no
+KWT,2011,"Oil output rises to replace Libyan supply","Oil & gas: price or output rise",high,no
+LAO,1980,"No identified event","Unidentified",low,no
+LBN,1978,"Renewed fighting (Israeli invasion of the south, Hundred Days' War)","War / armed conflict",high,no
+LBN,1979,"Civil war period (unreliable estimates)","Data artifact / statistical",low,no
+LBN,2021,"Financial collapse continues (smaller fall)","Financial / currency / debt crisis",high,no
+LBR,1991,"First civil war continues (smaller fall)","War / armed conflict",high,no
+LBR,1995,"First civil war; Abuja accord (August 1995)","War / armed conflict",medium,no
+LBR,1996,"No strong candidate (civil war; April 1996 fighting in Monrovia)","Unidentified",low,no
+LBR,2001,"Second civil war escalates (LURD); UN sanctions","War / armed conflict",high,no
+LBR,2004,"Recovery after the August 2003 peace agreement","Post-conflict recovery",high,no
+LBR,2008,"PWT-only jump in 2007 reversed (WB +4.1 and +2.8)","Data artifact / statistical",medium,no
+LBY,1972,"Oil output stabilizes after the 1971 cuts","Oil & gas: price or output rise",medium,no
+LBY,1975,"Oil output cut (1975 world recession)","Oil & gas: price or output fall",medium,no
+LBY,1977,"Slower growth after the 1976 oil-output recovery","Oil & gas: price or output fall",medium,no
+LBY,1982,"Oil output stabilizes after the 1981 collapse","Oil & gas: price or output rise",medium,no
+LBY,1985,"No identified event","Unidentified",low,no
+LBY,1988,"Partial recovery after the 1986-87 oil collapse","Oil & gas: price or output rise",low,no
+LBY,1992,"UN sanctions (April 1992, Lockerbie)","Sanctions / embargo",high,no
+LBY,2015,"Civil war continues (smaller fall)","War / armed conflict",medium,no
+LBY,2018,"Oil-output recovery slows","Oil & gas: price or output fall",medium,no
+LBY,2023,"Oil output recovers after the 2022 blockades","Oil & gas: price or output rise",high,no
+LCA,1987,"No identified event","Unidentified",low,no
+LCA,2023,"End of the post-COVID tourism rebound","Post-COVID rebound",high,no
+LSO,1974,"No identified event","Unidentified",low,no
+LSO,1984,"Smaller fall after the 1982-83 drought (PWT-only fall, WB -0.9)","Harvest recovery / good rains",low,yes
+LSO,1998,"Political crisis and SADC intervention (September 1998)","Political crisis / coup / revolution",high,no
+LSO,2021,"Partial post-COVID rebound","Post-COVID rebound",high,no
+LTU,1995,"Post-Soviet stabilization","Post-communist transition",high,no
+LTU,2010,"Recovery after the 2009 collapse","Recovery after economic crisis",high,no
+LVA,1994,"Post-Soviet stabilization","Post-communist transition",high,no
+LVA,2008,"Global financial crisis: end of the Baltic credit boom","Global financial crisis 2008-09",high,no
+LVA,2010,"Smaller fall after the 2009 collapse","Recovery after economic crisis",high,no
+LVA,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+MAR,1982,"Harvest recovery after the 1981 drought","Harvest recovery / good rains",high,yes
+MAR,1987,"Poor 1987 cereal harvest after the 1986 record","Drought / harvest failure",medium,yes
+MAR,1992,"Severe 1992 drought: cereal harvest collapse","Drought / harvest failure",high,yes
+MAR,1994,"Record cereal harvest after the 1992-93 droughts","Harvest recovery / good rains",high,yes
+MAR,1997,"Cereal harvest falls after the 1996 record","Drought / harvest failure",medium,yes
+MAR,2021,"Post-COVID rebound and record cereal harvest after the 2020 drought","Harvest recovery / good rains",high,yes
+MCO,2008,"Global financial crisis","Global financial crisis 2008-09",medium,no
+MCO,2010,"Recovery after the 2009 collapse","Recovery after economic crisis",medium,no
+MDA,1993,"Transition collapse pauses (between the 1992 and 1994 falls)","Post-communist transition",medium,no
+MDA,1995,"Smaller fall after the 1994 drought and collapse of Russian demand","Harvest recovery / good rains",medium,yes
+MDA,2009,"Global financial crisis: collapse of remittances","Global financial crisis 2008-09",high,no
+MDA,2010,"Recovery after the 2009 crisis","Recovery after economic crisis",high,no
+MDA,2020,"COVID-19 and the severe 2020 drought","Drought / harvest failure",high,yes
+MDA,2022,"Energy crisis after Russia's invasion of Ukraine and the 2022 drought","Drought / harvest failure",medium,yes
+MDG,1979,"Investment push (investissement a outrance, 1978-80)","Investment / reform / sector boom",medium,no
+MDG,2003,"Recovery after the 2002 political crisis","Recovery after economic crisis",high,no
+MDG,2009,"Political crisis (Rajoelina takeover, March 2009)","Political crisis / coup / revolution",high,no
+MDG,2021,"Partial post-COVID rebound","Post-COVID rebound",high,no
+MDV,1977,"No identified event","Unidentified",low,no
+MDV,1982,"No identified event","Unidentified",low,no
+MDV,1991,"Gulf-war tourism slump","Tourism / external demand shock",medium,no
+MDV,2002,"Tourism recovery after the 2001 slump","Recovery after economic crisis",medium,no
+MDV,2007,"Slower growth after the 2006 post-tsunami rebound","Natural disaster (non-weather)",high,no
+MDV,2010,"Recovery after the 2009 tourism fall","Recovery after economic crisis",high,no
+MEX,1996,"Recovery after the Tequila crisis","Recovery after economic crisis",high,no
+MEX,2010,"Recovery after the 2009 collapse","Recovery after economic crisis",high,no
+MEX,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+MHL,1975,"Early estimates of the Trust Territory economy","Data artifact / statistical",low,no
+MHL,1981,"Early estimates of the Trust Territory economy","Data artifact / statistical",low,no
+MHL,1984,"No identified event","Unidentified",low,no
+MHL,1987,"Slower growth after the 1986 Compact grant jump","Investment / reform / sector boom",medium,no
+MHL,2009,"No identified event","Unidentified",low,no
+MHL,2020,"COVID-19 border closure","COVID-19 pandemic",medium,no
+MLI,1979,"No strong candidate (harvest?)","Unidentified",low,no
+MLI,1980,"No identified event","Unidentified",low,no
+MLI,1987,"PWT-only jump in 1986 reversed (WB +0.8); 1987 poor rains?","Data artifact / statistical",low,no
+MLI,1992,"No identified event","Unidentified",low,no
+MLI,2002,"No identified event","Unidentified",low,no
+MLI,2005,"Harvest recovery after the 2004 drought and locusts","Harvest recovery / good rains",medium,yes
+MLT,1971,"No identified event","Unidentified",low,no
+MLT,2001,"Electronics export slump after the 2000 surge","Tourism / external demand shock",medium,no
+MLT,2022,"End of the post-COVID rebound","Post-COVID rebound",high,no
+MMR,1989,"Recovery after the 1988 collapse","Recovery after economic crisis",medium,no
+MMR,1992,"No identified event","Unidentified",low,no
+MMR,2022,"Partial recovery after the 2021 coup and COVID-19","Political crisis / coup / revolution",medium,no
+MNE,1994,"Avramovic stabilization (January 1994) ends hyperinflation","Recovery after economic crisis",high,no
+MNE,1997,"Slower growth after the 1996 rebound","Recovery after economic crisis",medium,no
+MNE,2001,"PWT-only jump in 2000 reversed (WB +3.2)","Data artifact / statistical",medium,no
+MNE,2009,"Global financial crisis","Global financial crisis 2008-09",high,no
+MNG,2009,"Global financial crisis: copper price collapse","Global financial crisis 2008-09",high,no
+MNG,2020,"COVID-19 (coal exports to China)","COVID-19 pandemic",high,no
+MNP,2010,"Smaller fall after the 2009 closure of the garment industry","Tourism / external demand shock",low,no
+MNP,2011,"Fall in Japanese tourism after the March 2011 Tohoku earthquake","Tourism / external demand shock",medium,no
+MNP,2021,"Partial post-COVID rebound","Post-COVID rebound",high,no
+MOZ,1971,"No identified event","Unidentified",low,no
+MOZ,1986,"Sources disagree (PWT -11.1 and -0.2, WB -0.9 and -4.1)","Data artifact / statistical",low,no
+MOZ,1993,"Peace (October 1992) and harvest recovery after the 1992 drought","Harvest recovery / good rains",high,yes
+MOZ,1996,"No strong candidate (post-war recovery; good 1996 harvest?)","Unidentified",low,no
+MOZ,2000,"February-March 2000 floods (Cyclone Eline)","Storm / flood (weather)",high,yes
+MRT,1971,"No identified event","Unidentified",low,no
+MRT,1974,"Recovery after the 1973 drought; iron-ore exports after the MIFERMA nationalization","Harvest recovery / good rains",medium,yes
+MRT,1976,"WB-only fall in 1975 reversed (PWT +6.7 and +3.5)","Data artifact / statistical",medium,no
+MRT,1977,"Western Sahara war: Polisario raids on the iron-ore railway","War / armed conflict",high,no
+MRT,1979,"End of the Western Sahara war (August 1979)","Post-conflict recovery",medium,no
+MRT,1983,"No identified event","Unidentified",low,no
+MRT,1995,"Sources disagree (PWT +1.3 and -5.2, WB -6.5 and +6.6)","Data artifact / statistical",medium,no
+MRT,1996,"Sources disagree (PWT -5.2 and +8.1, WB +6.6 and +3.7)","Data artifact / statistical",medium,no
+MRT,1997,"No strong candidate (poor 1997 rains?)","Unidentified",low,no
+MRT,2007,"Oil output fall at the Chinguetti field","Oil & gas: price or output fall",high,no
+MSR,1983,"No identified event","Unidentified",low,no
+MSR,1991,"End of the reconstruction boom after Hurricane Hugo (September 1989)","Storm / flood (weather)",medium,yes
+MSR,1995,"Soufriere Hills volcano eruption (July 1995)","Natural disaster (non-weather)",high,no
+MSR,1999,"Stabilization after the volcano evacuations","Natural disaster (non-weather)",medium,no
+MSR,2011,"No identified event","Unidentified",low,no
+MUS,1977,"End of the sugar price boom","Commodity / mining shock (non-oil)",medium,no
+MUS,1981,"Sugar crop recovery after Cyclone Claudette","Storm / flood (weather)",high,yes
+MUS,2021,"Partial post-COVID rebound","Post-COVID rebound",high,no
+MWI,1982,"Recovery after the 1981 drought and transport shock","Harvest recovery / good rains",medium,yes
+MWI,1993,"Harvest recovery after the 1992 drought","Harvest recovery / good rains",high,yes
+MWI,1996,"Slower growth after the 1995 harvest recovery","Harvest recovery / good rains",medium,yes
+MYS,1972,"PWT-only jump in 1971 reversed (WB +7.2 and +6.6)","Data artifact / statistical",medium,no
+MYS,1976,"Recovery after the 1975 commodity-price recession","Recovery after economic crisis",high,no
+MYS,1999,"Recovery after the Asian financial crisis","Recovery after economic crisis",high,no
+NAM,2021,"Partial post-COVID rebound","Post-COVID rebound",high,no
+NER,1974,"Harvest recovery after the 1972-73 Sahel drought","Harvest recovery / good rains",high,yes
+NER,1975,"No identified event","Unidentified",low,no
+NER,1985,"Harvest recovery after the 1984 drought","Harvest recovery / good rains",high,yes
+NER,1998,"Record 1998 harvest after the poor 1997 rains","Harvest recovery / good rains",medium,yes
+NER,1999,"April 1999 coup and aid suspension","Political crisis / coup / revolution",high,no
+NER,2008,"No identified event","Unidentified",low,no
+NGA,1972,"Slower growth after the 1971 oil surge","Oil & gas: price or output fall",medium,no
+NGA,1976,"Oil output recovers","Oil & gas: price or output rise",medium,no
+NGA,1979,"WB-only fall in 1978 reversed (PWT -6.0 and -5.9)","Data artifact / statistical",medium,no
+NGA,1984,"Crisis continues (smaller fall after 1983)","Oil & gas: price or output fall",medium,no
+NGA,1991,"Oil price falls back after the 1990 Gulf spike","Oil & gas: price or output fall",medium,no
+NIC,1975,"End of the reconstruction boom after the 1972 Managua earthquake","Natural disaster (non-weather)",medium,no
+NIC,1980,"Recovery after the 1979 revolution","Post-conflict recovery",high,no
+NIC,1989,"Smaller fall after the 1988 hurricane and hyperinflation; 1989 stabilization","Economic collapse / hyperinflation",medium,yes
+NIC,2021,"Post-COVID rebound and recovery after Hurricanes Eta and Iota (November 2020)","Post-COVID rebound",medium,yes
+NLD,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+NPL,1981,"Harvest recovery after the 1979 drought","Harvest recovery / good rains",medium,yes
+NPL,1984,"Harvest recovery after the 1982 monsoon failure","Harvest recovery / good rains",medium,yes
+NRU,1994,"Phosphate decline continues (smaller fall)","Commodity / mining shock (non-oil)",medium,no
+NRU,2003,"Phosphate decline continues (smaller fall)","Commodity / mining shock (non-oil)",medium,no
+NRU,2009,"No identified event","Unidentified",low,no
+NRU,2013,"Slower growth after the 2012 reopening of the Regional Processing Centre","Investment / reform / sector boom",medium,no
+NRU,2015,"Slower growth after the 2014 expansion of the Regional Processing Centre","Investment / reform / sector boom",medium,no
+OMN,1971,"Oil output fall","Oil & gas: price or output fall",medium,no
+OMN,1979,"Sources disagree (PWT +11.1 and -1.1, WB -8.9 and -1.0)","Data artifact / statistical",medium,no
+OMN,1986,"1986 oil price collapse","Oil & gas: price or output fall",high,no
+OMN,1990,"Sources disagree (PWT -2.4 and +2.9, WB +5.7 and -5.2)","Data artifact / statistical",medium,no
+PAK,1971,"1971 war and the secession of Bangladesh","War / armed conflict",high,no
+PAN,1971,"PWT-only jump in 1970 reversed (WB +3.9 and +6.4)","Data artifact / statistical",medium,no
+PAN,1989,"US sanctions continue; US invasion (December 1989)","Sanctions / embargo",medium,no
+PAN,1997,"WB-only fall in 1996 reversed (PWT +0.7 and +4.3)","Data artifact / statistical",medium,no
+PER,1984,"Recovery after the 1982-83 El Nino floods and drought","Harvest recovery / good rains",high,yes
+PER,2022,"End of the post-COVID rebound","Post-COVID rebound",high,no
+PHL,1986,"People Power revolution; the crisis bottoms out","Recovery after economic crisis",medium,no
+PHL,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+PLW,1994,"Early data","Data artifact / statistical",low,no
+PLW,2022,"COVID-19: tourism stays collapsed (smaller fall)","COVID-19 pandemic",medium,no
+PNG,1991,"Recovery with Porgera gold after the 1989 Panguna closure","Commodity / mining shock (non-oil)",medium,no
+PNG,1994,"Slower growth after the 1993 oil and gold boom","Commodity / mining shock (non-oil)",medium,no
+PNG,1996,"Recovery after the 1994-95 kina crisis","Recovery after economic crisis",medium,no
+PNG,1997,"1997 El Nino drought and frost; mines shut by low river levels","Drought / harvest failure",high,yes
+POL,1980,"Solidarity strikes and economic crisis","Political crisis / coup / revolution",high,no
+POL,1983,"Recovery after martial law","Recovery after economic crisis",high,no
+PRI,2005,"No identified event","Unidentified",low,no
+PRT,1974,"Carnation Revolution (April 1974) and the oil shock","Political crisis / coup / revolution",high,no
+PRT,1976,"Recovery after the 1975 revolutionary crisis","Recovery after economic crisis",high,no
+PRT,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+PRY,1982,"End of the Itaipu construction boom","Investment / reform / sector boom",medium,no
+PSE,1973,"Volatility under occupation (unreliable data)","Data artifact / statistical",low,no
+PSE,1975,"Volatility under occupation (unreliable data)","Data artifact / statistical",low,no
+PSE,1977,"Volatility under occupation (unreliable data)","Data artifact / statistical",low,no
+PSE,1978,"Volatility under occupation (unreliable data)","Data artifact / statistical",low,no
+PSE,1979,"Volatility under occupation (unreliable data)","Data artifact / statistical",low,no
+PSE,1982,"Volatility under occupation (unreliable data)","Data artifact / statistical",low,no
+PSE,1993,"Volatility under occupation (unreliable data)","Data artifact / statistical",low,no
+PSE,2006,"Aid boycott and clearance revenue withheld after the Hamas election win","Sanctions / embargo",high,no
+PSE,2021,"Partial post-COVID rebound","Post-COVID rebound",high,no
+PYF,1973,"No strong candidate (French nuclear-testing spending?)","Unidentified",low,no
+PYF,1976,"No strong candidate (French nuclear-testing spending?)","Unidentified",low,no
+PYF,1987,"No strong candidate (French nuclear-testing spending?)","Unidentified",low,no
+PYF,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+QAT,1978,"Oil output recovers after the 1977 Dukhan fire","Oil & gas: price or output rise",medium,no
+QAT,1992,"No strong candidate (oil output?)","Unidentified",low,no
+QAT,1993,"No identified event","Unidentified",low,no
+QAT,1998,"Slower growth after the 1997 LNG start; oil price fall","Oil & gas: price or output fall",medium,no
+QAT,2005,"Slower per-capita growth after the 2004 LNG jump","Oil & gas: price or output fall",medium,no
+QAT,2007,"No strong candidate (rapid inflow of migrant workers?)","Unidentified",low,no
+QAT,2012,"Slower growth once the new LNG trains reach capacity","Oil & gas: price or output fall",medium,no
+QAT,2022,"End of the post-COVID rebound (per capita: migrant population returns)","Post-COVID rebound",medium,no
+ROU,1993,"Post-communist stabilization","Post-communist transition",high,no
+ROU,2009,"Global financial crisis","Global financial crisis 2008-09",high,no
+RUS,1999,"Recovery after the 1998 crisis","Recovery after economic crisis",high,no
+RUS,2010,"Recovery after the 2009 collapse","Recovery after economic crisis",high,no
+RWA,1977,"End of the coffee price boom","Commodity / mining shock (non-oil)",medium,no
+RWA,1992,"No identified event (civil war from October 1990)","Unidentified",low,no
+RWA,1996,"Slower growth after the 1995 post-genocide rebound","Post-conflict recovery",high,no
+RWA,2003,"2003 drought: harvest fall","Drought / harvest failure",medium,yes
+RWA,2020,"COVID-19","COVID-19 pandemic",high,no
+RWA,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+SAU,1976,"Oil output recovers","Oil & gas: price or output rise",high,no
+SAU,1979,"Oil output rises after the Iranian revolution","Oil & gas: price or output rise",high,no
+SAU,1988,"Oil output rises","Oil & gas: price or output rise",medium,no
+SAU,2010,"Oil output recovers after the 2009 OPEC cut","Oil & gas: price or output rise",medium,no
+SAU,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+SAU,2023,"OPEC+ voluntary output cuts","Oil & gas: price or output fall",high,no
+SDN,1974,"No identified event","Unidentified",low,no
+SDN,1988,"Sources disagree (PWT -2.0 and +7.0, WB +11.5 and -1.6)","Data artifact / statistical",medium,no
+SDN,1989,"Sources disagree (PWT +7.0 and -5.3, WB -1.6 and +7.4)","Data artifact / statistical",medium,no
+SDN,1990,"Sources disagree (PWT -5.3 and +4.2, WB +7.4 and -7.4)","Data artifact / statistical",medium,no
+SDN,1991,"Sources disagree (PWT +4.2 and +5.6, WB -7.4 and +5.2)","Data artifact / statistical",medium,no
+SDN,1998,"WB-only jump in 1997 reversed (PWT +6.1 and +7.0)","Data artifact / statistical",medium,no
+SDN,2011,"Secession of South Sudan (July 2011): loss of most oil output","Oil & gas: price or output fall",high,no
+SDN,2012,"Oil loss after the secession of South Sudan; Heglig fighting","Oil & gas: price or output fall",high,no
+SEN,1974,"Harvest recovery after the 1972-73 Sahel drought","Harvest recovery / good rains",high,yes
+SEN,1977,"No strong candidate (groundnut prices or the 1977 drought?)","Unidentified",low,no
+SEN,1979,"Harvest recovery after the 1977-78 drought","Harvest recovery / good rains",high,yes
+SEN,1980,"Poor 1979-80 rains: groundnut crop falls","Drought / harvest failure",medium,yes
+SGP,1998,"Asian financial crisis","Financial / currency / debt crisis",high,no
+SGP,1999,"Recovery after the Asian financial crisis","Recovery after economic crisis",high,no
+SGP,2001,"Dot-com bust: electronics exports collapse","Tourism / external demand shock",high,no
+SGP,2022,"End of the post-COVID rebound","Post-COVID rebound",high,no
+SLE,1993,"Civil war; smaller fall after the 1992 WB-only collapse (PWT -8.2)","War / armed conflict",medium,no
+SLE,1998,"ECOMOG restores the Kabbah government (February 1998); smaller fall","War / armed conflict",medium,no
+SLE,2000,"Recovery after the Lome accord (July 1999)","Post-conflict recovery",medium,no
+SLE,2003,"Slower growth after the 2002 post-war rebound","Post-conflict recovery",high,no
+SMR,2013,"Banking crisis bottoms out","Financial / currency / debt crisis",medium,no
+SOM,1974,"Drought continues (1973-75 Abaartii Dabadheer); smaller fall","Drought / harvest failure",medium,yes
+SOM,1976,"No identified event (unreliable data)","Data artifact / statistical",low,no
+SOM,1978,"Ogaden War defeat (March 1978)","War / armed conflict",high,no
+SOM,1980,"Aftermath of the Ogaden War (smaller fall)","War / armed conflict",medium,no
+SOM,1981,"No identified event (unreliable data)","Unidentified",low,no
+SOM,1984,"Smaller fall after the 1983 Saudi ban on livestock imports","Commodity / mining shock (non-oil)",medium,no
+SOM,1986,"No identified event (unreliable data)","Data artifact / statistical",low,no
+SOM,1987,"No identified event (unreliable data)","Data artifact / statistical",low,no
+SOM,1992,"Civil war and the 1991-92 famine (war and drought)","War / armed conflict",medium,yes
+SOM,1995,"Civil war continues (smaller fall)","War / armed conflict",medium,no
+SOM,2013,"Sources disagree (PWT +5.6 and -6.0, WB +5.6 and +7.2)","Data artifact / statistical",medium,no
+SOM,2018,"WB-only jump in 2017 reversed (PWT +5.2 and -0.6)","Data artifact / statistical",low,no
+SRB,1994,"Avramovic stabilization (January 1994) ends hyperinflation","Recovery after economic crisis",high,no
+SRB,2000,"Sources disagree on 1999 (PWT +14.2, WB -10.5)","Data artifact / statistical",medium,no
+SSD,2016,"Renewed civil war (July 2016 fighting in Juba)","War / armed conflict",high,no
+SSD,2020,"COVID-19, oil price collapse and the 2020 floods","COVID-19 pandemic",medium,yes
+STP,1978,"End of the cocoa price boom","Commodity / mining shock (non-oil)",medium,no
+STP,1980,"Cocoa prices (unverified)","Commodity / mining shock (non-oil)",low,no
+STP,1982,"No identified event","Unidentified",low,no
+STP,1985,"No identified event","Unidentified",low,no
+SUR,1974,"PWT-only fall (WB -1.4 and +0.9)","Data artifact / statistical",medium,no
+SUR,1979,"No identified event","Unidentified",low,no
+SUR,1981,"No identified event","Unidentified",low,no
+SUR,1982,"Bauxite slump (December 1982 murders and suspension of Dutch aid)","Commodity / mining shock (non-oil)",medium,no
+SUR,1986,"PWT-only jump in 1985 reversed (WB +0.7 and -0.6)","Data artifact / statistical",medium,no
+SUR,1988,"Recovery after the interior war: elections and resumption of Dutch aid","Recovery after economic crisis",medium,no
+SUR,1994,"No identified event","Unidentified",low,no
+SUR,2021,"COVID-19 and debt default continue (smaller fall)","Financial / currency / debt crisis",high,no
+SVK,2009,"Global financial crisis","Global financial crisis 2008-09",high,no
+SVK,2010,"Recovery after the 2009 collapse","Recovery after economic crisis",high,no
+SVN,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+SWE,2010,"Recovery after the 2009 collapse","Recovery after economic crisis",high,no
+SWZ,1976,"End of the sugar price boom","Commodity / mining shock (non-oil)",medium,no
+SWZ,1977,"Sugar price fall","Commodity / mining shock (non-oil)",medium,no
+SWZ,1982,"No strong candidate (1982-83 southern African drought?)","Unidentified",low,no
+SWZ,1991,"Slower growth after the 1990 investment boom","Investment / reform / sector boom",medium,no
+SXM,2019,"Recovery after Hurricane Irma (September 2017)","Storm / flood (weather)",high,yes
+SXM,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+SYC,1980,"Tourism slump after the second oil shock","Tourism / external demand shock",medium,no
+SYC,1994,"No identified event","Unidentified",low,no
+SYC,2005,"No identified event","Unidentified",low,no
+SYC,2008,"Debt default (October 2008) and the global financial crisis","Financial / currency / debt crisis",high,no
+SYC,2021,"COVID-19: tourism stays depressed (smaller fall)","COVID-19 pandemic",high,no
+SYC,2023,"End of the post-COVID tourism rebound","Post-COVID rebound",high,no
+SYR,1971,"Harvest recovery after the poor 1970 harvest","Harvest recovery / good rains",medium,yes
+SYR,1977,"No identified event","Unidentified",low,no
+SYR,1978,"No strong candidate (harvest recovery?)","Unidentified",low,no
+SYR,1985,"Harvest recovery after the 1984 drought","Harvest recovery / good rains",medium,yes
+SYR,1987,"Foreign-exchange crisis continues (smaller fall)","Oil & gas: price or output fall",medium,no
+SYR,1990,"Harvest recovery after the 1989 drought","Harvest recovery / good rains",medium,yes
+SYR,1999,"1999 drought: wheat and barley harvest fall","Drought / harvest failure",high,yes
+SYR,2014,"Civil war continues (smaller fall)","War / armed conflict",high,no
+TCA,2007,"Slower growth after the tourism and construction boom","Investment / reform / sector boom",low,no
+TCA,2010,"Smaller fall after the 2009 slump","Global financial crisis 2008-09",medium,no
+TCA,2019,"WB series jump in 2018 reversed (PWT +1.4)","Data artifact / statistical",high,no
+TCD,1976,"PWT-only jump in 1975 reversed (WB +6.5 and +0.9)","Data artifact / statistical",medium,no
+TCD,1980,"Civil war continues (smaller fall)","War / armed conflict",high,no
+TCD,1982,"PWT-only fall in 1981 reversed (WB +0.9 and +0.5)","Data artifact / statistical",medium,no
+TCD,1986,"Cotton price collapse after the 1985 harvest recovery (WB series; PWT +2.8)","Commodity / mining shock (non-oil)",low,no
+TCD,1991,"WB-only fall in 1990 reversed (PWT +0.4 and +0.1)","Data artifact / statistical",medium,no
+TCD,1994,"CFA franc devaluation (January 1994) after the WB-only 1993 collapse","Financial / currency / debt crisis",low,no
+TCD,1995,"No identified event","Unidentified",low,no
+TCD,2001,"Oil-pipeline construction (Doba-Kribi) and recovery after the poor 2000 harvest","Investment / reform / sector boom",medium,yes
+TCD,2006,"Oil output fall and the dispute with the oil consortium","Oil & gas: price or output fall",medium,no
+TCD,2008,"PWT-only jump in 2007 reversed (WB +0.8 and -0.4)","Data artifact / statistical",medium,no
+TCD,2011,"2011 Sahel drought: harvest failure","Drought / harvest failure",high,yes
+TCD,2022,"WB-only jump (PWT +0.1)","Data artifact / statistical",medium,no
+TGO,1984,"Recovery after the 1983 debt crisis","Recovery after economic crisis",medium,no
+TGO,1988,"No identified event","Unidentified",low,no
+TGO,1995,"Slower growth after the 1994 rebound","Recovery after economic crisis",high,no
+TGO,1998,"Power shortages from the drought at Akosombo and the disputed June 1998 election","Drought / harvest failure",medium,yes
+THA,1971,"PWT-only jump in 1970 reversed (WB +8.0 and +2.1)","Data artifact / statistical",high,no
+THA,1999,"Recovery after the Asian financial crisis","Recovery after economic crisis",high,no
+TJK,1997,"Peace accord (June 1997); civil war ends","Post-conflict recovery",high,no
+TKM,1989,"Soviet-era estimates","Data artifact / statistical",low,no
+TKM,1991,"Soviet-era estimates","Data artifact / statistical",low,no
+TKM,1993,"Post-Soviet collapse pauses (gas exports)","Post-communist transition",medium,no
+TKM,1996,"No strong candidate (stabilization; gas-export swings?)","Unidentified",low,no
+TKM,1998,"No strong candidate (recovery despite the gas-export halt?)","Unidentified",low,no
+TKM,2000,"Slower growth after the 1999 resumption of gas exports","Oil & gas: price or output fall",medium,no
+TLS,2001,"Slower growth after the 2000 post-conflict rebound","Post-conflict recovery",high,no
+TLS,2007,"Recovery after the 2006 political crisis","Recovery after economic crisis",medium,no
+TLS,2021,"No strong candidate (oil-sector accounting?)","Unidentified",low,no
+TTO,1993,"WB-only jump in 1992 reversed (PWT -2.4 and -2.1)","Data artifact / statistical",medium,no
+TUN,1971,"PWT-only jump in 1970 reversed (WB +2.1 and +7.5)","Data artifact / statistical",medium,no
+TUN,1973,"No strong candidate (poor 1973 harvest after the 1972 bumper crop?)","Unidentified",low,no
+TUN,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+TUR,1994,"1994 currency crisis","Financial / currency / debt crisis",high,no
+TUR,1995,"Recovery after the 1994 crisis","Recovery after economic crisis",high,no
+TUR,2000,"Recovery after the 1999 recession and the Izmit earthquake","Recovery after economic crisis",high,no
+TUR,2001,"2001 banking crisis","Financial / currency / debt crisis",high,no
+TUR,2002,"Recovery after the 2001 crisis","Recovery after economic crisis",high,no
+TUR,2010,"Recovery after the 2009 recession","Recovery after economic crisis",high,no
+TUV,1983,"No identified event; very small economy","Unidentified",low,no
+TUV,1989,"No identified event; very small economy","Unidentified",low,no
+TUV,1991,"No identified event; very small economy","Unidentified",low,no
+TUV,1995,"No identified event; very small economy","Unidentified",low,no
+TUV,1997,"No identified event; very small economy","Unidentified",low,no
+TUV,1999,"No identified event; very small economy","Unidentified",low,no
+TUV,2003,"No identified event; very small economy","Unidentified",low,no
+TUV,2020,"No identified event; very small economy","Unidentified",low,no
+TZA,1971,"WB series break in 1970 reversed (PWT +0.5 and +0.6)","Data artifact / statistical",high,no
+UGA,1980,"Aftermath of the Uganda-Tanzania War (smaller fall)","War / armed conflict",medium,no
+UGA,2011,"PWT-only jump in 2010 reversed (WB +2.5 and +6.0)","Data artifact / statistical",medium,no
+UKR,1990,"Late-Soviet economic crisis","Post-communist transition",medium,no
+UKR,2010,"Recovery after the 2009 collapse","Recovery after economic crisis",high,no
+UKR,2016,"Stabilization after the 2014-15 war and currency crisis","Recovery after economic crisis",high,no
+URY,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+VCT,1989,"No identified event","Unidentified",low,no
+VEN,1990,"Recovery after the 1989 adjustment; Gulf-crisis oil price spike","Oil & gas: price or output rise",medium,no
+VEN,2021,"Collapse ends (informal dollarization)","Economic collapse / hyperinflation",high,no
+VGB,1972,"Early data for a very small economy","Data artifact / statistical",low,no
+VGB,1981,"No identified event","Unidentified",low,no
+VGB,1996,"Slower growth after the offshore-finance boom","Investment / reform / sector boom",low,no
+VGB,2004,"No identified event (offshore-finance economy)","Unidentified",low,no
+VGB,2006,"No identified event (offshore-finance economy)","Unidentified",low,no
+VGB,2016,"No identified event","Unidentified",low,no
+VNM,1978,"Border war with Cambodia, collectivization in the south and the 1978 floods (unreliable data)","War / armed conflict",low,yes
+VNM,1980,"No identified event (unreliable data)","Unidentified",low,no
+VUT,1981,"Stabilization after independence and the Santo rebellion","Independence / decolonization",medium,no
+WSM,1972,"Early data","Data artifact / statistical",low,no
+WSM,1976,"No identified event","Unidentified",low,no
+WSM,1980,"No identified event","Unidentified",low,no
+WSM,2023,"Post-COVID tourism rebound","Post-COVID rebound",high,no
+YEM,1991,"Return of about 800,000 workers expelled from Saudi Arabia after the Gulf crisis","Tourism / external demand shock",high,no
+YEM,1997,"PWT-only jump in 1996 reversed (WB +1.2 and +1.9)","Data artifact / statistical",medium,no
+YEM,2012,"Crisis after the 2011 uprising continues (smaller fall)","Political crisis / coup / revolution",high,no
+YEM,2018,"Civil war continues (smaller fall)","War / armed conflict",high,no
+ZAF,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+ZMB,1973,"Closure of the Rhodesian border (January 1973)","Sanctions / embargo",medium,no
+ZMB,1995,"No identified event","Unidentified",low,no
+ZWE,1971,"Slower growth after the 1970 sanctions-era boom","Investment / reform / sector boom",medium,no
+ZWE,1993,"Harvest recovery after the 1992 drought","Harvest recovery / good rains",high,yes
+ZWE,2004,"Economic collapse continues after the 2002-03 drought (smaller fall)","Economic collapse / hyperinflation",medium,yes
+ZWE,2013,"Slower growth after the 2010-12 recovery","Recovery after economic crisis",high,no
+ZWE,2021,"Post-COVID rebound and harvest recovery after the 2019-20 drought","Harvest recovery / good rains",high,yes

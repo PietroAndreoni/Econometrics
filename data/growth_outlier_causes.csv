@@ -1,0 +1,1033 @@
+GID_0,year,cause,category,confidence,weather
+ABW,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+AGO,1993,"Angolan civil war resumes after the disputed 1992 elections (MPLA vs UNITA)","War / armed conflict",high,no
+AIA,1991,"No identified event; very small economy with large swings (+19% 1990, -24% 1991, +22% 1992)","Data artifact / statistical",low,no
+AIA,2009,"Global financial crisis: tourism and construction collapse","Global financial crisis 2008-09",medium,no
+AIA,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+ALB,1991,"Collapse of the communist regime and of central planning","Post-communist transition",high,no
+ARE,1978,"Lower oil output and falling real oil prices with immigration-driven population growth","Oil & gas: price or output fall",medium,no
+ARE,1982,"Early-1980s oil glut: OPEC output cuts","Oil & gas: price or output fall",medium,no
+ARE,1986,"1986 oil price collapse","Oil & gas: price or output fall",high,no
+ARG,2002,"Argentine crisis: default and end of the peso-dollar convertibility","Financial / currency / debt crisis",high,no
+ARM,1991,"Soviet collapse (and aftermath of the 1988 Spitak earthquake)","Post-communist transition",high,no
+ARM,1992,"Soviet collapse, Nagorno-Karabakh war and Azerbaijani-Turkish blockade (energy crisis)","War / armed conflict",high,no
+ARM,2009,"Global financial crisis: construction collapse and fall in remittances from Russia","Global financial crisis 2008-09",high,no
+ATG,2009,"Global financial crisis: tourism and construction slump; Stanford Financial collapse","Global financial crisis 2008-09",medium,no
+ATG,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+AZE,1992,"Soviet collapse and Nagorno-Karabakh war","War / armed conflict",high,no
+AZE,1993,"Nagorno-Karabakh war (loss of territory) and Soviet collapse","War / armed conflict",high,no
+AZE,1994,"Nagorno-Karabakh war (ceasefire May 1994) and transition collapse","War / armed conflict",high,no
+AZE,1995,"Post-Soviet transition collapse after the Karabakh war","Post-communist transition",high,no
+BDI,1961,"Pre-independence political turmoil (assassination of Rwagasore); early, unreliable data","Political crisis / coup / revolution",low,no
+BDI,1995,"Burundian civil war (1993-2005)","War / armed conflict",high,no
+BFA,1961,"No identified event; early post-independence data (Upper Volta)","Unidentified",low,no
+BGD,1972,"Aftermath of the 1971 Liberation War (and of the 1970 Bhola cyclone)","War / armed conflict",high,no
+BGR,1997,"1996-97 banking crisis and hyperinflation","Financial / currency / debt crisis",high,no
+BHR,1975,"Fall in oil output in the 1975 world recession","Oil & gas: price or output fall",low,no
+BHR,1985,"Mid-1980s oil glut and Gulf slowdown","Oil & gas: price or output fall",medium,no
+BHS,1974,"Post-independence slump: the oil shock hits US tourism; exodus of offshore banks","Tourism / external demand shock",medium,no
+BHS,1975,"Continued tourism recession after the oil shock","Tourism / external demand shock",medium,no
+BHS,2020,"COVID-19 collapse of tourism (after Hurricane Dorian, 2019)","COVID-19 pandemic",high,no
+BLR,1994,"Post-Soviet transition collapse","Post-communist transition",high,no
+BLZ,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+BOL,1968,"No identified event (Bolivia grew in 1968); likely a data artifact","Data artifact / statistical",low,no
+BRB,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+BRN,1981,"Oil output cut (conservation policy, 1980s glut)","Oil & gas: price or output fall",medium,no
+BRN,1986,"1986 oil price collapse","Oil & gas: price or output fall",high,no
+BWA,2009,"Global financial crisis: diamond demand collapses, Debswana mines halted","Global financial crisis 2008-09",high,no
+CAF,2013,"Seleka seizure of power and civil war","War / armed conflict",high,no
+CHL,1975,"Copper price crash and shock-therapy stabilization","Commodity / mining shock (non-oil)",high,no
+CHL,1982,"Latin American debt crisis and Chilean banking collapse","Financial / currency / debt crisis",high,no
+CHN,1961,"Great Leap Forward famine","Economic collapse / hyperinflation",high,no
+CIV,1980,"Collapse of cocoa and coffee prices; debt crisis","Commodity / mining shock (non-oil)",medium,no
+CMR,1967,"No identified event","Unidentified",low,no
+COD,1961,"Congo Crisis (Katanga secession)","War / armed conflict",high,no
+COD,1991,"Zaire: army mutiny and looting (September 1991), hyperinflation","Economic collapse / hyperinflation",high,no
+COD,1992,"Zaire: hyperinflation and collapse of Gecamines copper output","Economic collapse / hyperinflation",high,no
+COD,1993,"Zaire: 1993 mutiny and looting, hyperinflation","Economic collapse / hyperinflation",high,no
+COG,2016,"2014-16 oil price collapse; Pool region conflict","Oil & gas: price or output fall",medium,no
+COM,2007,"Anjouan secession crisis (Mohamed Bacar)","Political crisis / coup / revolution",low,no
+CPV,1962,"No identified event (possibly drought); early data","Unidentified",low,no
+CPV,1963,"No identified event (possibly drought); early data","Unidentified",low,no
+CPV,1975,"Independence from Portugal and Portuguese departure; Sahel drought","Independence / decolonization",medium,yes
+CPV,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+CUW,2020,"COVID-19 collapse of tourism; refinery closure after the Venezuelan crisis","COVID-19 pandemic",high,no
+CYP,1960,"Independence after the 1955-59 EOKA emergency; run-down of British military spending","Independence / decolonization",low,no
+CYP,1975,"Aftermath of the 1974 Turkish invasion and partition","War / armed conflict",high,no
+CZE,1991,"Post-communist transition: price liberalization, collapse of COMECON trade","Post-communist transition",high,no
+DJI,1977,"Independence from France (departure of French personnel); the Ogaden war cuts the Addis Ababa railway","Independence / decolonization",medium,no
+DJI,1978,"The Ogaden war closes the Addis Ababa-Djibouti railway","War / armed conflict",medium,no
+DJI,1991,"Afar insurgency (FRUD) and regional instability","War / armed conflict",high,no
+DMA,1979,"Hurricane David (August 1979)","Storm / flood (weather)",high,yes
+DMA,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+DOM,1965,"Dominican civil war and US intervention","War / armed conflict",high,no
+DZA,1962,"Independence and exodus of about 900,000 European settlers","Independence / decolonization",high,no
+DZA,1971,"Nationalization of French oil interests; French boycott and lower oil output","Oil & gas: price or output fall",medium,no
+ESP,2020,"COVID-19 lockdowns and collapse of tourism","COVID-19 pandemic",high,no
+EST,1992,"Post-Soviet collapse","Post-communist transition",high,no
+EST,2009,"Global financial crisis: end of the Baltic credit boom","Global financial crisis 2008-09",high,no
+ETH,1991,"End of the civil war: fall of the Derg","War / armed conflict",high,no
+ETH,1992,"Aftermath of the civil war; de facto secession of Eritrea","War / armed conflict",medium,no
+FJI,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+GAB,1977,"End of the oil boom: fiscal overspending (1977 OAU summit, Transgabonais railway)","Oil & gas: price or output fall",medium,no
+GAB,1978,"IMF austerity after the 1977 fiscal crisis; falling oil output","Financial / currency / debt crisis",medium,no
+GAB,1987,"1986 oil price collapse","Oil & gas: price or output fall",high,no
+GAB,1999,"1998 oil price collapse and declining production","Oil & gas: price or output fall",medium,no
+GEO,1991,"Soviet collapse and civil war (Gamsakhurdia)","War / armed conflict",high,no
+GEO,1992,"Civil war, Abkhazia and South Ossetia wars, Soviet collapse","War / armed conflict",high,no
+GEO,1993,"Abkhazia war and civil war","War / armed conflict",high,no
+GHA,1975,"Oil-import shock, falling cocoa output and economic mismanagement","Macroeconomic mismanagement / recession",medium,no
+GNB,1966,"War of independence (PAIGC vs Portugal)","War / armed conflict",medium,no
+GNB,1970,"War of independence (PAIGC vs Portugal)","War / armed conflict",medium,no
+GNB,1977,"Sahel drought: rice harvest failure","Drought / harvest failure",medium,yes
+GNB,1980,"November 1980 coup (Vieira) and drought","Political crisis / coup / revolution",medium,yes
+GNB,1998,"1998-99 civil war","War / armed conflict",high,no
+GNQ,2010,"Oil output decline after the 2008 peak","Oil & gas: price or output fall",medium,no
+GNQ,2015,"2014-16 oil price collapse and falling output","Oil & gas: price or output fall",high,no
+GNQ,2016,"Oil price collapse and falling output","Oil & gas: price or output fall",high,no
+GRD,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+GUY,1982,"Bauxite and sugar price collapse, foreign-exchange crisis","Commodity / mining shock (non-oil)",medium,no
+HRV,1991,"Croatian War of Independence and Yugoslav breakup","War / armed conflict",high,no
+HRV,1992,"Croatian War of Independence","War / armed conflict",high,no
+HUN,1991,"Post-communist transition, collapse of COMECON trade","Post-communist transition",high,no
+IDN,1998,"Asian financial crisis","Financial / currency / debt crisis",high,no
+IRN,1970,"No identified event (Iran grew strongly around 1970); likely a data artifact","Data artifact / statistical",medium,no
+IRN,1978,"Revolutionary strikes, including in the oil sector (late 1978)","Political crisis / coup / revolution",high,no
+IRN,1979,"Islamic revolution: oil output collapses","Political crisis / coup / revolution",high,no
+IRN,1980,"Iran-Iraq War begins; US sanctions; oil exports collapse","War / armed conflict",high,no
+IRN,1986,"1986 oil price collapse during the Iran-Iraq War","Oil & gas: price or output fall",high,no
+IRQ,1981,"Iran-Iraq War: Gulf oil terminals destroyed, exports collapse","War / armed conflict",high,no
+IRQ,1983,"Iran-Iraq War","War / armed conflict",high,no
+IRQ,1989,"Aftermath of the Iran-Iraq War: debt crisis","Financial / currency / debt crisis",low,no
+IRQ,1991,"Gulf War and UN sanctions","War / armed conflict",high,no
+IRQ,1995,"UN sanctions and hyperinflation before Oil-for-Food","Sanctions / embargo",high,no
+IRQ,2003,"US-led invasion","War / armed conflict",high,no
+IRQ,2020,"COVID-19 and oil price collapse (OPEC+ cuts)","COVID-19 pandemic",high,no
+JOR,1970,"Black September: civil war between the Jordanian army and the PLO","War / armed conflict",high,no
+JOR,1989,"Currency and debt crisis (dinar devaluation, IMF programme, riots)","Financial / currency / debt crisis",high,no
+KAZ,1991,"Soviet collapse","Post-communist transition",high,no
+KAZ,1994,"Post-Soviet transition collapse","Post-communist transition",high,no
+KGZ,1992,"Post-Soviet transition collapse","Post-communist transition",high,no
+KGZ,1993,"Post-Soviet transition collapse","Post-communist transition",high,no
+KGZ,1994,"Post-Soviet transition collapse","Post-communist transition",high,no
+KHM,1973,"Cambodian civil war and US bombing","War / armed conflict",high,no
+KNA,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+KWT,1973,"Oil output cut (conservation policy) during the 1973 embargo","Oil & gas: price or output fall",medium,no
+KWT,1974,"Oil output cuts (conservation policy, 1974-75)","Oil & gas: price or output fall",medium,no
+KWT,1975,"Oil output cuts (conservation policy, 1974-75)","Oil & gas: price or output fall",medium,no
+KWT,1980,"Oil output cuts after the 1979-80 price boom","Oil & gas: price or output fall",medium,no
+KWT,1981,"Oil glut: output cuts","Oil & gas: price or output fall",medium,no
+KWT,1982,"Oil output cuts and the Souk Al-Manakh stock market crash","Financial / currency / debt crisis",medium,no
+KWT,1988,"Lower oil prices after the 1986 collapse; OPEC quotas","Oil & gas: price or output fall",low,no
+KWT,1991,"Iraqi occupation, Gulf War and oil-well fires","War / armed conflict",high,no
+KWT,2009,"Global financial crisis: oil price fall and OPEC output cuts","Global financial crisis 2008-09",medium,no
+LBN,1975,"Lebanese civil war begins","War / armed conflict",high,no
+LBN,1976,"Lebanese civil war (Two-Year War) and Syrian intervention","War / armed conflict",high,no
+LBN,1982,"Israeli invasion and siege of Beirut","War / armed conflict",high,no
+LBN,1988,"Currency collapse and hyperinflation; presidential vacuum with two rival governments","Economic collapse / hyperinflation",medium,no
+LBN,1989,"War of Liberation (Aoun vs Syria) and War of Elimination","War / armed conflict",high,no
+LBN,2020,"Financial collapse and default, Beirut port explosion, COVID-19","Financial / currency / debt crisis",high,no
+LBR,1990,"First Liberian civil war (NPFL invasion, fall of Doe)","War / armed conflict",high,no
+LBR,1992,"First Liberian civil war (Operation Octopus)","War / armed conflict",high,no
+LBR,1993,"First Liberian civil war","War / armed conflict",high,no
+LBR,1994,"First Liberian civil war","War / armed conflict",high,no
+LBR,2003,"Second Liberian civil war: siege of Monrovia","War / armed conflict",high,no
+LCA,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+LSO,1971,"No identified event (possibly drought or the aftermath of the 1970 political crisis)","Unidentified",low,no
+LSO,1975,"No identified event","Unidentified",low,no
+LSO,1979,"No identified event","Unidentified",low,no
+LSO,1983,"Southern African drought of 1982-83","Drought / harvest failure",medium,yes
+LTU,1992,"Post-Soviet collapse","Post-communist transition",high,no
+LTU,1993,"Post-Soviet collapse","Post-communist transition",high,no
+LTU,2009,"Global financial crisis: end of the Baltic credit boom","Global financial crisis 2008-09",high,no
+LVA,1992,"Post-Soviet collapse","Post-communist transition",high,no
+LVA,1993,"Post-Soviet collapse","Post-communist transition",high,no
+LVA,2009,"Global financial crisis: end of the Baltic credit boom","Global financial crisis 2008-09",high,no
+MDA,1991,"Soviet collapse","Post-communist transition",high,no
+MDA,1992,"Soviet collapse and Transnistria war","War / armed conflict",high,no
+MDA,1994,"Drought and collapse of Russian demand for Moldovan farm products","Post-communist transition",medium,yes
+MDG,1981,"Balance-of-payments and debt crisis under socialist policies","Financial / currency / debt crisis",medium,no
+MDG,2002,"Political crisis after the disputed 2001 election (Ratsiraka vs Ravalomanana, blockades)","Political crisis / coup / revolution",high,no
+MDV,2005,"Indian Ocean tsunami (December 2004)","Natural disaster (non-weather)",high,no
+MDV,2009,"Global financial crisis: fall in tourism","Global financial crisis 2008-09",medium,no
+MDV,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+MLI,1964,"Economic crisis under Modibo Keita's socialist policies (new Malian franc, 1962); early data","Macroeconomic mismanagement / recession",low,no
+MMR,1988,"8888 Uprising and economic collapse after the 1987 demonetization","Political crisis / coup / revolution",high,no
+MNE,1991,"Yugoslav breakup","Post-communist transition",high,no
+MNE,1992,"Yugoslav wars and UN sanctions","Sanctions / embargo",high,no
+MNE,1993,"UN sanctions and hyperinflation (FR Yugoslavia)","Economic collapse / hyperinflation",high,no
+MNE,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+MOZ,1983,"Civil war (Renamo) and the 1982-83 drought","War / armed conflict",high,yes
+MSR,1996,"Soufriere Hills volcano eruption: evacuation of Plymouth","Natural disaster (non-weather)",high,no
+MSR,1997,"Soufriere Hills volcano eruption: destruction of Plymouth","Natural disaster (non-weather)",high,no
+MUS,1968,"Independence-year crisis: communal riots, sugar sector slump","Independence / decolonization",low,no
+MUS,1980,"Cyclone Claudette (December 1979) cuts the sugar crop; devaluation and IMF programme","Storm / flood (weather)",medium,yes
+MUS,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+MWI,1962,"End of the Federation of Rhodesia and Nyasaland; early data","Independence / decolonization",low,no
+MWI,1981,"Drought, terms-of-trade shock and rail routes to the sea cut by the Mozambican war","Drought / harvest failure",low,yes
+NER,1973,"Sahel drought (1972-74)","Drought / harvest failure",high,yes
+NER,1984,"1984 Sahel drought and uranium price collapse","Drought / harvest failure",high,yes
+NGA,1967,"Nigerian civil war (Biafra) begins","War / armed conflict",high,no
+NGA,1983,"Oil price fall and output cuts; economic crisis and expulsion of migrants","Oil & gas: price or output fall",high,no
+NIC,1979,"Sandinista revolution","War / armed conflict",high,no
+NIC,1988,"Contra war, Hurricane Joan (October 1988) and hyperinflation","Economic collapse / hyperinflation",high,yes
+OMN,1973,"No clear event (Dhofar rebellion ongoing)","Unidentified",low,no
+PAN,1988,"US sanctions against Noriega; banking crisis","Sanctions / embargo",high,no
+PAN,2020,"COVID-19 lockdown","COVID-19 pandemic",high,no
+PER,1983,"1982-83 El Nino floods and drought; debt crisis","Storm / flood (weather)",high,yes
+PER,1988,"Hyperinflation under Garcia; Shining Path insurgency","Economic collapse / hyperinflation",high,no
+PER,1989,"Hyperinflation; Shining Path insurgency","Economic collapse / hyperinflation",high,no
+PER,2020,"COVID-19 lockdown","COVID-19 pandemic",high,no
+PSE,2000,"Second Intifada begins (September 2000): Israeli closures","War / armed conflict",high,no
+PSE,2001,"Second Intifada","War / armed conflict",high,no
+PSE,2002,"Second Intifada: Operation Defensive Shield","War / armed conflict",high,no
+PSE,2020,"COVID-19 and suspension of the PA-Israel clearance revenue","COVID-19 pandemic",high,no
+QAT,1977,"Fall in oil output (Dukhan field fire)","Oil & gas: price or output fall",low,no
+QAT,1982,"Oil glut: OPEC output cuts","Oil & gas: price or output fall",medium,no
+ROU,1991,"Post-communist transition","Post-communist transition",high,no
+RUS,1992,"Post-Soviet transition: price liberalization and collapse","Post-communist transition",high,no
+RUS,1994,"Post-Soviet transition collapse; First Chechen War","Post-communist transition",high,no
+RWA,1963,"Inyenzi incursions and massacres; Tutsi exodus after independence","Political crisis / coup / revolution",medium,no
+RWA,1964,"Post-independence turmoil and exodus","Political crisis / coup / revolution",low,no
+RWA,1993,"Civil war (RPF offensive, February 1993)","War / armed conflict",high,no
+RWA,1994,"Genocide and civil war","War / armed conflict",high,no
+SAU,1982,"Saudi output cuts as OPEC swing producer","Oil & gas: price or output fall",high,no
+SAU,1983,"Saudi output cuts as OPEC swing producer","Oil & gas: price or output fall",high,no
+SAU,1985,"Saudi output cut to about 3.4 mb/d before the 1986 price war","Oil & gas: price or output fall",high,no
+SDN,2023,"Civil war between the army and the RSF","War / armed conflict",high,no
+SLE,1967,"1967 coups (Juxon-Smith) and devaluation","Political crisis / coup / revolution",low,no
+SLE,1996,"Civil war (RUF)","War / armed conflict",high,no
+SLE,1997,"AFRC coup and civil war","War / armed conflict",high,no
+SLE,2015,"Ebola epidemic and iron-ore price collapse (mines closed)","Epidemic (non-COVID)",high,no
+SOM,1973,"Onset of the 1973-75 drought (Abaartii Dabadheer)","Drought / harvest failure",low,yes
+SOM,1979,"Aftermath of the Ogaden War defeat; refugee influx","War / armed conflict",medium,no
+SOM,1983,"Saudi ban on Somali livestock imports (rinderpest); insurgency","Commodity / mining shock (non-oil)",medium,no
+SOM,1994,"Civil war and state collapse","War / armed conflict",high,no
+SRB,1991,"Yugoslav breakup and wars","War / armed conflict",high,no
+SRB,1992,"Yugoslav wars and UN sanctions","War / armed conflict",high,no
+SRB,1993,"UN sanctions and hyperinflation (one of the largest recorded)","Economic collapse / hyperinflation",high,no
+SSD,2012,"Oil shutdown in the dispute with Sudan (January 2012)","Oil & gas: price or output fall",high,no
+STP,1981,"Cocoa sector collapse under nationalized estates","Commodity / mining shock (non-oil)",low,no
+SUR,2020,"COVID-19 and debt default","COVID-19 pandemic",high,no
+SVK,1991,"Post-communist transition","Post-communist transition",high,no
+SXM,2018,"Aftermath of Hurricane Irma (September 2017)","Storm / flood (weather)",high,yes
+SXM,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+SYC,1965,"No identified event; early data (pre-airport economy)","Unidentified",low,no
+SYC,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+SYR,1963,"Ba'ath coup (March 1963) and nationalizations","Political crisis / coup / revolution",medium,no
+SYR,1966,"Neo-Ba'ath coup (February 1966)","Political crisis / coup / revolution",medium,no
+SYR,1970,"Poor harvest (rain-fed agriculture); Assad's coup (November 1970)","Drought / harvest failure",low,yes
+SYR,1973,"October (Yom Kippur) War: damage to infrastructure","War / armed conflict",high,no
+SYR,1989,"Severe drought (wheat harvest roughly halved) and foreign-exchange crisis","Drought / harvest failure",medium,yes
+SYR,2012,"Syrian civil war","War / armed conflict",high,no
+SYR,2013,"Syrian civil war","War / armed conflict",high,no
+TCA,2009,"Global financial crisis: tourism and construction slump; UK suspension of self-government","Global financial crisis 2008-09",medium,no
+TCA,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+TCD,1979,"Civil war: battle of N'Djamena","War / armed conflict",high,no
+TCD,1981,"Civil war and Libyan intervention","War / armed conflict",high,no
+TGO,1993,"General strike and political crisis (1992-93), aid suspended","Political crisis / coup / revolution",high,no
+TJK,1992,"Civil war and Soviet collapse","War / armed conflict",high,no
+TJK,1993,"Civil war","War / armed conflict",high,no
+TJK,1994,"Civil war and transition collapse","War / armed conflict",high,no
+TJK,1995,"Civil war and transition collapse","War / armed conflict",high,no
+TJK,1996,"Civil war","War / armed conflict",high,no
+TKM,1992,"Soviet collapse","Post-communist transition",high,no
+TKM,1994,"Post-Soviet collapse; gas exports to the CIS unpaid","Post-communist transition",high,no
+TKM,1997,"Gas exports halted in the dispute with Gazprom (1997-98)","Oil & gas: price or output fall",high,no
+TTO,1983,"End of the oil boom: falling oil prices and output","Oil & gas: price or output fall",medium,no
+UGA,1979,"Uganda-Tanzania War, fall of Idi Amin","War / armed conflict",high,no
+UKR,1993,"Post-Soviet collapse and hyperinflation","Post-communist transition",high,no
+UKR,1994,"Post-Soviet collapse","Post-communist transition",high,no
+UKR,1995,"Post-Soviet collapse","Post-communist transition",high,no
+UKR,2009,"Global financial crisis: steel price collapse and banking crisis","Global financial crisis 2008-09",high,no
+UKR,2022,"Russian full-scale invasion","War / armed conflict",high,no
+UZB,1992,"Soviet collapse","Post-communist transition",high,no
+VCT,1973,"No identified event (small banana economy)","Unidentified",low,no
+VEN,2016,"Oil price collapse, hyperinflation and economic collapse","Economic collapse / hyperinflation",high,no
+VEN,2017,"Hyperinflation and economic collapse; US financial sanctions","Economic collapse / hyperinflation",high,no
+VEN,2018,"Hyperinflation and collapse of oil output","Economic collapse / hyperinflation",high,no
+VEN,2019,"Hyperinflation, US oil sanctions, blackouts","Economic collapse / hyperinflation",high,no
+VEN,2020,"Economic collapse, sanctions and COVID-19","Economic collapse / hyperinflation",high,no
+VGB,1971,"No identified event; early data for a very small economy","Unidentified",low,no
+VGB,2003,"No identified event (offshore-finance economy)","Unidentified",low,no
+YEM,2011,"Arab Spring uprising, fuel shortages, pipeline attacks","Political crisis / coup / revolution",high,no
+YEM,2014,"Houthi takeover of Sanaa, civil war","War / armed conflict",high,no
+YEM,2015,"Civil war and Saudi-led intervention","War / armed conflict",high,no
+YEM,2016,"Civil war and blockade","War / armed conflict",high,no
+YEM,2017,"Civil war, blockade and cholera epidemic","War / armed conflict",high,no
+ZMB,1969,"No clear event (nationalization of the copper mines, 1969)","Commodity / mining shock (non-oil)",low,no
+ZWE,1968,"UN comprehensive sanctions on Rhodesia and drought","Sanctions / embargo",low,yes
+ABW,1987,"Recovery after the closure of the Lago refinery (1985): tourism boom","Investment / reform / sector boom",medium,no
+ABW,1988,"Tourism boom after the refinery closure","Investment / reform / sector boom",medium,no
+ABW,2021,"Post-COVID tourism rebound","Post-COVID rebound",high,no
+AIA,1990,"No identified event; very small economy with large swings","Data artifact / statistical",low,no
+AIA,1992,"No identified event; very small economy with large swings","Data artifact / statistical",low,no
+AIA,2006,"Tourism and luxury-resort construction boom","Investment / reform / sector boom",medium,no
+AIA,2021,"Post-COVID tourism rebound","Post-COVID rebound",high,no
+AIA,2022,"Post-COVID tourism rebound","Post-COVID rebound",high,no
+ALB,1995,"Transition recovery boom (before the 1997 pyramid crisis)","Recovery after economic crisis",medium,no
+ALB,1999,"Recovery after the 1997 pyramid-scheme collapse; Kosovo-war aid","Recovery after economic crisis",medium,no
+ARE,1980,"1979-80 oil price boom","Oil & gas: price or output rise",high,no
+ARM,2002,"Construction and remittance boom","Investment / reform / sector boom",high,no
+ARM,2003,"Construction and remittance boom","Investment / reform / sector boom",high,no
+ARM,2005,"Construction and remittance boom","Investment / reform / sector boom",high,no
+ARM,2006,"Construction and remittance boom","Investment / reform / sector boom",high,no
+ARM,2007,"Construction and remittance boom","Investment / reform / sector boom",high,no
+AZE,2005,"Oil boom: Azeri-Chirag-Guneshli fields and the BTC pipeline","Oil & gas: price or output rise",high,no
+AZE,2006,"Oil boom: BTC pipeline opens","Oil & gas: price or output rise",high,no
+AZE,2007,"Oil and gas boom","Oil & gas: price or output rise",high,no
+BDI,1970,"Coffee price and harvest (unverified)","Commodity / mining shock (non-oil)",low,no
+BFA,1972,"No identified event","Unidentified",low,no
+BHR,1976,"Offshore banking boom after Beirut's civil war; oil-boom spillovers","Investment / reform / sector boom",medium,no
+BHS,1979,"Tourism boom (unverified)","Investment / reform / sector boom",low,no
+BHS,2021,"Post-COVID tourism rebound","Post-COVID rebound",high,no
+BIH,1994,"Rebound from the 1992-93 collapse after the Washington Agreement (wartime, from a very low base)","Post-conflict recovery",medium,no
+BIH,1995,"Wartime rebound from a very low base; Dayton Agreement (December 1995)","Post-conflict recovery",medium,no
+BIH,1996,"Post-war reconstruction after Dayton","Post-conflict recovery",high,no
+BIH,1997,"Post-war reconstruction","Post-conflict recovery",high,no
+BIH,1998,"Post-war reconstruction","Post-conflict recovery",high,no
+BLZ,1987,"Citrus, tourism and construction boom (unverified)","Investment / reform / sector boom",low,no
+BLZ,1989,"Citrus, tourism and construction boom (unverified)","Investment / reform / sector boom",low,no
+BLZ,2021,"Post-COVID tourism rebound","Post-COVID rebound",high,no
+BRB,1967,"Independence-era tourism boom (unverified)","Investment / reform / sector boom",low,no
+BRB,2022,"Post-COVID tourism recovery","Post-COVID rebound",high,no
+BRN,1976,"Oil boom","Oil & gas: price or output rise",medium,no
+BRN,1979,"1979 oil price boom","Oil & gas: price or output rise",high,no
+BTN,1987,"Chukha hydropower plant: electricity exports to India","Investment / reform / sector boom",high,no
+BTN,2007,"Tala hydropower plant commissioned","Investment / reform / sector boom",high,no
+BWA,1967,"Early mining development (diamonds discovered at Orapa, 1967); early data","Commodity / mining shock (non-oil)",low,no
+BWA,1971,"Orapa diamond mine opens","Commodity / mining shock (non-oil)",high,no
+BWA,1972,"Orapa diamond output ramps up","Commodity / mining shock (non-oil)",high,no
+BWA,1973,"Diamond output and the Selebi-Phikwe copper-nickel mine","Commodity / mining shock (non-oil)",medium,no
+BWA,1989,"Diamond boom (Jwaneng, record sales)","Commodity / mining shock (non-oil)",medium,no
+CHN,1984,"Deng's reforms: household responsibility system, 1984 boom","Investment / reform / sector boom",high,no
+CHN,1992,"Deng's Southern Tour and reform acceleration","Investment / reform / sector boom",high,no
+CHN,2007,"Pre-crisis investment and export boom","Investment / reform / sector boom",high,no
+CIV,1964,"Coffee and cocoa boom (Ivorian miracle)","Commodity / mining shock (non-oil)",medium,no
+CIV,2012,"Recovery after the 2010-11 post-election conflict","Post-conflict recovery",high,no
+CIV,2013,"Recovery after the 2010-11 post-election conflict","Post-conflict recovery",high,no
+CMR,1978,"Oil production starts","Oil & gas: price or output rise",medium,no
+COG,1961,"No identified event; early data","Unidentified",low,no
+COG,1973,"Oil production from the offshore Emeraude field","Oil & gas: price or output rise",medium,no
+COG,1981,"Oil boom: rising output and prices","Oil & gas: price or output rise",high,no
+COG,1982,"Oil boom: rising output","Oil & gas: price or output rise",high,no
+CPV,1966,"No identified event; early data","Unidentified",low,no
+CPV,2022,"Post-COVID tourism rebound","Post-COVID rebound",high,no
+CYM,1998,"No identified event (offshore finance and tourism)","Unidentified",low,no
+CYP,1965,"Recovery after the 1963-64 intercommunal violence","Post-conflict recovery",medium,no
+CYP,1976,"Recovery after the 1974 invasion; capital inflows from war-torn Lebanon","Post-conflict recovery",high,no
+CYP,1977,"Recovery after the 1974 invasion","Post-conflict recovery",high,no
+DMA,1980,"Reconstruction after Hurricane David (1979)","Storm / flood (weather)",high,yes
+DOM,1962,"Post-Trujillo liberalization rebound","Recovery after economic crisis",medium,no
+DOM,1970,"Balaguer-era boom (sugar prices, public works)","Investment / reform / sector boom",medium,no
+DZA,1963,"Rebound after the 1962 independence collapse","Independence / decolonization",high,no
+DZA,1972,"Oil output recovers after the 1971 nationalization dispute","Oil & gas: price or output rise",medium,no
+EGY,1964,"First five-year plan investment boom (unverified)","Investment / reform / sector boom",low,no
+EGY,1970,"End of the War of Attrition; Aswan High Dam completed","Post-conflict recovery",low,no
+EST,1997,"Transition boom before the 1998 Russian crisis","Investment / reform / sector boom",high,no
+FJI,2022,"Post-COVID tourism rebound","Post-COVID rebound",high,no
+GAB,1963,"Oil and manganese expansion (unverified)","Commodity / mining shock (non-oil)",low,no
+GAB,1974,"Oil boom: price and output","Oil & gas: price or output rise",high,no
+GAB,1975,"Oil boom: price and output","Oil & gas: price or output rise",high,no
+GAB,1976,"Oil boom: price and output","Oil & gas: price or output rise",high,no
+GEO,1996,"Post-war stabilization (lari, 1995)","Post-conflict recovery",medium,no
+GEO,1997,"Post-war stabilization","Post-conflict recovery",medium,no
+GEO,2007,"Post-Rose Revolution reform and FDI boom","Investment / reform / sector boom",high,no
+GIN,1960,"No identified event; early data","Unidentified",low,no
+GMB,1981,"Groundnut harvest recovery after the 1980 drought (unverified)","Harvest recovery / good rains",low,yes
+GNB,1963,"No identified event; early data","Unidentified",low,no
+GNQ,1996,"Oil boom: Zafiro field","Oil & gas: price or output rise",high,no
+GNQ,1997,"Oil boom: Zafiro field","Oil & gas: price or output rise",high,no
+GNQ,1998,"Oil boom","Oil & gas: price or output rise",high,no
+GNQ,1999,"Oil boom","Oil & gas: price or output rise",high,no
+GNQ,2001,"Oil boom: Ceiba field","Oil & gas: price or output rise",high,no
+GNQ,2002,"Oil boom","Oil & gas: price or output rise",high,no
+GNQ,2004,"Oil boom","Oil & gas: price or output rise",high,no
+GRD,2005,"Reconstruction after Hurricane Ivan (2004)","Storm / flood (weather)",high,yes
+GUY,2006,"Recovery after the 2005 floods; Cricket World Cup construction","Storm / flood (weather)",low,yes
+GUY,2020,"Oil production starts (Liza field, December 2019)","Oil & gas: price or output rise",high,no
+GUY,2021,"Oil production expands","Oil & gas: price or output rise",high,no
+GUY,2022,"Oil production expands","Oil & gas: price or output rise",high,no
+GUY,2023,"Oil production expands","Oil & gas: price or output rise",high,no
+HRV,2021,"Post-COVID tourism rebound","Post-COVID rebound",high,no
+IRL,2015,"Relocation of multinationals' intellectual property ('leprechaun economics')","Data artifact / statistical",high,no
+IRL,2021,"Multinational sector (pharmaceuticals, IP) and post-COVID rebound","Data artifact / statistical",medium,no
+IRN,1976,"Oil boom","Oil & gas: price or output rise",medium,no
+IRN,1982,"Oil exports recover during the Iran-Iraq War","Oil & gas: price or output rise",medium,no
+IRQ,1973,"Oil output growth after the 1972 nationalization; 1973 price boom","Oil & gas: price or output rise",medium,no
+IRQ,1976,"Oil boom","Oil & gas: price or output rise",high,no
+IRQ,1978,"Oil boom","Oil & gas: price or output rise",high,no
+IRQ,1979,"Oil boom","Oil & gas: price or output rise",high,no
+IRQ,1987,"Oil exports recover through new pipelines (Turkey, Saudi Arabia)","Oil & gas: price or output rise",medium,no
+IRQ,1992,"Rebound after the 1991 Gulf War collapse","Post-conflict recovery",medium,no
+IRQ,1993,"Rebound after the 1991 Gulf War collapse","Post-conflict recovery",medium,no
+IRQ,1996,"Oil-for-Food programme begins (December 1996)","Sanctions / embargo",medium,no
+IRQ,1997,"Oil-for-Food programme: oil exports resume","Sanctions / embargo",high,no
+IRQ,1998,"Oil-for-Food programme: oil exports expand","Sanctions / embargo",high,no
+IRQ,1999,"Oil-for-Food programme: oil exports expand","Sanctions / embargo",high,no
+IRQ,2004,"Rebound after the 2003 invasion; sanctions lifted","Post-conflict recovery",high,no
+JOR,1979,"Gulf remittances and Arab aid (Baghdad summit, 1978)","Investment / reform / sector boom",medium,no
+KAZ,2001,"Oil boom: CPC pipeline opens","Oil & gas: price or output rise",high,no
+KHM,1987,"No identified event (Vietnamese-backed PRK period)","Unidentified",low,no
+KOR,1973,"Export and heavy-industry boom","Investment / reform / sector boom",high,no
+KWT,1989,"Oil output above the OPEC quota","Oil & gas: price or output rise",high,no
+KWT,1992,"Post-war recovery: oil fields restored","Post-conflict recovery",high,no
+KWT,1993,"Post-war recovery: oil fields restored","Post-conflict recovery",high,no
+KWT,2003,"Higher oil output around the Iraq war","Oil & gas: price or output rise",medium,no
+LAO,1981,"No identified event","Unidentified",low,no
+LAO,2007,"Mining (Sepon copper and gold) and hydropower expansion","Commodity / mining shock (non-oil)",medium,no
+LBN,1977,"Lull after the 1975-76 war: rebound","Post-conflict recovery",high,no
+LBN,1983,"Rebound after the 1982 Israeli invasion","Post-conflict recovery",medium,no
+LBN,1984,"Wartime rebound (unreliable data)","Post-conflict recovery",low,no
+LBN,1985,"Wartime rebound (unreliable data)","Post-conflict recovery",low,no
+LBN,1987,"Wartime volatility (unreliable data)","Post-conflict recovery",low,no
+LBN,1990,"End of the civil war (Taif Agreement)","Post-conflict recovery",high,no
+LBN,1991,"Post-war reconstruction","Post-conflict recovery",high,no
+LBR,1997,"End of the first civil war (1996 Abuja accord, 1997 elections)","Post-conflict recovery",high,no
+LBR,1998,"Post-war recovery","Post-conflict recovery",high,no
+LBR,1999,"Post-war recovery","Post-conflict recovery",high,no
+LBR,2000,"Post-war recovery (before the second war escalated)","Post-conflict recovery",medium,no
+LBR,2007,"Post-war recovery after the second civil war","Post-conflict recovery",high,no
+LCA,1976,"Tourism and banana growth (unverified)","Investment / reform / sector boom",low,no
+LCA,1986,"Tourism and banana growth (unverified)","Investment / reform / sector boom",low,no
+LCA,1988,"Tourism and banana growth (unverified)","Investment / reform / sector boom",low,no
+LCA,2022,"Post-COVID tourism rebound","Post-COVID rebound",high,no
+LSO,1962,"No identified event; early data","Unidentified",low,no
+LSO,1972,"No identified event","Unidentified",low,no
+LSO,1973,"No identified event","Unidentified",low,no
+LSO,1976,"No identified event","Unidentified",low,no
+LSO,1977,"No identified event","Unidentified",low,no
+LSO,1978,"No identified event","Unidentified",low,no
+LSO,2007,"Textile exports (AGOA) and the Highlands Water Project","Investment / reform / sector boom",low,no
+LVA,2005,"Pre-crisis credit boom","Investment / reform / sector boom",high,no
+LVA,2006,"Pre-crisis credit boom","Investment / reform / sector boom",high,no
+MAR,1961,"No identified event (harvest-driven economy)","Unidentified",low,no
+MAR,1963,"Good harvest (unverified)","Harvest recovery / good rains",low,yes
+MDA,2021,"Post-COVID rebound and harvest recovery after the 2020 drought","Harvest recovery / good rains",high,yes
+MDV,1980,"Tourism expansion (unverified)","Investment / reform / sector boom",low,no
+MDV,1983,"Tourism expansion (unverified)","Investment / reform / sector boom",low,no
+MDV,1984,"Tourism expansion (unverified)","Investment / reform / sector boom",low,no
+MDV,2006,"Recovery after the 2004 tsunami","Natural disaster (non-weather)",high,no
+MDV,2021,"Post-COVID tourism rebound","Post-COVID rebound",high,no
+MLI,1986,"Harvest recovery after the 1984-85 drought","Harvest recovery / good rains",medium,yes
+MLI,1995,"CFA franc devaluation (1994) and cotton boom","Recovery after economic crisis",medium,no
+MLI,1996,"Cotton and gold expansion after the devaluation","Commodity / mining shock (non-oil)",medium,no
+MLT,1975,"Industrial and tourism expansion (unverified)","Investment / reform / sector boom",low,no
+MLT,1976,"Industrial and tourism expansion (unverified)","Investment / reform / sector boom",low,no
+MMR,2003,"Official growth statistics widely regarded as overstated; gas exports","Data artifact / statistical",medium,no
+MMR,2005,"Official growth statistics widely regarded as overstated; gas exports","Data artifact / statistical",medium,no
+MNE,1995,"Rebound after the 1993 hyperinflation","Recovery after economic crisis",medium,no
+MNE,1996,"Rebound after the sanctions were suspended (Dayton, 1995)","Recovery after economic crisis",medium,no
+MNE,2000,"Recovery after the Kosovo war; adoption of the Deutsche Mark","Recovery after economic crisis",low,no
+MNE,2021,"Post-COVID tourism rebound","Post-COVID rebound",high,no
+MNG,2011,"Mining boom (Oyu Tolgoi construction, coal exports)","Commodity / mining shock (non-oil)",high,no
+MRT,1964,"Iron-ore exports start (MIFERMA, 1963)","Commodity / mining shock (non-oil)",high,no
+MRT,1965,"Iron-ore exports ramp up","Commodity / mining shock (non-oil)",medium,no
+MRT,1968,"Iron-ore exports (unverified)","Commodity / mining shock (non-oil)",low,no
+MRT,2006,"Oil production starts (Chinguetti field)","Oil & gas: price or output rise",high,no
+MSR,1994,"No identified event","Unidentified",low,no
+MSR,2020,"No identified event (likely data for a tiny economy)","Data artifact / statistical",low,no
+MUS,1976,"Sugar price boom and export-processing-zone growth","Commodity / mining shock (non-oil)",medium,no
+MWI,1960,"No identified event; early data","Unidentified",low,no
+MWI,1965,"No identified event (independence, 1964); early data","Unidentified",low,no
+MWI,1966,"No identified event; early data","Unidentified",low,no
+MWI,1970,"No identified event","Unidentified",low,no
+MYS,1971,"No identified event (likely data)","Unidentified",low,no
+NGA,1960,"Independence year; early data","Unidentified",low,no
+NGA,1969,"Oil output surges during the civil war","Oil & gas: price or output rise",medium,no
+NGA,1970,"Oil boom and end of the civil war","Oil & gas: price or output rise",high,no
+NZL,1960,"No identified event (likely data)","Unidentified",low,no
+OMN,1974,"Oil price boom","Oil & gas: price or output rise",high,no
+OMN,1975,"Oil price boom","Oil & gas: price or output rise",high,no
+PAN,1970,"Banking-centre law (1970) and construction boom","Investment / reform / sector boom",low,no
+PAN,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+PRT,1968,"No identified event (likely data)","Unidentified",low,no
+PRY,2002,"No identified event (Paraguay was in recession in 2002); likely a data artifact","Data artifact / statistical",low,no
+PSE,1972,"Integration into the Israeli labour market after 1967","Investment / reform / sector boom",low,no
+PSE,1974,"Integration into the Israeli labour market after 1967","Investment / reform / sector boom",low,no
+PSE,1986,"Volatility under occupation (unreliable data)","Unidentified",low,no
+PSE,1990,"Volatility under occupation (unreliable data)","Unidentified",low,no
+PSE,1992,"Volatility under occupation (unreliable data)","Unidentified",low,no
+PSE,2004,"Recovery after the 2002 collapse in the Second Intifada","Post-conflict recovery",medium,no
+QAT,1997,"LNG exports start (Ras Laffan)","Oil & gas: price or output rise",high,no
+QAT,2004,"LNG expansion and oil prices","Oil & gas: price or output rise",high,no
+ROU,1961,"No identified event; early data","Unidentified",low,no
+RWA,1976,"Coffee price boom","Commodity / mining shock (non-oil)",medium,no
+RWA,1995,"Rebound after the 1994 genocide","Post-conflict recovery",high,no
+SAU,1972,"Oil output surge","Oil & gas: price or output rise",high,no
+SAU,1973,"Oil output and price boom","Oil & gas: price or output rise",high,no
+SDN,1976,"No identified event","Unidentified",low,no
+SLE,2002,"End of the civil war (January 2002)","Post-conflict recovery",high,no
+SLE,2013,"Iron-ore export boom (Tonkolili)","Commodity / mining shock (non-oil)",high,no
+SLE,2016,"Recovery after the Ebola epidemic; iron-ore mining restarts","Recovery after economic crisis",medium,no
+SLE,2017,"Recovery after the Ebola epidemic","Recovery after economic crisis",low,no
+SLE,2018,"Recovery after the Ebola epidemic","Recovery after economic crisis",low,no
+SOM,2015,"No identified event (unreliable data)","Unidentified",low,no
+SRB,1999,"No identified event (Serbia contracted in 1999 under NATO bombing); likely a data artifact","Data artifact / statistical",medium,no
+SSD,2013,"Oil production restarts after the 2012 shutdown","Oil & gas: price or output rise",high,no
+SSD,2014,"Oil production restarts after the 2012 shutdown","Oil & gas: price or output rise",high,no
+STP,1977,"Cocoa price boom","Commodity / mining shock (non-oil)",medium,no
+STP,1979,"Cocoa prices (unverified)","Commodity / mining shock (non-oil)",low,no
+SWZ,1974,"Sugar price boom","Commodity / mining shock (non-oil)",medium,no
+SWZ,1975,"Sugar price boom","Commodity / mining shock (non-oil)",medium,no
+SWZ,1986,"Firms relocating from South Africa under sanctions","Investment / reform / sector boom",low,no
+SYC,1963,"No identified event; early data","Unidentified",low,no
+SYC,1967,"No identified event; early data","Unidentified",low,no
+SYC,1968,"No identified event; early data","Unidentified",low,no
+SYC,1971,"International airport opens: start of mass tourism","Investment / reform / sector boom",high,no
+SYC,1976,"Tourism boom; independence","Investment / reform / sector boom",medium,no
+SYC,1979,"Tourism boom (unverified)","Investment / reform / sector boom",low,no
+SYC,1997,"No identified event","Unidentified",low,no
+SYR,1962,"Harvest recovery after the 1958-61 drought; end of the union with Egypt","Harvest recovery / good rains",medium,yes
+SYR,1969,"Good harvest (unverified)","Harvest recovery / good rains",low,yes
+SYR,1972,"Good harvest and rising oil output (unverified)","Harvest recovery / good rains",low,yes
+SYR,1974,"Reconstruction after the 1973 war; Arab aid and oil-price windfall","Post-conflict recovery",medium,no
+SYR,1975,"Arab aid and oil-price windfall","Oil & gas: price or output rise",medium,no
+TCD,1975,"No identified event","Unidentified",low,no
+TCD,2004,"Oil production starts (Doba fields, Chad-Cameroon pipeline)","Oil & gas: price or output rise",high,no
+TCD,2007,"No clear event (oil and harvest)","Unidentified",low,no
+TCD,2010,"Good harvest and oil (unverified)","Harvest recovery / good rains",low,yes
+TGO,1994,"Rebound after the 1993 crisis; CFA franc devaluation","Recovery after economic crisis",medium,no
+THA,1970,"No identified event (Thailand grew about 7%); likely a data artifact","Data artifact / statistical",medium,no
+TKM,1999,"Gas exports resume (to Russia and Ukraine)","Oil & gas: price or output rise",high,no
+TKM,2010,"Gas exports to China begin (Central Asia-China pipeline)","Oil & gas: price or output rise",high,no
+TTO,2003,"Atlantic LNG expansion","Oil & gas: price or output rise",high,no
+TTO,2006,"Atlantic LNG train 4 and energy boom","Oil & gas: price or output rise",high,no
+TUN,1970,"End of the collectivization experiment (1969); harvest recovery","Recovery after economic crisis",low,yes
+TUN,1972,"Good harvest and oil (unverified)","Harvest recovery / good rains",low,yes
+TZA,1964,"No identified event; early data","Unidentified",low,no
+UGA,2010,"No identified event","Unidentified",low,no
+UKR,2023,"Rebound after the 2022 collapse","Post-conflict recovery",high,no
+VCT,1972,"No identified event","Unidentified",low,no
+VCT,1988,"No identified event","Unidentified",low,no
+VEN,2004,"Oil output recovers after the 2002-03 general strike","Oil & gas: price or output rise",high,no
+VGB,1990,"Offshore-finance boom (International Business Companies Act, 1984)","Investment / reform / sector boom",medium,no
+VGB,1991,"Offshore-finance boom","Investment / reform / sector boom",medium,no
+VGB,1992,"Offshore-finance boom","Investment / reform / sector boom",medium,no
+VGB,1993,"Offshore-finance boom","Investment / reform / sector boom",medium,no
+VGB,1994,"Offshore-finance boom","Investment / reform / sector boom",medium,no
+VGB,1995,"Offshore-finance boom","Investment / reform / sector boom",medium,no
+YEM,1990,"Unification; early oil exports","Oil & gas: price or output rise",low,no
+YEM,1996,"Oil output (Masila field) and IMF reforms","Oil & gas: price or output rise",low,no
+ZMB,1967,"Copper price boom","Commodity / mining shock (non-oil)",low,no
+ZWE,1969,"Sanctions-era import substitution and mining boom (Rhodesia)","Investment / reform / sector boom",low,no
+ZWE,1970,"Sanctions-era import substitution and mining boom (Rhodesia)","Investment / reform / sector boom",low,no
+ZWE,2009,"Dollarization ends hyperinflation: rebound","Recovery after economic crisis",high,no
+ZWE,2010,"Recovery after hyperinflation","Recovery after economic crisis",high,no
+ZWE,2012,"Recovery after hyperinflation (mining)","Recovery after economic crisis",medium,no
+ABW,2009,"Global financial crisis: tourism slump and shutdown of the Valero refinery (July 2009)","Global financial crisis 2008-09",high,no
+AGO,1975,"War of independence and civil war (MPLA vs FNLA and UNITA); exodus of the Portuguese settlers","War / armed conflict",high,no
+AGO,1976,"Civil war after independence; departure of the Portuguese settlers and their skills","War / armed conflict",high,no
+AGO,1978,"Civil war (UNITA insurgency; South African raid on Cassinga)","War / armed conflict",medium,no
+AGO,1981,"Civil war (UNITA) and South African invasion (Operation Protea, August 1981)","War / armed conflict",high,no
+AGO,1992,"Return to civil war after the disputed September 1992 elections","War / armed conflict",high,no
+AGO,2020,"COVID-19 and the 2020 oil price collapse","COVID-19 pandemic",high,no
+ALB,1990,"Crisis of the communist economy before its collapse (shortages, strikes, embassy exodus)","Post-communist transition",high,no
+ALB,1992,"Post-communist collapse (third year)","Post-communist transition",high,no
+ALB,1997,"Collapse of the pyramid schemes and civil unrest","Financial / currency / debt crisis",high,no
+ARE,1983,"Oil glut: OPEC output cuts and the March 1983 price cut","Oil & gas: price or output fall",high,no
+ARE,1985,"OPEC output cuts as oil prices slide","Oil & gas: price or output fall",medium,no
+ARE,1988,"Oil price fall (1988) under OPEC quotas","Oil & gas: price or output fall",medium,no
+ARE,2007,"Immigration-driven population growth (per-capita effect of the Gulf boom)","Data artifact / statistical",medium,no
+ARE,2009,"Global financial crisis: oil price fall, OPEC cuts and the Dubai debt crisis","Global financial crisis 2008-09",high,no
+ARG,1985,"High inflation and the Austral Plan stabilization (June 1985)","Economic collapse / hyperinflation",medium,no
+ARG,1989,"Hyperinflation (1989-90)","Economic collapse / hyperinflation",high,no
+ARG,2020,"COVID-19 lockdown","COVID-19 pandemic",high,no
+ATG,1976,"No identified event","Unidentified",low,no
+BDI,1996,"Civil war; Buyoya coup (July 1996) and regional embargo","War / armed conflict",high,no
+BEN,1975,"No strong candidate (Marxist-Leninist turn and nationalizations, 1974-75?)","Unidentified",low,no
+BGD,1967,"No identified event (East Pakistan)","Unidentified",low,no
+BGD,1971,"Liberation War (March-December 1971)","War / armed conflict",high,no
+BGR,1990,"Collapse of the communist economy and of CMEA trade","Post-communist transition",high,no
+BGR,1991,"Price liberalization and the CMEA collapse","Post-communist transition",high,no
+BGR,1999,"No strong candidate (Kosovo war cuts the Danube trade route?)","Unidentified",low,no
+BHR,1981,"No strong candidate (early-1980s oil glut?)","Unidentified",low,no
+BHR,1982,"No strong candidate (early-1980s oil glut?)","Unidentified",low,no
+BHS,1981,"No strong candidate (US recession and tourism?)","Unidentified",low,no
+BIH,1991,"Yugoslav collapse (before the 1992 war)","Post-communist transition",high,no
+BLR,1992,"Soviet collapse","Post-communist transition",high,no
+BLR,1993,"Post-Soviet transition collapse","Post-communist transition",high,no
+BLR,1995,"Post-Soviet transition collapse","Post-communist transition",high,no
+BMU,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+BOL,2020,"COVID-19 lockdown after the 2019 political crisis","COVID-19 pandemic",high,no
+BRB,1992,"Balance-of-payments crisis: IMF programme and 8% public-sector wage cut","Financial / currency / debt crisis",high,no
+BRN,1980,"Oil output cut after the 1979 peak (conservation policy)","Oil & gas: price or output fall",medium,no
+BTN,2020,"COVID-19: border closure and end of tourism","COVID-19 pandemic",high,no
+BWA,2020,"COVID-19: collapse of diamond sales","COVID-19 pandemic",high,no
+CAF,1983,"No identified event","Unidentified",low,no
+CAF,1996,"Army mutinies (April, May and November 1996)","Political crisis / coup / revolution",high,no
+CAF,2003,"Rebellion and Bozize coup (March 2003)","Political crisis / coup / revolution",high,no
+CHE,1975,"Recession after the first oil shock (GDP -7%, the deepest fall in the OECD)","Macroeconomic mismanagement / recession",high,no
+CIV,1983,"1983 drought (cocoa and coffee harvests, hydropower shortage) and debt crisis","Drought / harvest failure",medium,yes
+CMR,1976,"No identified event","Unidentified",low,no
+CMR,1986,"1986 oil price collapse and falling cocoa and coffee prices","Oil & gas: price or output fall",medium,no
+CMR,1987,"Start of the 1987-94 economic crisis (oil and commodity prices, fiscal crisis)","Oil & gas: price or output fall",medium,no
+COD,1975,"Copper price collapse (1974-75) and the Zairianization of foreign businesses (1973-74)","Commodity / mining shock (non-oil)",high,no
+COD,1976,"Copper price slump and debt crisis after Zairianization","Commodity / mining shock (non-oil)",medium,no
+COD,1978,"Shaba II: FLNC invasion of Kolwezi (May 1978) disrupts copper mining","War / armed conflict",high,no
+COD,1990,"Aid suspended after the Lubumbashi massacre (May 1990); start of the Gecamines collapse","Economic collapse / hyperinflation",high,no
+COD,1994,"Hyperinflation and economic collapse; Rwandan refugee crisis in the east","Economic collapse / hyperinflation",high,no
+COD,1997,"First Congo War (AFDL; fall of Mobutu in May 1997)","War / armed conflict",high,no
+COD,1999,"Second Congo War","War / armed conflict",high,no
+COD,2000,"Second Congo War","War / armed conflict",high,no
+COG,1963,"August 1963 revolution (Trois Glorieuses): fall of Youlou","Political crisis / coup / revolution",medium,no
+COG,1977,"No strong candidate (assassination of President Ngouabi, March 1977; falling oil output?)","Unidentified",low,no
+COG,1986,"1986 oil price collapse","Oil & gas: price or output fall",high,no
+COG,2001,"No strong candidate (lower oil prices?)","Unidentified",low,no
+COG,2007,"Fall in oil output (technical problems at mature fields)","Oil & gas: price or output fall",medium,no
+COG,2017,"Debt crisis after the 2014-16 oil price collapse (hidden debt, arrears); Pool conflict","Financial / currency / debt crisis",medium,no
+COG,2020,"COVID-19 and the 2020 oil price collapse","COVID-19 pandemic",high,no
+COL,2020,"COVID-19 lockdown","COVID-19 pandemic",high,no
+CRI,1982,"Debt crisis: 1981 default, colon devaluation and inflation","Financial / currency / debt crisis",high,no
+CUW,2018,"Venezuelan crisis: the Isla refinery (PDVSA lease) winds down","Oil & gas: price or output fall",medium,no
+CUW,2019,"Isla refinery shut (PDVSA; US sanctions on Venezuela)","Oil & gas: price or output fall",medium,no
+CYM,2009,"Global financial crisis: tourism and financial services","Global financial crisis 2008-09",medium,no
+CYP,1964,"Intercommunal violence (December 1963-1964) and UN intervention","War / armed conflict",high,no
+DJI,1974,"No identified event","Unidentified",low,no
+DJI,1989,"No identified event","Unidentified",low,no
+DJI,1996,"No strong candidate (fiscal crisis and public wage arrears after the FRUD insurgency?)","Unidentified",low,no
+DOM,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+DZA,1966,"No strong candidate (possibly a poor harvest)","Unidentified",low,no
+ECU,2020,"COVID-19 and the oil price collapse","COVID-19 pandemic",high,no
+EST,1991,"Soviet collapse","Post-communist transition",high,no
+ETH,1985,"1984-85 drought and famine; civil war (Eritrea, Tigray)","Drought / harvest failure",high,yes
+ETH,1989,"Civil war (EPRDF and EPLF offensives; May 1989 coup attempt)","War / armed conflict",high,no
+FIN,2009,"Global financial crisis: collapse of exports (electronics, paper, machinery)","Global financial crisis 2008-09",high,no
+FJI,1987,"Two military coups (May and September 1987)","Political crisis / coup / revolution",high,no
+FRA,2020,"COVID-19 lockdown","COVID-19 pandemic",high,no
+GBR,2020,"COVID-19 lockdown","COVID-19 pandemic",high,no
+GEO,1994,"Post-Soviet collapse after the civil war and the Abkhazia war","Post-communist transition",high,no
+GHA,1982,"Rawlings coup (31 December 1981) and economic collapse","Political crisis / coup / revolution",high,no
+GHA,1983,"1983 drought and bush fires; return of about one million Ghanaians expelled from Nigeria","Drought / harvest failure",high,yes
+GIN,1964,"No identified event","Unidentified",low,no
+GIN,1970,"No strong candidate (Portuguese raid on Conakry, November 1970?)","Unidentified",low,no
+GMB,1961,"No identified event; early data","Unidentified",low,no
+GMB,2011,"Crop failure after the erratic 2011 rains (Sahel drought)","Drought / harvest failure",high,yes
+GNQ,2013,"Fall in oil output (mature fields)","Oil & gas: price or output fall",medium,no
+GNQ,2017,"Falling oil output after the 2014-16 price collapse; fiscal adjustment","Oil & gas: price or output fall",high,no
+GNQ,2018,"Falling oil output","Oil & gas: price or output fall",high,no
+GNQ,2019,"Falling oil output","Oil & gas: price or output fall",high,no
+GNQ,2020,"COVID-19, oil price collapse and falling output","COVID-19 pandemic",high,no
+GNQ,2023,"Falling oil and gas output","Oil & gas: price or output fall",medium,no
+GRC,2011,"Sovereign debt crisis and austerity","Financial / currency / debt crisis",high,no
+GRC,2012,"Sovereign debt crisis: default (PSI) and austerity","Financial / currency / debt crisis",high,no
+GRC,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+HND,2020,"COVID-19 and Hurricanes Eta and Iota (November 2020)","COVID-19 pandemic",high,yes
+HRV,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+HTI,1994,"OAS/UN embargo under the military regime (1991-94)","Sanctions / embargo",high,no
+IND,1979,"Monsoon failure (1979 drought) and the second oil shock","Drought / harvest failure",high,yes
+IRL,2023,"Contraction of the multinational sector (contract manufacturing, IP) after the 2022 surge","Data artifact / statistical",medium,no
+IRN,1981,"Iran-Iraq War; post-revolution turmoil","War / armed conflict",high,no
+IRN,1984,"Iran-Iraq War (attacks on tankers and on Kharg Island)","War / armed conflict",medium,no
+IRN,1988,"Iran-Iraq War (War of the Cities, tanker war); low oil prices","War / armed conflict",high,no
+IRQ,1994,"UN sanctions and hyperinflation","Sanctions / embargo",high,no
+IRQ,2002,"UN sanctions; oil exports halted for a month (April 2002); run-up to the invasion","Sanctions / embargo",medium,no
+ISL,2009,"Banking collapse (October 2008)","Financial / currency / debt crisis",high,no
+ISL,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+ITA,2020,"COVID-19 lockdown","COVID-19 pandemic",high,no
+JAM,1976,"Recession and capital flight under the Manley government (1976 state of emergency)","Macroeconomic mismanagement / recession",medium,no
+JAM,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+JOR,1968,"Loss of the West Bank in the Six-Day War (June 1967)","War / armed conflict",high,no
+JOR,1973,"Drought (1973 harvest failure) and the October 1973 war","Drought / harvest failure",medium,yes
+JOR,1990,"Gulf crisis (August 1990): loss of Iraqi trade and Gulf remittances; returnees","Tourism / external demand shock",high,no
+KAZ,1993,"Post-Soviet transition collapse","Post-communist transition",high,no
+KEN,1970,"No identified event","Unidentified",low,no
+KGZ,1991,"Soviet collapse","Post-communist transition",high,no
+KGZ,2020,"COVID-19 and the October 2020 political crisis","COVID-19 pandemic",high,no
+KHM,1977,"Khmer Rouge regime (forced collectivization, purges) and border war with Vietnam","War / armed conflict",medium,no
+KHM,1979,"Vietnamese invasion (January 1979), fall of the Khmer Rouge and famine","War / armed conflict",high,no
+KHM,1980,"Aftermath of the Khmer Rouge regime and the Vietnamese invasion: famine (1979-80)","War / armed conflict",high,no
+KWT,1977,"Oil output cuts","Oil & gas: price or output fall",medium,no
+KWT,1985,"OPEC output cuts as oil prices slide","Oil & gas: price or output fall",medium,no
+KWT,2010,"Oil output held down by OPEC quotas after the 2009 cuts","Oil & gas: price or output fall",medium,no
+KWT,2017,"OPEC+ output cuts (January 2017)","Oil & gas: price or output fall",high,no
+KWT,2023,"OPEC+ output cuts (2023)","Oil & gas: price or output fall",high,no
+LBN,1986,"Civil war: collapse of the Lebanese pound (1986-87)","War / armed conflict",medium,no
+LBN,2014,"Syrian refugee influx (per-capita effect) and spillover of the Syrian war","War / armed conflict",medium,no
+LBR,1980,"Samuel Doe's coup (April 1980)","Political crisis / coup / revolution",high,no
+LKA,2022,"Sovereign default and balance-of-payments crisis","Financial / currency / debt crisis",high,no
+LSO,2020,"COVID-19 (South African lockdown, textile exports)","COVID-19 pandemic",high,no
+LTU,1994,"Post-Soviet transition collapse","Post-communist transition",high,no
+LUX,1975,"Steel crisis after the first oil shock (ARBED)","Macroeconomic mismanagement / recession",high,no
+LVA,1991,"Soviet collapse","Post-communist transition",high,no
+MAR,1995,"Severe drought: cereal harvest collapse","Drought / harvest failure",high,yes
+MAR,2020,"COVID-19 and drought (poor 2020 cereal harvest)","COVID-19 pandemic",high,yes
+MDG,1963,"No identified event","Unidentified",low,no
+MDG,1991,"General strikes and the Forces Vives protests against Ratsiraka","Political crisis / coup / revolution",high,no
+MDG,2020,"COVID-19: collapse of tourism and of textile and mining exports","COVID-19 pandemic",high,no
+MDV,1975,"No identified event","Unidentified",low,no
+MEX,1995,"Tequila crisis (December 1994 devaluation)","Financial / currency / debt crisis",high,no
+MEX,2009,"Global financial crisis and the H1N1 influenza outbreak","Global financial crisis 2008-09",high,no
+MEX,2020,"COVID-19 lockdown","COVID-19 pandemic",high,no
+MKD,1992,"Yugoslav collapse","Post-communist transition",high,no
+MLI,1983,"No strong candidate (possibly drought)","Unidentified",low,no
+MLI,2004,"Fall in gold output (Morila, Sadiola) and the 2004 drought and locust invasion","Commodity / mining shock (non-oil)",medium,yes
+MMR,1964,"Burmese Way to Socialism: nationalization of trade and demonetization (1963-64)","Macroeconomic mismanagement / recession",medium,no
+MNE,1999,"Kosovo war and NATO bombing","War / armed conflict",high,no
+MNG,1991,"End of Soviet aid and of the CMEA: transition collapse","Post-communist transition",high,no
+MNG,1992,"Transition collapse after the end of Soviet aid","Post-communist transition",high,no
+MOZ,1985,"Civil war (Renamo)","War / armed conflict",high,no
+MOZ,1992,"Southern African drought (1991-92) and the last year of the civil war","Drought / harvest failure",high,yes
+MRT,1961,"No identified event; early data","Unidentified",low,no
+MRT,1978,"Western Sahara war (Polisario raids on the iron-ore railway) and the July 1978 coup","War / armed conflict",high,no
+MRT,1982,"No strong candidate (iron-ore slump? drought?)","Unidentified",low,no
+MSR,1998,"Soufriere Hills volcano: evacuation of two-thirds of the island","Natural disaster (non-weather)",high,no
+MSR,2010,"No strong candidate (February 2010 dome collapse of the Soufriere Hills volcano?)","Unidentified",low,no
+MUS,1960,"Cyclones Alix and Carol (January-February 1960) destroy the sugar crop","Storm / flood (weather)",high,yes
+MWI,1992,"Southern African drought (1991-92): maize harvest failure; aid freeze","Drought / harvest failure",high,yes
+MWI,1994,"1994 drought (maize harvest failure) and the aid freeze before the political transition","Drought / harvest failure",medium,yes
+MYS,1998,"Asian financial crisis","Financial / currency / debt crisis",high,no
+NAM,2020,"COVID-19 (mining and tourism)","COVID-19 pandemic",high,no
+NER,1969,"No strong candidate (possibly drought)","Unidentified",low,no
+NER,1972,"Sahel drought (1972-74)","Drought / harvest failure",high,yes
+NER,1983,"End of the uranium boom and debt crisis (IMF programme, 1983)","Commodity / mining shock (non-oil)",medium,no
+NGA,1965,"No strong candidate (Western Region crisis after the 1965 elections?)","Unidentified",low,no
+NGA,1966,"Coups of January and July 1966 and the massacres in the North","Political crisis / coup / revolution",high,no
+NGA,1982,"Oil price fall and OPEC output cuts","Oil & gas: price or output fall",high,no
+NIC,1978,"Sandinista insurrection after the assassination of Chamorro (January 1978)","War / armed conflict",high,no
+OMN,1987,"No strong candidate (oil price slump after 1986?)","Unidentified",low,no
+OMN,2011,"Immigration-driven population growth (per-capita effect)","Data artifact / statistical",medium,no
+PHL,1984,"Debt crisis after the assassination of Benigno Aquino (August 1983): moratorium and IMF austerity","Financial / currency / debt crisis",high,no
+PHL,1985,"Debt crisis and recession at the end of the Marcos regime","Financial / currency / debt crisis",high,no
+PHL,2020,"COVID-19 lockdown","COVID-19 pandemic",high,no
+POL,1981,"Solidarity crisis, shortages and martial law (December 1981)","Political crisis / coup / revolution",high,no
+POL,1991,"Shock therapy and the collapse of CMEA trade","Post-communist transition",high,no
+PRT,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+PSE,1981,"Volatility under occupation (unreliable data)","Unidentified",low,no
+PSE,1983,"Volatility under occupation (unreliable data)","Unidentified",low,no
+PSE,1987,"Volatility under occupation (unreliable data); First Intifada begins in December","Unidentified",low,no
+PSE,1991,"Gulf War: curfews in the territories, loss of Gulf remittances and of work in Israel","Tourism / external demand shock",medium,no
+PSE,2023,"Gaza war (October 2023)","War / armed conflict",high,no
+QAT,1980,"No strong candidate (oil output cut?)","Unidentified",low,no
+QAT,1983,"Oil glut: OPEC output cuts","Oil & gas: price or output fall",medium,no
+ROU,1992,"Post-communist transition collapse","Post-communist transition",high,no
+RUS,1993,"Post-Soviet transition collapse; October 1993 constitutional crisis","Post-communist transition",high,no
+RUS,2009,"Global financial crisis and oil price fall","Global financial crisis 2008-09",high,no
+RWA,1984,"No strong candidate (possibly the 1984 drought)","Unidentified",low,no
+SAU,1975,"Oil output cut after the 1974 boom (world recession)","Oil & gas: price or output fall",medium,no
+SAU,1984,"Saudi output cuts as OPEC swing producer","Oil & gas: price or output fall",high,no
+SAU,1987,"Oil output held down after the 1986 price war (OPEC quotas)","Oil & gas: price or output fall",medium,no
+SDN,1978,"Balance-of-payments crisis: IMF programme and devaluation","Financial / currency / debt crisis",medium,no
+SDN,1979,"Debt crisis (first Paris Club rescheduling) and austerity","Financial / currency / debt crisis",medium,no
+SDN,1984,"1984 drought and famine (Darfur, Kordofan); civil war in the south","Drought / harvest failure",high,yes
+SEN,1969,"No strong candidate (possibly drought: poor 1968 groundnut crop; end of French price support)","Unidentified",low,no
+SEN,1973,"Sahel drought (1972-73): groundnut and millet harvest failure","Drought / harvest failure",medium,yes
+SEN,1978,"1977 drought: groundnut harvest failure","Drought / harvest failure",medium,yes
+SLE,1991,"Civil war begins (RUF invasion, March 1991)","War / armed conflict",high,no
+SLE,1992,"Civil war; NPRC coup (April 1992)","War / armed conflict",high,no
+SLE,1995,"Civil war: RUF reaches the outskirts of Freetown; mining halted","War / armed conflict",high,no
+SLE,1999,"Civil war: RUF/AFRC attack on Freetown (January 1999)","War / armed conflict",high,no
+SLV,1980,"Civil war begins (assassination of Archbishop Romero; FMLN)","War / armed conflict",high,no
+SLV,1981,"Civil war (FMLN final offensive, January 1981)","War / armed conflict",high,no
+SLV,2020,"COVID-19 lockdown","COVID-19 pandemic",high,no
+STP,1984,"No identified event (cocoa sector decline)","Unidentified",low,no
+STP,1986,"No identified event","Unidentified",low,no
+SUR,1980,"Sergeants' coup (February 1980)","Political crisis / coup / revolution",high,no
+SUR,1987,"Interior war (Jungle Commando) and suspension of Dutch aid","War / armed conflict",high,no
+SVN,1991,"Ten-Day War and the Yugoslav collapse","Post-communist transition",high,no
+SVN,2009,"Global financial crisis","Global financial crisis 2008-09",high,no
+SXM,2017,"Hurricane Irma (September 2017)","Storm / flood (weather)",high,yes
+SYC,1969,"No identified event; early data","Unidentified",low,no
+SYC,1981,"Tourism slump and the November 1981 mercenary coup attempt","Tourism / external demand shock",medium,no
+SYC,2003,"Foreign-exchange crisis under the fixed rupee (rationing, arrears)","Financial / currency / debt crisis",medium,no
+SYR,1984,"Drought (1984 harvest failure) and foreign-exchange crisis","Drought / harvest failure",medium,yes
+SYR,1986,"Oil price collapse, foreign-exchange crisis and falling Arab aid","Financial / currency / debt crisis",medium,no
+SYR,2023,"Civil war and the February 2023 earthquake","War / armed conflict",high,no
+TCD,1963,"No identified event","Unidentified",low,no
+TCD,1972,"Sahel drought (1972-73) and the FROLINAT rebellion","Drought / harvest failure",medium,yes
+TCD,1977,"No strong candidate (FROLINAT rebellion in the north?)","Unidentified",low,no
+TCD,2016,"Oil price collapse, fiscal crisis and Boko Haram","Oil & gas: price or output fall",high,no
+TGO,1980,"No strong candidate (phosphate slump and debt crisis?)","Unidentified",low,no
+TGO,1981,"Debt crisis and phosphate slump (Paris Club reschedulings, IMF programmes)","Financial / currency / debt crisis",medium,no
+TGO,1983,"Debt crisis and austerity (IMF programme)","Financial / currency / debt crisis",medium,no
+THA,1998,"Asian financial crisis","Financial / currency / debt crisis",high,no
+TJK,1991,"Soviet collapse","Post-communist transition",high,no
+TKM,1995,"Post-Soviet collapse; gas exports to the CIS unpaid","Post-communist transition",high,no
+TTO,2016,"Oil and gas price collapse and gas supply shortfall","Oil & gas: price or output fall",high,no
+TTO,2020,"COVID-19 and the energy price collapse","COVID-19 pandemic",high,no
+TUN,2020,"COVID-19 collapse of tourism","COVID-19 pandemic",high,no
+TZA,1961,"No identified event; early data","Unidentified",low,no
+UGA,1984,"Bush War (NRA insurgency)","War / armed conflict",high,no
+UKR,1991,"Soviet collapse","Post-communist transition",high,no
+UKR,1992,"Post-Soviet collapse","Post-communist transition",high,no
+UKR,1996,"Post-Soviet transition collapse","Post-communist transition",high,no
+UKR,2015,"War in Donbas and loss of Crimea; currency crisis","War / armed conflict",high,no
+URY,1982,"Collapse of the tablita: November 1982 devaluation and debt crisis","Financial / currency / debt crisis",high,no
+URY,2002,"Banking crisis after the Argentine collapse","Financial / currency / debt crisis",high,no
+URY,2020,"COVID-19","COVID-19 pandemic",high,no
+UZB,1994,"Post-Soviet transition collapse","Post-communist transition",high,no
+VCT,1974,"No identified event (small banana economy)","Unidentified",low,no
+VCT,1975,"No identified event (small banana economy)","Unidentified",low,no
+VEN,1960,"Recession after the fall of Perez Jimenez: fiscal crisis, capital flight and austerity","Macroeconomic mismanagement / recession",medium,no
+VEN,1983,"Black Friday devaluation (February 1983) and oil price fall","Financial / currency / debt crisis",high,no
+VEN,1989,"Caracazo and the Perez adjustment programme","Financial / currency / debt crisis",high,no
+VEN,1999,"OPEC output cuts and recession at the start of the Chavez government","Oil & gas: price or output fall",medium,no
+VEN,2002,"April 2002 coup attempt and the December 2002 general strike (oil output collapse)","Political crisis / coup / revolution",high,no
+VEN,2003,"General strike (December 2002-February 2003): oil output collapse","Political crisis / coup / revolution",high,no
+VEN,2015,"Oil price collapse and economic crisis","Oil & gas: price or output fall",high,no
+ZAF,2020,"COVID-19 lockdown","COVID-19 pandemic",high,no
+ZMB,1994,"No strong candidate (copper output decline at ZCCM?)","Unidentified",low,no
+ZWE,1977,"Rhodesian Bush War","War / armed conflict",high,no
+ZWE,1992,"Southern African drought (1991-92), the worst of the century","Drought / harvest failure",high,yes
+ZWE,2000,"Land invasions; fuel and foreign-exchange crisis","Economic collapse / hyperinflation",high,no
+ZWE,2003,"Economic collapse after the land reform; hyperinflation; poor harvests (2002-03 drought)","Economic collapse / hyperinflation",high,yes
+ZWE,2019,"Cyclone Idai (March 2019), drought and currency reform","Drought / harvest failure",high,yes
+ZWE,2020,"COVID-19 and the 2019-20 drought","COVID-19 pandemic",high,yes
+ABW,1989,"Tourism boom after the refinery closure","Investment / reform / sector boom",medium,no
+AGO,1995,"Lusaka Protocol (November 1994): ceasefire and rising oil output","Post-conflict recovery",medium,no
+AGO,2002,"End of the civil war (April 2002) and rising oil output","Post-conflict recovery",high,no
+AGO,2005,"Oil output boom (new deep-water fields)","Oil & gas: price or output rise",high,no
+AIA,1972,"No identified event","Unidentified",low,no
+AIA,1988,"No identified event; very small economy with large swings","Unidentified",low,no
+AIA,2004,"Tourism and luxury-resort construction boom","Investment / reform / sector boom",medium,no
+AIA,2007,"Tourism and luxury-resort construction boom","Investment / reform / sector boom",medium,no
+ARE,1979,"1979 oil price boom (Iranian revolution)","Oil & gas: price or output rise",high,no
+ARE,1990,"Gulf crisis: oil price spike and higher output replacing Iraq and Kuwait","Oil & gas: price or output rise",high,no
+ARG,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+ARM,2001,"Construction and remittance boom","Investment / reform / sector boom",medium,no
+ARM,2004,"Construction and remittance boom","Investment / reform / sector boom",medium,no
+ARM,2022,"Inflow of Russian migrants, capital and transfers after the invasion of Ukraine","Tourism / external demand shock",high,no
+ATG,1979,"No identified event","Unidentified",low,no
+ATG,2006,"Tourism and construction boom before the 2007 Cricket World Cup","Investment / reform / sector boom",medium,no
+ATG,2007,"Tourism and construction boom (2007 Cricket World Cup)","Investment / reform / sector boom",medium,no
+AZE,2003,"Oil-sector investment boom (BTC pipeline and ACG field construction)","Oil & gas: price or output rise",medium,no
+BDI,1967,"No identified event","Unidentified",low,no
+BEN,1997,"No identified event","Unidentified",low,no
+BEN,1999,"No identified event","Unidentified",low,no
+BGR,1988,"No identified event (late-communist statistics)","Unidentified",low,no
+BHS,1978,"No strong candidate (tourism recovery?)","Unidentified",low,no
+BHS,1984,"No identified event","Unidentified",low,no
+BHS,2022,"Post-COVID tourism rebound","Post-COVID rebound",high,no
+BLR,1997,"State-directed credit expansion","Investment / reform / sector boom",medium,no
+BLR,2004,"Boom on subsidized Russian energy (re-exported oil products) and state-directed credit","Investment / reform / sector boom",medium,no
+BLR,2005,"Boom on subsidized Russian energy (re-exported oil products) and state-directed credit","Investment / reform / sector boom",medium,no
+BLR,2006,"Boom on subsidized Russian energy (re-exported oil products) and state-directed credit","Investment / reform / sector boom",medium,no
+BLR,2008,"Pre-crisis boom on subsidized Russian energy and state-directed credit","Investment / reform / sector boom",medium,no
+BLZ,1988,"No strong candidate (citrus, tourism and construction boom?)","Unidentified",low,no
+BLZ,1990,"No strong candidate (citrus, tourism and construction boom?)","Unidentified",low,no
+BRA,1961,"No identified event","Unidentified",low,no
+BRA,1973,"Brazilian 'miracle' (GDP +14% in 1973)","Investment / reform / sector boom",high,no
+BRB,1970,"No strong candidate (tourism boom?)","Unidentified",low,no
+BTN,1986,"Chukha hydropower plant begins operating (1986-88)","Investment / reform / sector boom",medium,no
+BTN,2010,"Hydropower construction boom (Punatsangchhu)","Investment / reform / sector boom",medium,no
+BWA,1968,"No identified event; early data (mining development under way)","Unidentified",low,no
+BWA,1970,"Construction of the Orapa diamond mine (opened 1971)","Commodity / mining shock (non-oil)",medium,no
+BWA,2021,"Post-COVID rebound of diamond sales","Post-COVID rebound",high,no
+CHL,1992,"Export and investment boom after the return to democracy (GDP +12% in 1992)","Investment / reform / sector boom",medium,no
+CHL,2021,"Post-COVID rebound (pension-fund withdrawals)","Post-COVID rebound",high,no
+CHN,1978,"Post-Mao recovery and the start of the reforms","Investment / reform / sector boom",medium,no
+CHN,1985,"Reform boom and overheating","Investment / reform / sector boom",high,no
+CHN,1993,"Boom after Deng's Southern Tour","Investment / reform / sector boom",high,no
+CHN,1994,"Boom after Deng's Southern Tour","Investment / reform / sector boom",high,no
+CHN,2005,"Investment and export boom after WTO accession","Investment / reform / sector boom",high,no
+CHN,2006,"Investment and export boom after WTO accession","Investment / reform / sector boom",high,no
+CIV,2014,"Recovery after the 2010-11 post-election conflict","Post-conflict recovery",high,no
+CIV,2015,"Recovery after the 2010-11 post-election conflict","Post-conflict recovery",high,no
+CMR,1977,"Coffee and cocoa price boom (1976-77)","Commodity / mining shock (non-oil)",medium,no
+COD,1962,"No strong candidate (partial rebound during the Congo Crisis; unreliable data)","Unidentified",low,no
+COG,1980,"Oil boom (1979-80 price rise)","Oil & gas: price or output rise",medium,no
+COM,1962,"No identified event; early data","Unidentified",low,no
+COM,1963,"No identified event; early data","Unidentified",low,no
+COM,2023,"No identified event","Unidentified",low,no
+CPV,1967,"No identified event; early data","Unidentified",low,no
+CPV,1999,"No identified event","Unidentified",low,no
+CPV,2006,"Tourism and FDI boom","Tourism / external demand shock",medium,no
+CYP,1962,"No identified event","Unidentified",low,no
+CYP,1967,"No identified event","Unidentified",low,no
+CYP,1971,"No identified event","Unidentified",low,no
+CYP,2021,"Post-COVID tourism rebound","Post-COVID rebound",high,no
+DJI,2006,"No identified event","Unidentified",low,no
+DJI,2009,"No strong candidate (port investment: Doraleh container terminal?)","Unidentified",low,no
+DJI,2011,"No strong candidate (port investment?)","Unidentified",low,no
+DJI,2012,"No strong candidate (port investment?)","Unidentified",low,no
+DJI,2013,"No strong candidate (port investment?)","Unidentified",low,no
+DMA,1981,"Reconstruction after Hurricane David (1979)","Storm / flood (weather)",medium,yes
+DOM,2021,"Post-COVID tourism rebound","Post-COVID rebound",high,no
+EGY,1976,"Suez Canal reopens (June 1975), Sinai oil fields returned, Gulf remittances (Infitah)","Investment / reform / sector boom",medium,no
+ESP,1960,"No identified event (first year of the sample)","Unidentified",low,no
+ESP,1961,"Spanish 'miracle' after the 1959 Stabilization Plan","Investment / reform / sector boom",medium,no
+EST,2000,"Recovery after the 1998-99 Russian crisis (electronics exports)","Recovery after economic crisis",medium,no
+EST,2005,"Pre-crisis credit boom","Investment / reform / sector boom",high,no
+EST,2006,"Pre-crisis credit boom","Investment / reform / sector boom",high,no
+ETH,2004,"Harvest recovery after the 2002-03 drought","Harvest recovery / good rains",high,yes
+FJI,1967,"No identified event","Unidentified",low,no
+GAB,1964,"No strong candidate (oil and manganese expansion; February 1964 coup attempt)","Unidentified",low,no
+GAB,1967,"No identified event","Unidentified",low,no
+GEO,2003,"Construction of the BTC pipeline","Investment / reform / sector boom",medium,no
+GEO,2005,"Post-Rose Revolution reform and FDI boom","Investment / reform / sector boom",high,no
+GEO,2006,"Post-Rose Revolution reform and FDI boom","Investment / reform / sector boom",high,no
+GEO,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+GEO,2022,"Inflow of Russian migrants, capital and transfers after the invasion of Ukraine","Tourism / external demand shock",high,no
+GHA,2011,"Oil production starts (Jubilee field, December 2010)","Oil & gas: price or output rise",high,no
+GNB,1999,"Rebound after the 1998-99 civil war","Post-conflict recovery",medium,no
+GNQ,2007,"Oil and gas boom (EG LNG plant, 2007)","Oil & gas: price or output rise",medium,no
+GNQ,2008,"Oil boom (record prices and output)","Oil & gas: price or output rise",high,no
+GRC,1961,"No strong candidate (postwar boom; harvest swings?)","Unidentified",low,no
+GRC,1963,"No strong candidate (postwar boom; harvest swings?)","Unidentified",low,no
+GRC,1965,"No strong candidate (postwar boom)","Unidentified",low,no
+GRC,1969,"No strong candidate (postwar boom)","Unidentified",low,no
+GRD,1987,"No identified event","Unidentified",low,no
+GRD,1998,"No identified event","Unidentified",low,no
+GUY,2001,"No identified event","Unidentified",low,no
+GUY,2004,"No identified event","Unidentified",low,no
+HND,2021,"Post-COVID rebound and reconstruction after Hurricanes Eta and Iota","Post-COVID rebound",high,yes
+HTI,1995,"End of the embargo and return of Aristide (October 1994)","Recovery after economic crisis",high,no
+IRN,1965,"No strong candidate (White Revolution and rising oil output)","Unidentified",low,no
+IRN,1971,"Oil revenue boom after the Tehran Agreement (February 1971)","Oil & gas: price or output rise",medium,no
+IRN,1972,"Oil revenue boom (rising output)","Oil & gas: price or output rise",medium,no
+IRN,1990,"Post-war reconstruction and the 1990 oil price spike","Post-conflict recovery",high,no
+IRQ,1975,"Oil boom after the 1973 price rise","Oil & gas: price or output rise",high,no
+IRQ,2016,"Oil output surge","Oil & gas: price or output rise",high,no
+ISL,1971,"No identified event","Unidentified",low,no
+ISR,1969,"Boom after the Six-Day War","Investment / reform / sector boom",medium,no
+ITA,1970,"No identified event","Unidentified",low,no
+JAM,1970,"No strong candidate (bauxite and alumina investment?)","Unidentified",low,no
+JOR,1961,"No identified event","Unidentified",low,no
+JOR,1976,"Gulf remittances and diversion of trade from war-torn Lebanon","Investment / reform / sector boom",medium,no
+JOR,1978,"Gulf remittances and diversion of trade from war-torn Lebanon","Investment / reform / sector boom",medium,no
+JOR,1981,"Gulf remittances, Arab aid and Iraqi transit trade (Iran-Iraq War)","Investment / reform / sector boom",medium,no
+JPN,1960,"High-growth era (Iwato boom)","Investment / reform / sector boom",high,no
+JPN,1961,"High-growth era (Iwato boom; Income-Doubling Plan)","Investment / reform / sector boom",high,no
+JPN,1968,"High-growth era (Izanagi boom)","Investment / reform / sector boom",high,no
+JPN,1969,"High-growth era (Izanagi boom)","Investment / reform / sector boom",high,no
+KHM,1988,"No identified event (Vietnamese-backed PRK period)","Unidentified",low,no
+KHM,1999,"Peace after the end of the Khmer Rouge (1998), ASEAN entry and garment boom","Post-conflict recovery",medium,no
+KHM,2005,"Rice harvest recovery after the 2004 drought; garment and tourism boom","Harvest recovery / good rains",medium,yes
+KNA,1986,"No identified event","Unidentified",low,no
+KNA,2000,"No strong candidate (reconstruction after Hurricanes Georges, 1998, and Lenny, 1999?)","Unidentified",low,no
+KNA,2022,"Post-COVID tourism rebound","Post-COVID rebound",high,no
+KOR,1969,"Export-led boom","Investment / reform / sector boom",medium,no
+KOR,1976,"Heavy and chemical industry drive; Middle East construction boom","Investment / reform / sector boom",high,no
+KOR,1977,"Heavy and chemical industry drive; Middle East construction boom","Investment / reform / sector boom",high,no
+KOR,1983,"Recovery after the 1980 crisis","Recovery after economic crisis",medium,no
+KOR,1987,"'Three lows' boom (low oil prices, dollar and interest rates)","Investment / reform / sector boom",high,no
+KOR,1988,"'Three lows' boom; Seoul Olympics","Investment / reform / sector boom",high,no
+KOR,1999,"Recovery after the Asian financial crisis","Recovery after economic crisis",high,no
+LAO,1989,"Harvest recovery after the 1987-88 droughts; New Economic Mechanism reforms","Harvest recovery / good rains",medium,yes
+LCA,2021,"Post-COVID tourism rebound","Post-COVID rebound",high,no
+LTU,2003,"EU accession and credit boom","Investment / reform / sector boom",medium,no
+LTU,2007,"Pre-crisis credit boom","Investment / reform / sector boom",high,no
+LUX,1969,"No identified event","Unidentified",low,no
+LVA,1997,"Transition recovery before the 1998 Russian crisis","Recovery after economic crisis",medium,no
+LVA,2007,"Pre-crisis credit boom","Investment / reform / sector boom",high,no
+MAR,1962,"No strong candidate (harvest-driven economy)","Unidentified",low,no
+MAR,1996,"Record cereal harvest after the 1995 drought","Harvest recovery / good rains",high,yes
+MDA,2013,"Harvest recovery after the 2012 drought","Harvest recovery / good rains",high,yes
+MDV,1978,"No strong candidate (tourism expansion?)","Unidentified",low,no
+MDV,1990,"No strong candidate (tourism expansion?)","Unidentified",low,no
+MDV,2003,"No strong candidate (tourism expansion?)","Unidentified",low,no
+MDV,2022,"Post-COVID tourism rebound","Post-COVID rebound",high,no
+MEX,1964,"Stabilizing-development boom (GDP +11% in 1964)","Investment / reform / sector boom",medium,no
+MLI,1976,"Harvest recovery after the 1972-74 Sahel drought","Harvest recovery / good rains",medium,yes
+MLI,1991,"No identified event (March 1991 coup)","Unidentified",low,no
+MLI,1999,"No identified event","Unidentified",low,no
+MLI,2001,"Gold output (Morila mine, October 2000) and cotton recovery after the 2000 producers' strike","Commodity / mining shock (non-oil)",medium,no
+MLT,1966,"No strong candidate (tourism and manufacturing after independence?)","Unidentified",low,no
+MLT,1968,"No strong candidate (tourism and manufacturing after independence?)","Unidentified",low,no
+MLT,1970,"No strong candidate (tourism and manufacturing after independence?)","Unidentified",low,no
+MLT,1977,"No strong candidate (industrial and tourism expansion?)","Unidentified",low,no
+MLT,1978,"No strong candidate (industrial and tourism expansion?)","Unidentified",low,no
+MLT,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+MMR,1963,"No identified event","Unidentified",low,no
+MMR,2000,"Official growth statistics widely regarded as overstated","Data artifact / statistical",medium,no
+MMR,2001,"Official growth statistics widely regarded as overstated; gas exports","Data artifact / statistical",medium,no
+MMR,2002,"Official growth statistics widely regarded as overstated; gas exports","Data artifact / statistical",medium,no
+MMR,2004,"Official growth statistics widely regarded as overstated; gas exports","Data artifact / statistical",medium,no
+MMR,2006,"Official growth statistics widely regarded as overstated; gas exports","Data artifact / statistical",medium,no
+MMR,2007,"Official growth statistics widely regarded as overstated; gas exports","Data artifact / statistical",medium,no
+MNG,2012,"Mining boom (Oyu Tolgoi construction, coal exports)","Commodity / mining shock (non-oil)",high,no
+MOZ,2001,"Mozal aluminium smelter output and recovery after the 2000 floods","Investment / reform / sector boom",medium,yes
+MUS,1973,"No strong candidate (sugar price boom and export-processing zone?)","Unidentified",low,no
+MWI,1961,"No identified event; early data","Unidentified",low,no
+MWI,1971,"No identified event","Unidentified",low,no
+NAM,1962,"No identified event; early data","Unidentified",low,no
+NAM,2004,"Mining output: Skorpion zinc mine and marine diamonds","Commodity / mining shock (non-oil)",medium,no
+NER,1978,"Uranium boom","Commodity / mining shock (non-oil)",medium,no
+NGA,1971,"Oil boom and end of the civil war","Oil & gas: price or output rise",high,no
+NGA,2002,"Anomalous official growth (non-oil GDP surge)","Data artifact / statistical",medium,no
+OMN,1976,"Oil boom and end of the Dhofar rebellion","Oil & gas: price or output rise",medium,no
+OMN,1977,"Oil boom","Oil & gas: price or output rise",medium,no
+OMN,1978,"Oil boom","Oil & gas: price or output rise",medium,no
+OMN,1981,"Oil price peak and rising output","Oil & gas: price or output rise",medium,no
+PAN,1980,"Canal Zone incorporated into the economy after the Torrijos-Carter Treaties (October 1979)","Data artifact / statistical",medium,no
+PER,1994,"Recovery after the 1990 Fujishock stabilization","Recovery after economic crisis",high,no
+PER,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+PSE,1971,"Integration into the Israeli labour market after 1967","Investment / reform / sector boom",low,no
+PSE,1976,"Volatility under occupation (unreliable data)","Unidentified",low,no
+PSE,1980,"Volatility under occupation (unreliable data)","Unidentified",low,no
+PSE,1994,"Oslo Accords: Palestinian Authority established (May 1994)","Investment / reform / sector boom",medium,no
+PSE,1997,"Easing of Israeli closures after 1996","Recovery after economic crisis",medium,no
+PSE,1998,"Easing of Israeli closures; employment in Israel recovers","Recovery after economic crisis",medium,no
+PSE,2003,"Partial recovery after Operation Defensive Shield (2002)","Post-conflict recovery",medium,no
+ROU,1963,"No strong candidate (communist-era industrialization; official statistics)","Unidentified",low,no
+ROU,1967,"No strong candidate (communist-era industrialization; official statistics)","Unidentified",low,no
+ROU,1971,"No strong candidate (communist-era industrialization; official statistics)","Unidentified",low,no
+ROU,1974,"No strong candidate (communist-era industrialization; official statistics)","Unidentified",low,no
+ROU,2004,"Record harvest after the 2003 drought; pre-accession credit boom","Harvest recovery / good rains",medium,yes
+ROU,2008,"Pre-crisis credit boom and harvest recovery after the 2007 drought","Investment / reform / sector boom",medium,yes
+RUS,2000,"Recovery after the 1998 crisis (devaluation) and rising oil prices","Recovery after economic crisis",high,no
+RWA,1999,"Post-genocide recovery","Post-conflict recovery",medium,no
+RWA,2002,"Post-conflict recovery","Post-conflict recovery",medium,no
+SAU,1971,"Oil output surge (Tehran Agreement price rise)","Oil & gas: price or output rise",high,no
+SAU,1974,"Oil price boom (1973-74)","Oil & gas: price or output rise",high,no
+SDN,1975,"No identified event","Unidentified",low,no
+SDN,1986,"Harvest recovery after the 1984-85 drought","Harvest recovery / good rains",medium,yes
+SDN,2005,"Oil boom and the Comprehensive Peace Agreement (January 2005)","Oil & gas: price or output rise",high,no
+SEN,1982,"Groundnut harvest recovery after the 1980-81 drought","Harvest recovery / good rains",medium,yes
+SGP,1968,"Industrialization boom after independence (EDB-led foreign investment)","Investment / reform / sector boom",high,no
+SGP,1969,"Industrialization boom after independence (EDB-led foreign investment)","Investment / reform / sector boom",high,no
+SGP,1970,"Industrialization boom after independence (EDB-led foreign investment)","Investment / reform / sector boom",high,no
+SGP,1971,"Industrialization boom after independence (EDB-led foreign investment)","Investment / reform / sector boom",high,no
+SGP,1972,"Industrialization boom after independence (EDB-led foreign investment)","Investment / reform / sector boom",high,no
+SGP,2010,"Rebound after the global financial crisis","Recovery after economic crisis",high,no
+SGP,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+SLE,1962,"No identified event; early data","Unidentified",low,no
+SLE,1963,"No identified event; early data","Unidentified",low,no
+SLE,2001,"End of the civil war: disarmament and recovery","Post-conflict recovery",high,no
+SLE,2012,"Iron-ore exports begin (Tonkolili and Marampa)","Commodity / mining shock (non-oil)",high,no
+SLV,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+SOM,1972,"No identified event (unreliable data)","Unidentified",low,no
+SOM,1975,"No identified event (unreliable data)","Unidentified",low,no
+SOM,1977,"No identified event (Ogaden War; unreliable data)","Unidentified",low,no
+SOM,2014,"No identified event (unreliable data)","Unidentified",low,no
+SOM,2016,"No identified event (unreliable data)","Unidentified",low,no
+SUR,1975,"No strong candidate (independence and Dutch aid, 1975?)","Unidentified",low,no
+SUR,1977,"No identified event","Unidentified",low,no
+SUR,1985,"No identified event","Unidentified",low,no
+SVK,2007,"Car-industry boom (Kia and PSA plants) and FDI","Investment / reform / sector boom",high,no
+SYC,1970,"Construction of the international airport (opened 1971)","Investment / reform / sector boom",medium,no
+SYC,2022,"Post-COVID tourism rebound","Post-COVID rebound",high,no
+SYR,1964,"No strong candidate (rebound after the 1963 Ba'ath coup?)","Unidentified",low,no
+TCA,2006,"Tourism and construction boom","Investment / reform / sector boom",medium,no
+TCD,1974,"No strong candidate (possibly harvest recovery after the 1972-73 drought)","Unidentified",low,no
+TGO,1964,"No strong candidate (phosphate expansion?)","Unidentified",low,no
+TGO,1965,"No strong candidate (phosphate expansion?)","Unidentified",low,no
+TGO,2006,"No identified event","Unidentified",low,no
+THA,1988,"Thai boom: FDI surge after the Plaza Accord","Investment / reform / sector boom",high,no
+THA,1989,"Thai boom: FDI surge after the Plaza Accord","Investment / reform / sector boom",high,no
+TKM,2005,"Higher gas export prices; unreliable official statistics","Oil & gas: price or output rise",medium,no
+TKM,2008,"Higher gas export prices; unreliable official statistics","Oil & gas: price or output rise",medium,no
+TKM,2011,"Gas exports to China ramp up; unreliable official statistics","Oil & gas: price or output rise",medium,no
+TTO,1961,"No identified event","Unidentified",low,no
+TUR,2021,"Post-COVID rebound","Post-COVID rebound",high,no
+TWN,1971,"Export-led boom","Investment / reform / sector boom",medium,no
+TWN,1972,"Export-led boom","Investment / reform / sector boom",medium,no
+TWN,1973,"Export-led boom","Investment / reform / sector boom",medium,no
+TWN,1976,"Recovery after the 1974-75 oil-shock recession","Recovery after economic crisis",high,no
+TWN,1978,"Export boom; Ten Major Construction Projects","Investment / reform / sector boom",medium,no
+TWN,1986,"Export boom with an undervalued currency","Investment / reform / sector boom",medium,no
+TWN,1987,"Export boom with an undervalued currency","Investment / reform / sector boom",medium,no
+UKR,2001,"Recovery after the 1998 crisis: steel and metals exports","Recovery after economic crisis",medium,no
+UKR,2003,"Export boom (steel prices) and credit growth","Investment / reform / sector boom",medium,no
+UKR,2004,"Export boom (steel prices) and credit growth","Investment / reform / sector boom",high,no
+VGB,1979,"No identified event","Unidentified",low,no
+VGB,1980,"No identified event","Unidentified",low,no
+VGB,1987,"No identified event (offshore-finance economy)","Unidentified",low,no
+VGB,2005,"No identified event (offshore-finance economy)","Unidentified",low,no
+VNM,1977,"No identified event (unreliable data)","Unidentified",low,no
+VNM,2006,"Investment and export boom around WTO accession (January 2007)","Investment / reform / sector boom",medium,no
+VNM,2007,"Investment and export boom around WTO accession (January 2007)","Investment / reform / sector boom",medium,no
+VNM,2010,"No strong candidate (credit-fuelled stimulus?)","Unidentified",low,no
+YEM,1995,"Recovery after the 1994 civil war; Masila oil output","Post-conflict recovery",medium,no
+ZMB,1966,"Copper price boom","Commodity / mining shock (non-oil)",high,no
+ZWE,2011,"Recovery after hyperinflation (mining)","Recovery after economic crisis",high,no
