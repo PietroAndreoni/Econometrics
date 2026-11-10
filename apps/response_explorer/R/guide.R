@@ -147,7 +147,13 @@ guide_ui <- function() {
              "termination year; warming then catches up with the background with time constant tau. The page shows",
              "the warming paths with a band of exceedances of natural variability (k SD above the reference climate),",
              "the world loss, a map of the loss by country, the exposure by latitude and year (events beyond k SD),",
-             "and a table.")
+             "and a table."),
+      tags$p("\"Compare side by side\" runs several background forcings, economic developments (SSPs) or catch-up",
+             "times at once, each in place of that option: the warming and world charts get one column per",
+             "alternative (the settings in rows), the table a column naming it, and the map, latitude chart and",
+             "exceedances show the alternative chosen above them. With the growth measure, both world charts can show",
+             "the historical growth of world GDP in PWT 11.0 (1971-2023: the series, and its median, interquartile",
+             "range and range on the right).")
     ),
     guide_section(
       "Caveats",

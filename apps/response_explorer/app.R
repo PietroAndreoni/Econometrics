@@ -72,6 +72,23 @@ SCENARIO_CHOICES <- stats::setNames(names(SCEN$scenarios),
 # forcing's own SSP, or one SSP for all.
 ECONOMY_CHOICES <- c("Follow SSP-RCP" = "follow", SSP1 = "SSP1", SSP2 = "SSP2", SSP3 = "SSP3",
                      SSP4 = "SSP4", SSP5 = "SSP5")
+# The warming charts: global warming itself, or its rate (velocity), 10 times
+# the change from the year before (C per decade).
+WARMING_CHOICES <- c("Global warming (C)" = "level", "Rate of warming (C per decade)" = "rate")
+RATE_AXIS <- "Rate of global warming (C per decade)"
+RATE_TEXT <- "rate of warming, 10 x the change from the year before (C per decade)"
+warming_rate <- function(years, g) {
+  out <- 10 * (g - g[match(years - 1L, years)])
+  out[is.na(out)] <- NA_real_
+  out
+}
+# The option of the world aggregate without gains (R/projection.R no_gains).
+NO_GAINS_LABEL <- paste("Ignore gains in the world aggregate: a country whose GDP gains counts at its",
+                        "baseline GDP (zero effect; the maps and country results unchanged)")
+# What the termination page can compare side by side (each alternative takes
+# the place of that option, the others as set).
+TS_COMPARE_CHOICES <- c("Nothing" = "none", "Background forcings" = "forcing",
+                        "Economic developments" = "economy", "Catch-up times" = "tau")
 # The number of noise paths with natural variability (about 5 s a setting and
 # forcing per 200 paths).
 NOISE_PATH_CHOICES <- c("100", "200", "500", "1000")
@@ -1441,15 +1458,44 @@ ui <- page_navbar(
                      ECONOMY_CHOICES, selected = "follow", inline = TRUE)
       ),
       layout_columns(
+        col_widths = c(3, 9),
+        radioButtons("ts_compare", "Compare side by side", TS_COMPARE_CHOICES, selected = "none"),
+        tagList(
+          conditionalPanel(
+            "input.ts_compare == 'forcing'",
+            checkboxGroupInput("ts_cmp_forcings", "Background forcings (in place of the one above)", SCENARIO_CHOICES,
+                               selected = intersect(c("ssp126", "ssp245", "ssp585"), SCENARIO_CHOICES), inline = TRUE)
+          ),
+          conditionalPanel(
+            "input.ts_compare == 'economy'",
+            checkboxGroupInput("ts_cmp_economies", "Economic developments (in place of the one above)",
+                               ECONOMY_CHOICES[-1], selected = c("SSP1", "SSP2", "SSP3"), inline = TRUE)
+          ),
+          conditionalPanel(
+            "input.ts_compare == 'tau'",
+            textInput("ts_cmp_taus", "Catch-up times in years, comma separated (in place of tau above)", "2, 4, 8")
+          ),
+          conditionalPanel(
+            "input.ts_compare != 'none'",
+            helpText("The warming and global charts show one column per alternative; the map, the latitude chart",
+                     "and the exceedances show the one chosen below them.")
+          )
+        )
+      ),
+      layout_columns(
         col_widths = c(6, 3),
         selectInput("ts_noise", "Natural variability (each country's detrended historical T and P)",
                     VARIABILITY_CHOICES, selected = "none"),
-        selectInput("ts_noise_n", "Noise paths", NOISE_PATH_CHOICES, selected = "200")
+        selectInput("ts_noise_n", "Noise paths", NOISE_PATH_CHOICES, selected = "200"),
+        checkboxInput("ts_no_gains", NO_GAINS_LABEL, value = FALSE)
       ),
       div(class = "d-flex align-items-center gap-3 mb-2",
           actionButton("run_termination", "Run the termination scenarios", class = "btn-primary"),
           uiOutput("ts_status")),
+      radioButtons("ts_gmt_measure", "Warming chart", WARMING_CHOICES, selected = "level", inline = TRUE),
       radioButtons("ts_measure", "Global chart", MEASURE_CHOICES, selected = "loss", inline = TRUE),
+      conditionalPanel("input.ts_measure == 'growth'",
+        checkboxInput("ts_history", "Show the historical growth of world GDP (PWT 11.0, 1971-2023: series, median, IQR, range)", value = TRUE)),
       layout_columns(
         col_widths = c(3, 3, 3, 3),
         selectInput("ts_ref", "Exceedances: reference climate", EXCEEDANCE_REFERENCES, selected = "20"),
@@ -1459,16 +1505,13 @@ ui <- page_navbar(
                                                             "Either sign (beyond +-k SD)" = "both"),
                      selected = "warm")
       ),
-      layout_columns(
-        col_widths = c(4, 8),
-        plotOutput("ts_gmt_plot", height = 460),
-        plotOutput("ts_global_plot", height = 460, hover = hoverOpts("hover_ts", delay = 80))
-      ),
+      uiOutput("ts_charts"),
       uiOutput("readout_ts"),
       layout_columns(
-        col_widths = c(6, 6),
+        col_widths = c(4, 4, 4),
         selectInput("ts_map_setting", "Map and exceedances: setting (its panel's climate data)", choices = NULL),
-        selectInput("ts_map_year", "Map: termination year", choices = NULL)
+        selectInput("ts_map_year", "Map: termination year", choices = NULL),
+        selectInput("ts_variant", "Map, latitude chart and exceedances: alternative", choices = NULL)
       ),
       plotOutput("ts_map", height = 380),
       selectInput("ts_lat_paths", "Latitude chart: warming paths", choices = NULL, multiple = TRUE,
@@ -2383,35 +2426,76 @@ server <- function(input, output, session) {
   # sustained (held from 2025), and terminated in each year (termination_path()).
   # They run only when asked, for the shown settings at the moment of the click.
   TS_NOT_RUN <- "Press \"Run the termination scenarios\" to project the termination shocks."
+  # The catch-up times of the comparison (positive numbers of a list).
+  ts_compare_taus <- function(text) {
+    x <- suppressWarnings(as.numeric(trimws(strsplit(text %||% "", ",")[[1]])))
+    unique(x[is.finite(x) & x > 0])
+  }
+  # The alternatives of a run: each a forcing, an economy and a catch-up time
+  # (the options as set, the compared one taking each of its values), with its
+  # label.
+  ts_variants_of <- function(compare, forcing, economy, tau, forcings, economies, taus) {
+    one <- function(f, e, t) list(forcing = f, economy = e, tau = t)
+    v <- switch(compare,
+                forcing = lapply(forcings, function(f) one(f, economy, tau)),
+                economy = lapply(economies, function(e) one(forcing, e, tau)),
+                tau = lapply(taus, function(t) one(forcing, economy, t)),
+                list(one(forcing, economy, tau)))
+    for (i in seq_along(v)) {
+      v[[i]]$label <- switch(compare, tau = sprintf("%s, tau = %g years", scenario_label(v[[i]]$forcing, v[[i]]$economy), v[[i]]$tau),
+                             scenario_label(v[[i]]$forcing, v[[i]]$economy))
+    }
+    v
+  }
+  ts_inputs <- function() {
+    compare <- input$ts_compare %||% "none"
+    list(compare = compare,
+         variants = ts_variants_of(compare, input$ts_forcing, input$ts_econ %||% "follow", input$ts_tau,
+                                   intersect(SCENARIO_CHOICES, input$ts_cmp_forcings), input$ts_cmp_economies,
+                                   ts_compare_taus(input$ts_cmp_taus)))
+  }
   ts_run <- eventReactive(input$run_termination, {
+    x <- ts_inputs()
     validate(need(length(input$ts_years) > 0, "Select at least one termination year."),
-             need(isTRUE(input$ts_tau > 0), "The catch-up time must be positive."))
-    list(specs = specs(), forcing = input$ts_forcing, held = as.numeric(input$ts_held),
-         years = sort(as.integer(input$ts_years)), tau = input$ts_tau,
-         economy = input$ts_econ %||% "follow", noise = noise_of(input$ts_noise, input$ts_noise_n))
+             need(length(x$variants) > 0, "Select at least one alternative to compare."),
+             need(all(vapply(x$variants, function(v) isTRUE(v$tau > 0), TRUE)), "The catch-up time must be positive."))
+    v1 <- x$variants[[1]]
+    # (forcing, economy, tau: those of the first alternative.)
+    list(specs = specs(), forcing = v1$forcing, held = as.numeric(input$ts_held),
+         years = sort(as.integer(input$ts_years)), tau = v1$tau, economy = v1$economy,
+         compare = x$compare, variants = x$variants, noise = noise_of(input$ts_noise, input$ts_noise_n),
+         no_gains = isTRUE(input$ts_no_gains))
   })
-  ts_key <- function(sp, forcing, held, years, tau, economy, noise) {
+  ts_key <- function(sp, variants, held, years, noise, no_gains) {
     paste(c(vapply(sp, function(s) paste(s$label, s$model$key, s$sd_mode, s$clim_mode, paste(s$cap, collapse = "/")), ""),
-            forcing, held, years, tau, economy, noise_key(noise)), collapse = " || ")
+            vapply(variants, function(v) paste(v$forcing, v$economy, v$tau), ""), held, years, noise_key(noise), no_gains),
+          collapse = " || ")
   }
   ts_status <- function() {
     if (input$run_termination == 0) return(helpText(class = "mb-0", "Not run yet."))
     r <- ts_run()
-    current <- ts_key(specs(), input$ts_forcing, as.numeric(input$ts_held),
-                      sort(as.integer(input$ts_years)), input$ts_tau, input$ts_econ %||% "follow",
-                      noise_of(input$ts_noise, input$ts_noise_n))
-    if (!identical(current, ts_key(r$specs, r$forcing, r$held, r$years, r$tau, r$economy, r$noise))) {
+    current <- ts_key(specs(), ts_inputs()$variants, as.numeric(input$ts_held), sort(as.integer(input$ts_years)),
+                      noise_of(input$ts_noise, input$ts_noise_n), isTRUE(input$ts_no_gains))
+    if (!identical(current, ts_key(r$specs, r$variants, r$held, r$years, r$noise, r$no_gains))) {
       return(helpText(class = "mb-0 text-warning-emphasis",
                       "Settings or options changed since the last run: press Run to update."))
     }
     helpText(class = "mb-0", sprintf("Up to date: %d setting(s), %s, held at %.1f C, %d termination year(s); %s.",
-                                     length(r$specs), scenario_label(r$forcing, r$economy), r$held,
-                                     length(r$years), noise_label(r$noise)))
+                                     length(r$specs), paste(vapply(r$variants, `[[`, "", "label"), collapse = " | "),
+                                     r$held, length(r$years),
+                                     paste0(noise_label(r$noise), if (r$no_gains) "; gains ignored in the world aggregate")))
   }
   output$ts_status <- renderUI(ts_status())
-  # The paths of the last run: name -> global warming (named by year).
-  ts_paths <- reactive({
+  # The alternative of the map, latitude chart and exceedances: the run with
+  # its forcing, economy and catch-up time.
+  ts_one <- reactive({
     r <- ts_run()
+    k <- match(input$ts_variant %||% "", vapply(r$variants, `[[`, "", "label"))
+    ts_with(r, r$variants[[if (is.na(k)) 1L else k]])
+  })
+  # The paths of alternative r (a run with one forcing and catch-up time):
+  # name -> global warming (named by year).
+  ts_paths_of <- function(r) {
     g <- SCEN$gmt[SCEN$gmt$scenario == r$forcing, ]
     background <- stats::setNames(g$median, g$year)
     held <- sprintf("%.1f C", r$held)
@@ -2422,7 +2506,18 @@ server <- function(input, output, session) {
       paths[[paste("terminated in", y)]] <- termination_path(background, r$held, y, r$tau)
     }
     paths
-  })
+  }
+  # The run with alternative v.
+  ts_with <- function(r, v) {
+    r$forcing <- v$forcing
+    r$economy <- v$economy
+    r$tau <- v$tau
+    r$variant <- v$label
+    r
+  }
+  ts_paths <- reactive(ts_paths_of(ts_one()))
+  # (The alternatives in their order, for the facets.)
+  ts_variant_factor <- function(x) factor(x, levels = vapply(ts_run()$variants, `[[`, "", "label"))
   # The colours of the paths: grey without geoengineering, blue sustained, an
   # orange ramp for the termination years (darker later).
   ts_colours <- reactive({
@@ -2432,28 +2527,37 @@ server <- function(input, output, session) {
                       grDevices::colorRampPalette(c("#f3a272", "#eb6834", "#8f3510"))(n_term)), p)
   })
   # Every setting and path of the last run: list of (setting, path, result).
-  ts_projections <- reactive({
+  # Every alternative, setting and path of the last run: list of (variant,
+  # setting, path, result).
+  ts_projections_all <- reactive({
     r <- ts_run()
-    paths <- ts_paths()
-    ssp <- economy_of(r$forcing, r$economy)
-    jobs <- expand.grid(i = seq_along(r$specs), path = names(paths), stringsAsFactors = FALSE)
+    paths <- lapply(r$variants, function(v) ts_paths_of(ts_with(r, v)))
+    jobs <- expand.grid(i = seq_along(r$specs), path = names(paths[[1]]), k = seq_along(r$variants),
+                        stringsAsFactors = FALSE)
     withProgress(message = "Projecting the termination scenarios", value = 0, {
       lapply(seq_len(nrow(jobs)), function(j) {
         s <- r$specs[[jobs$i[j]]]
+        v <- r$variants[[jobs$k[j]]]
+        ssp <- economy_of(v$forcing, v$economy)
         path <- jobs$path[j]
-        incProgress(1 / nrow(jobs), detail = paste(s$label, "-", path))
-        key <- paste(s$model$key, s$sd_mode, s$clim_mode, paste(s$cap, collapse = "/"), r$forcing, ssp, r$held, r$tau, path,
-                     noise_key(r$noise), sep = " | ")
+        incProgress(1 / nrow(jobs), detail = paste(s$label, "-", v$label, "-", path))
+        key <- paste(s$model$key, s$sd_mode, s$clim_mode, paste(s$cap, collapse = "/"), v$forcing, ssp, r$held, v$tau, path,
+                     noise_key(r$noise), if (r$no_gains) "no gains", sep = " | ")
         if (is.null(projection_cache[[key]])) {
-          projection_cache[[key]] <- project_with(s, r$forcing, ssp, r$noise, gmt = paths[[path]])
+          projection_cache[[key]] <- project_with(s, v$forcing, ssp, r$noise, gmt = paths[[jobs$k[j]]][[path]],
+                                                  no_gains = r$no_gains)
         }
-        list(setting = s$label, n = s$n, path = path, result = projection_cache[[key]])
+        list(variant = v$label, setting = s$label, n = s$n, path = path, result = projection_cache[[key]])
       })
     })
   })
+  # Those of the chosen alternative (map, table).
+  ts_projections <- reactive({
+    Filter(function(p) p$variant == ts_one()$variant, ts_projections_all())
+  })
   ts_global <- reactive({
-    do.call(rbind, lapply(ts_projections(), function(p) {
-      cbind(setting = p$setting, path = p$path, p$result$global)
+    do.call(rbind, lapply(ts_projections_all(), function(p) {
+      cbind(variant = p$variant, setting = p$setting, path = p$path, p$result$global)
     }))
   })
   observeEvent(ts_run(), {
@@ -2463,8 +2567,10 @@ server <- function(input, output, session) {
     updateSelectInput(session, "ts_map_setting", choices = choices, selected = choices[[1]])
     updateSelectInput(session, "ts_map_year", choices = as.character(r$years),
                       selected = as.character(r$years[[1]]))
-    p <- names(ts_paths())
+    p <- names(ts_paths_of(r))
     updateSelectInput(session, "ts_lat_paths", choices = p, selected = p[c(2, 3)])
+    labels <- vapply(r$variants, `[[`, "", "label")
+    updateSelectInput(session, "ts_variant", choices = labels, selected = labels[[1]])
   })
   ts_run_colours <- function(x) factor(x, levels = names(ts_colours()))
 
@@ -2476,8 +2582,7 @@ server <- function(input, output, session) {
     s <- Filter(function(s) as.character(s$n) == input$ts_map_setting, sp)
     if (length(s)) s[[1]] else sp[[1]]
   })
-  ts_population <- reactive({
-    r <- ts_run()
+  ts_population_of <- function(r) {
     ssp <- economy_of(r$forcing, r$economy)
     years <- seq(PROJECTION_FROM, PROJECTION_TO)
     gdp <- SCEN$ssp$gdp[SCEN$ssp$gdp$ssp == ssp & SCEN$ssp$gdp$year %in% years, ]
@@ -2487,14 +2592,17 @@ server <- function(input, output, session) {
     iso <- intersect(rownames(gdp), rownames(pc))
     pop <- gdp[iso, as.character(years), drop = FALSE] / pc[iso, as.character(years), drop = FALSE]
     pop[stats::complete.cases(pop), , drop = FALSE]
-  })
-  ts_sigma <- reactive({
+  }
+  ts_population <- reactive(ts_population_of(ts_one()))
+  # The natural SDs of alternative r (its SSP's population weights).
+  ts_sigma_of <- function(r) {
     m <- ts_sigma_setting()$model
     weight <- m$weight %||% "population"
     variability <- EXPLORER$variability[[paste(m$gdp, m$climate, weight, sep = " | ")]]
-    pop <- ts_population()
+    pop <- ts_population_of(r)
     natural_sigma(variability, SCEN$pattern[[weight]], pop[, as.character(PROJECTION_FROM)])
-  })
+  }
+  ts_sigma <- reactive(ts_sigma_of(ts_one()))
   ts_reference <- reactive({
     ref <- input$ts_ref %||% "20"
     list(window = if (ref == "horizon") NA_real_ else as.numeric(ref),
@@ -2506,11 +2614,9 @@ server <- function(input, output, session) {
   })
   # For each terminated path, by year: warming, its reference plus k SD, and
   # whether the warming exceeds it.
-  ts_exceedance <- reactive({
-    paths <- ts_paths()
+  ts_exceedance_of <- function(paths, sg) {
     k <- input$ts_k_gmt
     validate(need(isTRUE(k > 0), "k must be positive."))
-    sg <- ts_sigma()
     ref <- ts_reference()
     years <- seq(PROJECTION_FROM, PROJECTION_TO)
     do.call(rbind, lapply(grep("^terminated in", names(paths), value = TRUE), function(p) {
@@ -2519,7 +2625,8 @@ server <- function(input, output, session) {
                  warming = d$warming, threshold = d$reference + k * sg$gmt,
                  above = d$deviation > k * sg$gmt)
     }))
-  })
+  }
+  ts_exceedance <- reactive(ts_exceedance_of(ts_paths(), ts_sigma()))
   # "2040: 12 years (2041-2052)", the years from the termination on.
   exceedance_text <- function(ex) {
     vapply(split(ex, ex$termination), function(e) {
@@ -2529,43 +2636,100 @@ server <- function(input, output, session) {
     }, "")
   }
 
+  # One panel per alternative of the run (a forcing and catch-up time; the
+  # economy changes only the population weights of the natural SD).
   ts_gmt_plot <- function() {
     validate(need(input$run_termination > 0, TS_NOT_RUN))
-    paths <- ts_paths()
-    d <- do.call(rbind, lapply(names(paths), function(k) {
-      data.frame(path = k, year = as.integer(names(paths[[k]])), warming = unname(paths[[k]]))
-    }))
-    d <- d[d$year >= 2000, ]
+    r <- ts_run()
+    rate <- identical(input$ts_gmt_measure, "rate")
+    parts <- lapply(r$variants, function(v) {
+      rv <- ts_with(r, v)
+      paths <- ts_paths_of(rv)
+      sg <- ts_sigma_of(rv)
+      d <- do.call(rbind, lapply(names(paths), function(k) {
+        data.frame(path = k, year = as.integer(names(paths[[k]])), warming = unname(paths[[k]]))
+      }))
+      if (rate) {
+        d <- d[order(d$path, d$year), ]
+        d$warming <- unlist(lapply(split(d, factor(d$path, levels = unique(d$path))), function(x) warming_rate(x$year, x$warming)))
+      }
+      d <- d[d$year >= 2000, ]
+      if (rate) {
+        # The fastest warming of each terminated path, from its termination on.
+        peaks <- vapply(grep("^terminated in", names(paths), value = TRUE), function(p) {
+          x <- d[d$path == p & d$year >= as.integer(sub("^terminated in ", "", p)), ]
+          i <- which.max(x$warming)
+          sprintf("%s: %.2f C per decade in %d", sub("^terminated in ", "", p), x$warming[i], x$year[i])
+        }, "")
+        return(list(d = cbind(variant = v$label, d), ex = NULL, sd = NA_real_,
+                    text = paste0(if (length(r$variants) > 1) paste0(v$label, ": "), paste(peaks, collapse = "; "))))
+      }
+      # The bands: the warming above the reference climate plus k SD, in the
+      # years it exceeds it from the termination on (one ribbon per run of
+      # consecutive years).
+      ex0 <- ts_exceedance_of(paths, sg)
+      ex <- ex0
+      ex$above <- ex$above & ex$year >= ex$termination
+      ex$segment <- paste(ex$path, cumsum(c(TRUE, diff(ex$above) != 0 | ex$path[-1] != ex$path[-nrow(ex)])))
+      ex <- ex[ex$above, ]
+      list(d = cbind(variant = v$label, d), ex = if (nrow(ex)) cbind(variant = v$label, ex),
+           text = paste0(if (length(r$variants) > 1) paste0(v$label, ": "), paste(exceedance_text(ex0), collapse = "; ")),
+           sd = sg$gmt)
+    })
+    d <- do.call(rbind, lapply(parts, `[[`, "d"))
+    ex <- do.call(rbind, lapply(parts, `[[`, "ex"))
     d$path <- ts_run_colours(d$path)
-    # The bands: the warming above the reference climate plus k SD, in the
-    # years it exceeds it from the termination on (one ribbon per run of
-    # consecutive years).
-    ex <- ts_exceedance()
-    ex$above <- ex$above & ex$year >= ex$termination
-    ex$segment <- paste(ex$path, cumsum(c(TRUE, diff(ex$above) != 0 | ex$path[-1] != ex$path[-nrow(ex)])))
-    ex <- ex[ex$above, ]
-    ex$path <- ts_run_colours(ex$path)
-    sg <- ts_sigma()
+    d$variant <- ts_variant_factor(d$variant)
+    bands <- if (!is.null(ex)) {
+      ex$path <- ts_run_colours(ex$path)
+      ex$variant <- ts_variant_factor(ex$variant)
+      geom_ribbon(data = ex, aes(x = year, ymin = threshold, ymax = warming, fill = path, group = segment),
+                  inherit.aes = FALSE, alpha = 0.3, colour = NA)
+    }
+    sds <- unique(round(vapply(parts, `[[`, 0, "sd"), 2))
+    many <- length(r$variants) > 1
+    caption <- if (rate) {
+      paste0(wrap_label(paste0(first_upper(RATE_TEXT), ". Fastest warming after each termination:"), if (many) 140 else 70),
+             "\n", paste(vapply(parts, `[[`, "", "text"), collapse = "\n"))
+    } else {
+      paste0(wrap_label(sprintf(
+        "Bands: warming above %s + %g SD of natural variability (1 SD = %s C of global warming). Years above it:",
+        ts_reference()$label, input$ts_k_gmt, paste(sprintf("%.2f", sds), collapse = " / ")), if (many) 140 else 70), "\n",
+        paste(vapply(parts, `[[`, "", "text"), collapse = "\n"))
+    }
     ggplot(d, aes(year, warming, colour = path)) +
       geom_vline(xintercept = PROJECTION_FROM, colour = GRID, linewidth = 0.5) +
-      geom_ribbon(data = ex, aes(x = year, ymin = threshold, ymax = warming, fill = path, group = segment),
-                  inherit.aes = FALSE, alpha = 0.3, colour = NA) +
+      (if (rate) geom_hline(yintercept = 0, colour = INK_MUTED, linewidth = 0.4)) +
+      bands +
       geom_line(aes(linetype = path == "no geoengineering"), linewidth = 0.9) +
+      (if (many) facet_wrap(~variant, nrow = 1, labeller = labeller(variant = function(x) wrap_label(x, 40)))) +
       scale_colour_manual(values = ts_colours(), name = NULL,
-                          guide = guide_legend(ncol = 2)) +
+                          guide = guide_legend(ncol = if (many) 4 else 2)) +
       scale_fill_manual(values = ts_colours(), guide = "none") +
       scale_linetype_manual(values = c(`FALSE` = "solid", `TRUE` = "22"), guide = "none") +
-      labs(x = NULL, y = "Global warming above 1850-1900 (C)",
-           subtitle = sprintf("Background: %s (FaIR median); catch-up time %.1f years",
-                              FORCING_LABELS[[ts_run()$forcing]], ts_run()$tau),
-           caption = paste0(wrap_label(sprintf(
-             "Bands: warming above %s + %g SD of natural variability (1 SD = %.2f C of global warming). Years above it:",
-             ts_reference()$label, input$ts_k_gmt, sg$gmt), 70), "\n",
-             paste(exceedance_text(ts_exceedance()), collapse = "\n"))) +
+      labs(x = NULL, y = if (rate) RATE_AXIS else "Global warming above 1850-1900 (C)",
+           subtitle = if (many) "Background: FaIR median of each forcing"
+                      else sprintf("Background: %s (FaIR median); catch-up time %.1f years",
+                                   FORCING_LABELS[[r$forcing]], r$tau),
+           caption = caption) +
       theme_explorer() +
-      theme(plot.caption = element_text(colour = INK_MUTED, size = 9, hjust = 0))
+      theme(plot.caption = element_text(colour = INK_MUTED, size = 9, hjust = 0),
+            strip.text = element_text(colour = INK_MUTED, size = 9.5, hjust = 0))
   }
   output$ts_gmt_plot <- renderPlot(ts_gmt_plot(), bg = SURFACE)
+  # The heights of the charts: the global chart grows with the settings when
+  # the alternatives are in columns.
+  ts_many <- reactive(input$run_termination > 0 && length(ts_run()$variants) > 1)
+  ts_global_height <- function() if (ts_many()) 160 + 230 * length(ts_run()$specs) else 460
+  output$ts_charts <- renderUI({
+    if (ts_many()) {
+      tagList(plotOutput("ts_gmt_plot", height = 420),
+              plotOutput("ts_global_plot", height = ts_global_height(), hover = hoverOpts("hover_ts", delay = 80)))
+    } else {
+      layout_columns(col_widths = c(4, 8), plotOutput("ts_gmt_plot", height = 460),
+                     plotOutput("ts_global_plot", height = 460, hover = hoverOpts("hover_ts", delay = 80)))
+    }
+  })
 
   ts_global_plot <- function() {
     validate(need(input$run_termination > 0, TS_NOT_RUN))
@@ -2574,11 +2738,13 @@ server <- function(input, output, session) {
     validate(need(measure == "loss" || growth_allowed(sp), GROWTH_NOTE))
     d <- as_measure(ts_global(), measure)
     d$setting <- factor(d$setting, levels = vapply(sp, `[[`, "", "label"))
+    d$variant <- ts_variant_factor(d$variant)
     d$path <- ts_run_colours(d$path)
+    many <- length(ts_run()$variants) > 1
     # Growth: the SSP's growth without climate change (the same for every
     # path), thin grey.
     baseline <- if (measure == "growth") {
-      geom_line(data = d[d$path == levels(d$path)[1], ], mapping = aes(year, baseline_growth), inherit.aes = FALSE,
+      geom_line(data = d[d$path == levels(d$path)[1], ], mapping = aes(year, baseline_growth, group = interaction(setting, variant)), inherit.aes = FALSE,
                 colour = INK_MUTED, linetype = "dotted", linewidth = 0.6)
     }
     ggplot(d, aes(year, estimate, colour = path, fill = path)) +
@@ -2586,20 +2752,29 @@ server <- function(input, output, session) {
       geom_ribbon(aes(ymin = low, ymax = high), alpha = 0.06, colour = NA) +
       noise_lines(d) +
       baseline +
+      (if (measure == "growth" && isTRUE(input$ts_history)) history_growth_layers()) +
       geom_line(aes(linetype = path == "no geoengineering"), linewidth = 0.9) +
-      facet_wrap(~setting, ncol = min(3, nlevels(d$setting)), scales = "free_y",
-                 labeller = labeller(setting = function(x) wrap_label(x, 50))) +
+      (if (many) {
+        # Side by side: the alternatives in columns, the settings in rows (one y
+        # scale per row).
+        facet_grid(setting ~ variant, scales = "free_y",
+                   labeller = labeller(setting = function(x) wrap_label(x, 30), variant = function(x) wrap_label(x, 40)))
+      } else {
+        facet_wrap(~setting, ncol = min(3, nlevels(d$setting)), scales = "free_y",
+                   labeller = labeller(setting = function(x) wrap_label(x, 50)))
+      }) +
       scale_colour_manual(values = ts_colours(), name = NULL, guide = guide_legend(ncol = 3)) +
       scale_fill_manual(values = ts_colours(), guide = "none") +
       scale_linetype_manual(values = c(`FALSE` = "solid", `TRUE` = "22"), guide = "none") +
       labs(x = NULL, y = measure_axis(measure, sp),
-           subtitle = wrap_label(sprintf("%s; %s%s%s", scenario_label(ts_run()$forcing, ts_run()$economy),
+           subtitle = wrap_label(sprintf("%s; %s%s%s", if (many) paste("Held at", sprintf("%.1f C", ts_run()$held)) else ts_run()$variants[[1]]$label,
                                          if (ts_run()$noise$type != "none") "mean over the noise paths; " else "",
                                          band_label(ts_run()$noise),
-                                         if (measure == "growth") "; grey dotted: the SSP's growth without climate change" else ""),
+                                         if (measure == "growth") paste0("; grey dotted: the SSP's growth without climate change", if (isTRUE(input$ts_history)) history_growth_note()) else ""),
                                  110)) +
       theme_explorer() +
-      theme(strip.text = element_text(colour = INK_MUTED, size = 9.5, hjust = 0))
+      theme(strip.text = element_text(colour = INK_MUTED, size = 9.5, hjust = 0),
+            strip.text.y = element_text(colour = INK_MUTED, size = 9, angle = 0, hjust = 0))
   }
   output$ts_global_plot <- renderPlot(ts_global_plot(), bg = SURFACE)
 
@@ -2612,9 +2787,10 @@ server <- function(input, output, session) {
     d <- as_measure(ts_global(), measure)
     year <- max(min(d$year), min(round(hover$x), PROJECTION_TO))
     rows <- d[d$year == year, ]
-    rows <- rows[order(match(rows$path, names(ts_colours()))), ]
+    rows <- rows[order(match(rows$variant, vapply(ts_run()$variants, `[[`, "", "label")), match(rows$path, names(ts_colours()))), ]
+    many <- length(ts_run()$variants) > 1
     tagList(tags$div(class = "small", paste("Year", year)),
-            readout_list(paste0(rows$setting, ", ", rows$path, ": ", loss_text(rows, measure))))
+            readout_list(paste0(if (many) paste0(rows$variant, ", "), rows$setting, ", ", rows$path, ": ", loss_text(rows, measure))))
   })
 
   # Map: the extra loss from terminating in the chosen year against sustained
@@ -2638,8 +2814,7 @@ server <- function(input, output, session) {
                            name = paste0(first_upper(quantity_of(ts_run()$specs)), ", terminated minus\nsustained (pp)")) +
       labs(title = sprintf("%d: termination in %s against sustained geoengineering (%.1f C)",
                            PROJECTION_TO, input$ts_map_year, ts_run()$held),
-           subtitle = wrap_label(paste0(pr[[1]]$setting, "; ",
-                                        scenario_label(ts_run()$forcing, ts_run()$economy)))) +
+           subtitle = wrap_label(paste0(pr[[1]]$setting, "; ", ts_one()$variant))) +
       theme_map()
   }
   output$ts_map <- renderPlot(ts_map(), bg = SURFACE)
@@ -2675,8 +2850,8 @@ server <- function(input, output, session) {
            title = sprintf("Share of the population with a year of T %s of natural variability", events),
            subtitle = wrap_label(sprintf(
              "%s; deviation from %s; each country's normal with its SD of detrended historical T (%s), population (%s) spread over its area; %.1f%% with no forced deviation",
-             scenario_label(ts_run()$forcing, ts_run()$economy), ref$label,
-             ts_sigma_setting()$label, economy_of(ts_run()$forcing, ts_run()$economy), baseline), 140)) +
+             ts_one()$variant, ref$label,
+             ts_sigma_setting()$label, economy_of(ts_one()$forcing, ts_one()$economy), baseline), 140)) +
       theme_explorer() +
       theme(strip.text = element_text(colour = INK_MUTED, size = 9.5, hjust = 0), legend.position = "right")
   }
@@ -2684,13 +2859,14 @@ server <- function(input, output, session) {
 
   ts_table <- function() {
     if (input$run_termination == 0) return(NULL)
-    pr <- ts_projections()
+    pr <- ts_projections_all()
+    many <- length(ts_run()$variants) > 1
     cell <- function(g, y) loss_text(g[g$year == y, ])
     out <- do.call(rbind, lapply(pr, function(p) {
       g <- p$result$global
-      sustained <- Filter(function(q) q$setting == p$setting && startsWith(q$path, "sustained"), pr)[[1]]
+      sustained <- Filter(function(q) q$variant == p$variant && q$setting == p$setting && startsWith(q$path, "sustained"), pr)[[1]]
       s100 <- sustained$result$global$estimate[sustained$result$global$year == PROJECTION_TO]
-      data.frame(Setting = p$setting, Path = p$path,
+      data.frame(Alternative = p$variant, Setting = p$setting, Path = p$path,
                  `World GDP 2050 (%)` = cell(g, 2050), `World GDP 2100 (%)` = cell(g, PROJECTION_TO),
                  `2100 against sustained (pp)` = sprintf("%+.2f", g$estimate[g$year == PROJECTION_TO] - s100),
                  `Growth of world GDP 2026-2100 (% a year): mean; largest change by climate change (pp, year)` =
@@ -2698,8 +2874,11 @@ server <- function(input, output, session) {
                  check.names = FALSE)
     }))
     names(out) <- sub("^World GDP", paste("World", quantity_of(ts_run()$specs)), names(out))
-    out[order(match(out$Setting, vapply(ts_run()$specs, `[[`, "", "label")),
-              match(out$Path, names(ts_colours()))), ]
+    out <- out[order(match(out$Alternative, vapply(ts_run()$variants, `[[`, "", "label")),
+                     match(out$Setting, vapply(ts_run()$specs, `[[`, "", "label")),
+                     match(out$Path, names(ts_colours()))), ]
+    if (!many) out$Alternative <- NULL
+    out
   }
   output$ts_table <- renderTable(ts_table(), striped = TRUE, spacing = "s", align = "l")
 
@@ -3009,7 +3188,8 @@ server <- function(input, output, session) {
       card("Termination shocks: perfect geoengineering, 2025-2100",
            tags$div(class = "muted", ts_status()),
            tags$p(class = "muted", paste0("Global chart: ", measure_text(input$ts_measure), ".")),
-           pair(chart(ts_gmt_plot, 460, 520), chart(ts_global_plot, 460, 1040), "1fr 2fr"),
+           if (ts_many()) tagList(chart(ts_gmt_plot, 420, 1180), chart(ts_global_plot, ts_global_height(), 1180))
+           else pair(chart(ts_gmt_plot, 460, 520), chart(ts_global_plot, 460, 1040), "1fr 2fr"),
            chart(ts_map, 380, 1180),
            if (length(input$ts_lat_paths)) chart(ts_lat_plot, 420, 1180),
            table_of(ts_table()), ts_notes())
