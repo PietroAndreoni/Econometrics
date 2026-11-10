@@ -505,6 +505,11 @@ explorer_model <- function(o, panels) {
   if (o$diff || o$both) {
     for (v in c("TM", "RR")) d <- d[is.finite(deviation_values(d, v, window, panels$units_suffix[[o$units[[v]]]], dev_fe[[v]], TRUE)), ]
   }
+  # The rows with the deviations themselves (all of them, except where a short
+  # trailing window has no variability: CRU TS fill values).
+  if (!o$diff) {
+    for (v in c("TM", "RR")) d <- d[is.finite(deviation_values(d, v, window, panels$units_suffix[[o$units[[v]]]], dev_fe[[v]], FALSE)), ]
+  }
 
   # The outcome (see the header).
   d$.outcome <- as.numeric(d[[if (o$outcome == "log") panels$outcome else panels$outcome_columns[[o$outcome]]]])
