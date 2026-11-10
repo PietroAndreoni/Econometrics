@@ -258,8 +258,14 @@ world_growth <- function(world_gdp, loss) {
 # and share. `variability`: the natural variability of the setting's panel
 # (build_models.R; NULL: none), resampled as `noise` (a value of
 # VARIABILITY_CHOICES) in `n_paths` paths.
+#
+# `no_gains`: in the global aggregation a country's gain counts as its baseline
+# GDP (its effect capped at zero, year by year, at each draw and noise path);
+# the countries keep their GDP weights, and the country results stay as they
+# are.
 project_setting <- function(spec, scen_data, scenario, ssp = NULL, gmt = NULL,
-                            variability = NULL, noise = "none", n_paths = 500L) {
+                            variability = NULL, noise = "none", n_paths = 500L, no_gains = FALSE) {
+  agg <- function(x) if (isTRUE(no_gains)) pmin(x, 0) else x
   model <- spec$model
   ssp <- ssp %||% scen_data$ssp$of_scenario[[scenario]]
   # The global warming path: the scenario's median, or the path `gmt` (named by
@@ -357,16 +363,18 @@ project_setting <- function(spec, scen_data, scenario, ssp = NULL, gmt = NULL,
       country_loss[i, ] <- rowMeans(paths)
       country_loss_T[i, ] <- rowMeans(cumulative_pct(model, r$point_T))
       country_loss_P[i, ] <- rowMeans(cumulative_pct(model, r$point_P))
-      global_paths <- global_paths + weights[i, ] * paths
+      global_paths <- global_paths + weights[i, ] * agg(paths)
+      contribution <- rowMeans(agg(paths))
     } else {
       r <- project_country(model, country, anomalies, spec$sd_mode, spec$clim_mode, spec$cap, draws,
                            income, share)
       country_loss[i, ] <- cumulative_pct(model, r$point)
       country_loss_T[i, ] <- cumulative_pct(model, r$point_T)
       country_loss_P[i, ] <- cumulative_pct(model, r$point_P)
+      contribution <- agg(country_loss[i, ])
     }
-    global_point <- global_point + weights[i, ] * country_loss[i, ]
-    global_draws <- global_draws + weights[i, ] * cumulative_pct(model, r$draws)
+    global_point <- global_point + weights[i, ] * contribution
+    global_draws <- global_draws + weights[i, ] * agg(cumulative_pct(model, r$draws))
   }
   q <- apply(global_draws, 1, stats::quantile, probs = c(0.025, 0.975), names = FALSE)
   global <- data.frame(year = years, estimate = global_point, low = q[1, ], high = q[2, ])
@@ -396,7 +404,8 @@ project_setting <- function(spec, scen_data, scenario, ssp = NULL, gmt = NULL,
                            year = rep(years, each = nrow(countries)),
                            loss = as.vector(country_loss), loss_T = as.vector(country_loss_T),
                            loss_P = as.vector(country_loss_P)),
-    coverage = coverage, n = nrow(countries), follow = follow, followed = followed, ssp = ssp
+    coverage = coverage, n = nrow(countries), follow = follow, followed = followed, ssp = ssp,
+    no_gains = isTRUE(no_gains)
   )
 }
 

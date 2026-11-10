@@ -136,6 +136,10 @@ guide_ui <- function() {
         guide_item("Natural variability:", "none (forced signal only), or each country's detrended historical T and P",
                    "added as noise: years independent across countries, joint years (spatial correlation) or joint",
                    "5-year blocks (also persistence), over the chosen number of noise paths (slower)."),
+        guide_item("Ignore gains (also on the Termination page):", "in the world aggregate a country whose GDP",
+                   "gains counts at its baseline GDP (its effect capped at zero each year, at every draw of the",
+                   "coefficients and noise path); it keeps its GDP weight, and the maps and country results are",
+                   "unchanged."),
         guide_item("Outputs:", "the warming paths, the world loss (or the world growth rate and its change), maps of",
                    "the loss by country in 2050 and 2100 (setting, forcing, T and / or P), the physical drivers (each",
                    "country's change of T and P) and a table.")

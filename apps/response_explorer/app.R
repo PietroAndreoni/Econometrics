@@ -1450,7 +1450,8 @@ ui <- page_navbar(
         col_widths = c(6, 3),
         selectInput("scen_noise", "Natural variability (each country's detrended historical T and P)",
                     VARIABILITY_CHOICES, selected = "none"),
-        selectInput("scen_noise_n", "Noise paths", NOISE_PATH_CHOICES, selected = "200")
+        selectInput("scen_noise_n", "Noise paths", NOISE_PATH_CHOICES, selected = "200"),
+        checkboxInput("scen_no_gains", NO_GAINS_LABEL, value = FALSE)
       ),
       layout_columns(
         col_widths = c(4, 3, 5),
@@ -2482,6 +2483,9 @@ server <- function(input, output, session) {
         "the coefficients, draw by draw; the third option is their difference, the change of the",
         "growth rate by climate change. Not available for the capital outcome.")),
       tags$li(paste(
+        "Ignore gains (option): each country's effect enters the global loss capped at zero, year by year,",
+        "at every draw of the coefficients and every noise path (a gain counts as the baseline GDP); the",
+        "countries keep their GDP weights, and the maps and country results show the effects as they are.",
         "Global loss: the average of the countries' losses weighted by the SSP's GDP of each year",
         "(PPP), over the countries with a pattern and SSP GDP; the share of the SSP's world GDP they",
         "cover in 2025 is in the table. 95% CI: 1,000 draws of the coefficients, the same for every",
