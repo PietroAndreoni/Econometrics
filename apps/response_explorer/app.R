@@ -1037,45 +1037,31 @@ setting_server <- function(id, n, default_country, first = NULL) {
                                                        format(round(EXPLORER$low_income[["PWT"]]), big.mark = ","))
                        else ""))
     })
+    # Load a model (a list as model_inputs()) into the panels, and optionally a
+    # name. The inputs some others reset when they change (the low-income
+    # threshold with the GDP source, the long-run characteristics with the
+    # moderators, the units with the exposure) are set again twice, after
+    # those observers have run.
+    pending <- reactiveVal(NULL)
+    load_model <- function(m, label = NULL) {
+      apply_model_inputs(session, m)
+      if (!is.null(label)) updateTextInput(session, "label", value = label)
+      pending(list(m = m, rounds = 2L, at = Sys.time() + 0.6))
+    }
+    observe({
+      p <- pending()
+      req(p)
+      wait <- as.numeric(difftime(p$at, Sys.time(), units = "secs"))
+      if (wait > 0) {
+        invalidateLater(ceiling(1000 * wait) + 10)
+        return()
+      }
+      apply_model_inputs(session, p$m)
+      pending(if (p$rounds > 1) list(m = p$m, rounds = p$rounds - 1L, at = Sys.time() + 0.6))
+    })
     if (!is.null(first)) {
       observeEvent(input$copy, {
-        m <- first$model_inputs()
-        for (k in c("gdp", "climate", "outcome", "baseline", "form_T", "form_P", "fe")) {
-          updateSelectInput(session, k, selected = m[[k]])
-        }
-        updateRadioButtons(session, "moderators", selected = m$moderators)
-        updateRadioButtons(session, "effects", selected = m$effects)
-        updateRadioButtons(session, "convergence", selected = m$convergence)
-        updateRadioButtons(session, "style", selected = m$style %||% "simple")
-        for (k in c("quad_T", "quad_P")) updateSelectInput(session, k, selected = m[[k]] %||% "none")
-        for (v in c("T", "P")) {
-          updateCheckboxInput(session, paste0("symmetric_", v), value = isTRUE(m[[paste0("symmetric_", v)]]))
-          updateRadioButtons(session, paste0("units_", v), selected = m[[paste0("units_", v)]])
-          updateRadioButtons(session, paste0("shape_", v), selected = m[[paste0("shape_", v)]])
-          updateCheckboxInput(session, paste0("cap_", v), value = isTRUE(m[[paste0("cap_", v)]]))
-        }
-        updateCheckboxInput(session, "use_lags", value = isTRUE(m$use_lags))
-        if (is.finite(m$lags %||% NA)) updateNumericInput(session, "lags", value = m$lags)
-        for (v in c("T", "P")) {
-          updateRadioButtons(session, paste0("income_form_", v), selected = m[[paste0("income_form_", v)]])
-          updateSliderInput(session, paste0("xi_", v), value = m[[paste0("xi_", v)]])
-        }
-        updateCheckboxInput(session, "share_trailing", value = isTRUE(m$share_trailing))
-        for (k in c("exposure_mode", "exp_hot_src", "exp_cold_src", "exposure_mode_P", "exp_wet_pct", "exp_wet_abs",
-                    "exp_dry_value")) updateSelectInput(session, k, selected = m[[k]])
-        for (k in c("exposure_channels", "exp_hot_measure", "exp_cold_measure", "exposure_channels_P", "exp_wet_type",
-                    "exp_wet_measure", "exp_dry_measure")) updateRadioButtons(session, k, selected = m[[k]])
-        for (k in c("exp_hot_value", "exp_cold_value")) if (is.finite(m[[k]] %||% NA)) updateNumericInput(session, k, value = m[[k]])
-        for (k in c("inter_T", "inter_P")) {
-          updateCheckboxGroupInput(session, k, selected = m[[k]] %||% character(0))
-        }
-        if (is.finite(m$low_threshold %||% NA)) updateNumericInput(session, "low_threshold", value = m$low_threshold)
-        updateRadioButtons(session, "weight", selected = m$weight)
-        updateRadioButtons(session, "sd_mode", selected = m$sd_mode)
-        updateRadioButtons(session, "clim_mode", selected = m$clim_mode)
-        updateCheckboxGroupInput(session, "controls", selected = m$controls %||% character(0))
-        updateCheckboxInput(session, "drop_outliers", value = isTRUE(m$drop_outliers))
-        updateRadioButtons(session, "outlier_tail", selected = m$outlier_tail)
+        load_model(first$model_inputs())
       })
     }
     # Exposure terms are in the index per C or m: absolute deviations.
@@ -1266,7 +1252,8 @@ setting_server <- function(id, n, default_country, first = NULL) {
            })),
            units = u, gdp = input$gdp)
     })
-    list(active = active, spec = spec, model_inputs = model_inputs, units = units, gdp = reactive(input$gdp))
+    list(active = active, spec = spec, model_inputs = model_inputs, units = units, gdp = reactive(input$gdp),
+         load = load_model, label = reactive(trimws(input$label %||% "")))
   })
 }
 
@@ -1327,6 +1314,9 @@ setting_tab <- function(n) {
   )
 }
 
+# Snapshots of a setting's model and the literature presets.
+source(file.path(APP_DIR, "R", "snapshots.R"), local = environment())
+
 ui <- page_navbar(
   title = "Weather response explorer",
   id = "page",
@@ -1340,6 +1330,22 @@ ui <- page_navbar(
     downloadButton("save_page", "Save the page as HTML", class = "btn-sm btn-outline-secondary"),
     helpText("The shown settings, charts, tables and notes; the climate scenarios and the termination",
              "shocks only if run (their last run)."),
+    tags$hr(),
+    tags$div(
+      tags$strong("Snapshots of a model"),
+      selectInput("snap_setting", "Setting", stats::setNames(seq_len(N_SETTINGS), paste("Setting", seq_len(N_SETTINGS))),
+                  selected = 1),
+      tags$div(class = "d-flex gap-2 align-items-end",
+               textInput("snap_name", "Name", placeholder = "e.g. my baseline", width = "100%"),
+               actionButton("snap_save", "Save", class = "btn-sm btn-outline-secondary mb-3")),
+      selectInput("snap_pick", "Load (literature presets and saved snapshots)", snapshot_choices(list())),
+      uiOutput("snap_note"),
+      tags$div(class = "d-flex gap-2",
+               actionButton("snap_load", "Load into the setting", class = "btn-sm btn-outline-primary"),
+               actionButton("snap_delete", "Delete", class = "btn-sm btn-outline-danger")),
+      helpText("A snapshot keeps every model option of the setting (not its countries); saved ones are kept in",
+               "results/response_explorer/snapshots.rds.")
+    ),
     tags$hr(),
     do.call(navset_pill, c(lapply(seq_len(N_SETTINGS), setting_tab), list(id = "setting_tabs")))
   ),
@@ -1586,6 +1592,55 @@ server <- function(input, output, session) {
   settings <- c(settings, lapply(2:N_SETTINGS, function(n) {
     setting_server(paste0("s", n), n, DEFAULT_COUNTRIES[n], first = settings[[1]])
   }))
+
+  # Snapshots: save the model of a setting under a name, load a preset or a
+  # saved snapshot into a setting. The setting follows the open settings tab.
+  saved <- reactiveVal(read_snapshots())
+  observeEvent(input$setting_tabs, {
+    updateSelectInput(session, "snap_setting", selected = sub("^s", "", input$setting_tabs))
+  })
+  refresh_snapshots <- function(selected = NULL) {
+    updateSelectInput(session, "snap_pick", choices = snapshot_choices(saved()), selected = selected)
+  }
+  observeEvent(TRUE, refresh_snapshots(), once = TRUE)
+  observeEvent(input$snap_save, {
+    s <- settings[[as.integer(input$snap_setting)]]
+    name <- trimws(input$snap_name %||% "")
+    if (!nzchar(name)) name <- s$label()
+    if (!nzchar(name)) name <- format(Sys.time(), "Snapshot %Y-%m-%d %H:%M")
+    all <- saved()
+    replaced <- name %in% names(all)
+    all[[name]] <- list(name = name, note = sprintf("Saved %s from setting %s.", format(Sys.time(), "%Y-%m-%d %H:%M"),
+                                                    input$snap_setting),
+                        inputs = s$model_inputs(), saved = Sys.time())
+    write_snapshots(all)
+    saved(all)
+    refresh_snapshots(paste0("own:", name))
+    showNotification(sprintf("%s snapshot \"%s\".", if (replaced) "Replaced" else "Saved", name), type = "message")
+  })
+  output$snap_note <- renderUI({
+    x <- snapshot_of(input$snap_pick, saved())
+    req(x)
+    helpText(x$note)
+  })
+  observeEvent(input$snap_load, {
+    x <- snapshot_of(input$snap_pick, saved())
+    req(x)
+    n <- as.integer(input$snap_setting)
+    settings[[n]]$load(x$inputs, label = x$name)
+    showNotification(sprintf("Loaded \"%s\" into setting %d.", x$name, n), type = "message")
+  })
+  observeEvent(input$snap_delete, {
+    if (!startsWith(input$snap_pick %||% "", "own:")) {
+      showNotification("Only saved snapshots can be deleted (not the literature presets).", type = "warning")
+      return()
+    }
+    all <- saved()
+    all[[sub("^own:", "", input$snap_pick)]] <- NULL
+    write_snapshots(all)
+    saved(all)
+    refresh_snapshots()
+  })
 
   # The countries of the Single country page, each with the setting it uses.
   countries <- lapply(seq_len(N_SETTINGS), function(k) {
