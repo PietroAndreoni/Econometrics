@@ -1587,17 +1587,24 @@ ui <- page_navbar(
     )
   ),
   nav_panel(
-    "Termination",
+    "Geoengineering",
     card(
-      card_header("Termination shocks: perfect geoengineering, 2025-2100"),
+      card_header("Geoengineering and termination shocks, 2025-2100"),
       layout_columns(
         col_widths = c(3, 3, 6),
         selectInput("ts_forcing", "Background forcing (the warming without geoengineering)",
                     SCENARIO_CHOICES, selected = "ssp245"),
-        radioButtons("ts_held", "Geoengineering holds global warming at",
-                     c("1.5 C" = "1.5", "1.0 C" = "1.0"), selected = "1.5", inline = TRUE),
-        checkboxGroupInput("ts_years", "Termination years", as.character(seq(2040, 2090, by = 10)),
-                           selected = c("2040", "2060", "2080"), inline = TRUE)
+        tagList(
+          radioButtons("ts_mode", "Geoengineering limits", c("Global warming (C above 1850-1900)" = "level",
+                                                              "Rate of warming (C per decade)" = "rate"),
+                       selected = "level", inline = TRUE),
+          conditionalPanel("input.ts_mode != 'rate'",
+            numericInput("ts_held", "Held at (C; 0: preindustrial)", 1.5, min = 0, step = 0.1)),
+          conditionalPanel("input.ts_mode == 'rate'",
+            numericInput("ts_rate", "At most (C per decade; 0: warming stops)", 0.1, min = 0, step = 0.05))
+        ),
+        checkboxGroupInput("ts_years", "Termination years (none: only sustained geoengineering)",
+                           as.character(seq(2040, 2090, by = 10)), selected = c("2040", "2060", "2080"), inline = TRUE)
       ),
       layout_columns(
         col_widths = c(3, 9),
@@ -1666,7 +1673,7 @@ ui <- page_navbar(
         checkboxInput("ts_no_gains", NO_GAINS_LABEL, value = FALSE)
       ),
       div(class = "d-flex align-items-center gap-3 mb-2",
-          actionButton("run_termination", "Run the termination scenarios", class = "btn-primary"),
+          actionButton("run_termination", "Run the geoengineering scenarios", class = "btn-primary"),
           uiOutput("ts_status")),
       radioButtons("ts_gmt_measure", "Warming chart", WARMING_CHOICES, selected = "level", inline = TRUE),
       radioButtons("ts_measure", "Global chart", MEASURE_CHOICES, selected = "loss", inline = TRUE),
@@ -2792,11 +2799,11 @@ server <- function(input, output, session) {
   }
   output$scenario_notes <- renderUI(scenario_notes())
 
-  # Termination shocks ---------------------------------------------------------
-  # Global warming paths with perfect geoengineering: none (the background),
-  # sustained (held from 2025), and terminated in each year (termination_path()).
+  # Geoengineering and termination shocks -------------------------------------
+  # Global warming paths with geoengineering: none (the background),
+  # sustained (limited from 2025), and terminated in each year (termination_path()).
   # They run only when asked, for the shown settings at the moment of the click.
-  TS_NOT_RUN <- "Press \"Run the termination scenarios\" to project the termination shocks."
+  TS_NOT_RUN <- "Press \"Run the geoengineering scenarios\" to project them."
   # The catch-up times of the comparison (positive numbers of a list).
   ts_compare_taus <- function(text) {
     x <- suppressWarnings(as.numeric(trimws(strsplit(text %||% "", ",")[[1]])))
@@ -2907,7 +2914,7 @@ server <- function(input, output, session) {
     paths <- lapply(r$variants, function(v) ts_paths_of(ts_with(r, v)))
     jobs <- expand.grid(i = seq_along(r$specs), path = names(paths[[1]]), k = seq_along(r$variants),
                         stringsAsFactors = FALSE)
-    withProgress(message = if (is.null(region)) "Projecting the termination scenarios" else "Projecting the selected countries",
+    withProgress(message = if (is.null(region)) "Projecting the geoengineering scenarios" else "Projecting the selected countries",
                  value = 0, {
       lapply(seq_len(nrow(jobs)), function(j) {
         s <- r$specs[[jobs$i[j]]]
@@ -3664,7 +3671,7 @@ server <- function(input, output, session) {
            table_of(global_table()), scenario_notes())
     }
     termination_part <- if (ts_runs() > 0) {
-      card("Termination shocks: perfect geoengineering, 2025-2100",
+      card("Geoengineering and termination shocks, 2025-2100",
            tags$div(class = "muted", ts_status()),
            tags$p(class = "muted", paste0("Global chart: ", measure_text(input$ts_measure), ".")),
            if (ts_many()) tagList(chart(ts_gmt_plot, 420, 1180), chart(ts_global_plot, ts_global_height(), 1180))
