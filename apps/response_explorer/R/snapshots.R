@@ -127,3 +127,34 @@ apply_model_inputs <- function(session, m) {
     if (has(k)) updateCheckboxGroupInput(session, k, selected = as.character(m[[k]] %||% character(0)))
   }
 }
+
+# Snapshots of the whole app: every input (the settings' models and names, the
+# countries, the options of every page), the fitted models of the settings
+# and the cached projections, and whether the climate scenarios and the
+# termination shocks had been run (they are run again on loading, from the
+# cache). One file each in results/response_explorer/app_snapshots/.
+APP_SNAPSHOTS_DIR <- normalizePath(file.path(APP_DIR, "..", "..", "results", "response_explorer", "app_snapshots"),
+                                   mustWork = FALSE)
+# The inputs not restored: buttons, the snapshot controls themselves, chart
+# hovers and clicks, and the client's own values.
+APP_SNAPSHOT_SKIP <- paste0("(^|-)(snap_|app_snap_|run_|copy$|save_page)|hover|click|brush|^\\.|",
+                            "^clientdata|_rows_|_cell_|_search|_state$")
+# The file of a name (the name with characters unsafe in file names as "_").
+app_snapshot_file <- function(name) {
+  file.path(APP_SNAPSHOTS_DIR, paste0(gsub("[^A-Za-z0-9 _.-]", "_", name), ".rds"))
+}
+# The saved app snapshots (their file names), newest first.
+app_snapshot_names <- function() {
+  files <- list.files(APP_SNAPSHOTS_DIR, pattern = "\\.rds$", full.names = TRUE)
+  if (!length(files)) return(character(0))
+  sub("\\.rds$", "", basename(files))[order(file.mtime(files), decreasing = TRUE)]
+}
+write_app_snapshot <- function(x) {
+  dir.create(APP_SNAPSHOTS_DIR, showWarnings = FALSE, recursive = TRUE)
+  saveRDS(x, app_snapshot_file(x$name))
+}
+read_app_snapshot <- function(name) {
+  f <- app_snapshot_file(name)
+  if (!file.exists(f)) return(NULL)
+  tryCatch(readRDS(f), error = function(e) NULL)
+}

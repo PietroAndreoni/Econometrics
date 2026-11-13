@@ -1347,6 +1347,21 @@ ui <- page_navbar(
                "results/response_explorer/snapshots.rds.")
     ),
     tags$hr(),
+    tags$div(
+      tags$strong("Snapshots of the app"),
+      tags$div(class = "d-flex gap-2 align-items-end",
+               textInput("app_snap_name", "Name", placeholder = "e.g. draft figures", width = "100%"),
+               actionButton("app_snap_save", "Save", class = "btn-sm btn-outline-secondary mb-3")),
+      selectInput("app_snap_pick", "Load a saved app snapshot", character(0)),
+      tags$div(class = "d-flex gap-2",
+               actionButton("app_snap_load", "Load", class = "btn-sm btn-outline-primary"),
+               actionButton("app_snap_delete", "Delete", class = "btn-sm btn-outline-danger")),
+      helpText("Every setting (model and name), every country, the options of every page, the fitted models",
+               "and the projections, and whether the climate scenarios and termination shocks were run (they",
+               "are run again on loading, from the saved projections). Kept in",
+               "results/response_explorer/app_snapshots/.")
+    ),
+    tags$hr(),
     do.call(navset_pill, c(lapply(seq_len(N_SETTINGS), setting_tab), list(id = "setting_tabs")))
   ),
   # The warnings of the settings, above every page.
@@ -1642,11 +1657,97 @@ server <- function(input, output, session) {
     refresh_snapshots()
   })
 
+  # Snapshots of the app: every input, the settings' fitted models and the
+  # cached projections; on loading the inputs are set three times (some
+  # observers reset others when they change: the presets of a country, the
+  # threshold with the GDP source, ...), then the runs that had been made are
+  # made again (from the saved projections).
+  scen_trigger <- reactiveVal(0)
+  ts_trigger <- reactiveVal(0)
+  refresh_app_snapshots <- function(selected = NULL) {
+    updateSelectInput(session, "app_snap_pick", choices = app_snapshot_names(), selected = selected)
+  }
+  observeEvent(TRUE, refresh_app_snapshots(), once = TRUE)
+  observeEvent(input$app_snap_save, {
+    name <- trimws(input$app_snap_name %||% "")
+    if (!nzchar(name)) name <- format(Sys.time(), "App %Y-%m-%d %H%M")
+    ids <- setdiff(names(input), grep(APP_SNAPSHOT_SKIP, names(input), value = TRUE))
+    values <- lapply(stats::setNames(ids, ids), function(id) isolate(input[[id]]))
+    models <- list()
+    # (The models of the shown settings: those a shown country uses.)
+    for (s in settings[isolate(used_settings())]) {
+      m <- tryCatch(isolate(s$spec())$model, error = function(e) NULL)
+      if (!is.null(m$key)) models[[m$key]] <- m
+    }
+    x <- list(name = gsub("[^A-Za-z0-9 _.-]", "_", name), saved = Sys.time(), inputs = values,
+              settings = lapply(settings, function(s) list(inputs = isolate(s$model_inputs()), label = isolate(s$label()))),
+              runs = c(scenarios = isolate(scen_runs()) > 0, termination = isolate(ts_runs()) > 0),
+              models = models, projections = as.list(projection_cache))
+    replaced <- file.exists(app_snapshot_file(x$name))
+    write_app_snapshot(x)
+    refresh_app_snapshots(x$name)
+    showNotification(sprintf("%s app snapshot \"%s\" (%s MB).", if (replaced) "Replaced" else "Saved", x$name,
+                             format(round(file.size(app_snapshot_file(x$name)) / 2^20, 1))), type = "message")
+  })
+  app_pending <- reactiveVal(NULL)
+  set_inputs <- function(values) {
+    for (id in names(values)) {
+      v <- values[[id]]
+      if (is.null(v)) v <- character(0)
+      if (is.numeric(v) && length(v) == 1 && !is.finite(v)) next
+      session$sendInputMessage(id, list(value = v))
+    }
+  }
+  observeEvent(input$app_snap_load, {
+    x <- read_app_snapshot(input$app_snap_pick %||% "")
+    if (is.null(x)) {
+      showNotification("No such app snapshot (or the file cannot be read).", type = "error")
+      return()
+    }
+    for (k in names(x$models)) model_cache[[k]] <- x$models[[k]]
+    for (k in names(x$projections)) projection_cache[[k]] <- x$projections[[k]]
+    for (n in seq_along(x$settings)) if (n <= N_SETTINGS) {
+      settings[[n]]$load(x$settings[[n]]$inputs, label = x$settings[[n]]$label)
+    }
+    set_inputs(x$inputs)
+    load_step <<- 0L
+    app_pending(list(x = x, at = Sys.time()))
+    showNotification(sprintf("Loading app snapshot \"%s\" (saved %s)...", x$name, format(x$saved, "%Y-%m-%d %H:%M")),
+                     type = "message")
+  })
+  # Every 0.8 s after loading: the inputs again (twice), then the runs.
+  load_step <- 0L
+  observe({
+    p <- app_pending()
+    req(p)
+    invalidateLater(800)
+    load_step <<- load_step + 1L
+    if (load_step == 1L) return()
+    if (load_step <= 3L) {
+      set_inputs(p$x$inputs)
+      return()
+    }
+    if (isTRUE(p$x$runs[["scenarios"]])) scen_trigger(isolate(scen_trigger()) + 1)
+    if (isTRUE(p$x$runs[["termination"]])) ts_trigger(isolate(ts_trigger()) + 1)
+    app_pending(NULL)
+  })
+  observeEvent(input$app_snap_delete, {
+    f <- app_snapshot_file(input$app_snap_pick %||% "")
+    if (!nzchar(input$app_snap_pick %||% "") || !file.exists(f)) return()
+    unlink(f)
+    refresh_app_snapshots()
+    showNotification(sprintf("Deleted app snapshot \"%s\".", input$app_snap_pick), type = "message")
+  })
+
   # The countries of the Single country page, each with the setting it uses.
   countries <- lapply(seq_len(N_SETTINGS), function(k) {
     country_server(paste0("c", k), k, DEFAULT_COUNTRIES[k], settings)
   })
-  shown_k <- reactive(which(vapply(countries, function(cn) cn$active(), TRUE)))
+  shown_k <- reactive({
+    k <- which(vapply(countries, function(cn) cn$active(), TRUE))
+    validate(need(length(k) > 0, "Tick \"Show this country\" for at least one country (Single country page, Countries card)."))
+    k
+  })
   # The shown settings: those a shown country uses (in setting order), with
   # unique labels.
   used_settings <- reactive(sort(unique(vapply(countries[shown_k()], function(cn) cn$setting_n(), 0L))))

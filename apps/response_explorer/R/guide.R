@@ -37,8 +37,14 @@ guide_ui <- function() {
         tags$li("Snapshots (sidebar): \"Save\" keeps every model option of the chosen setting under a name",
                 "(results/response_explorer/snapshots.rds); \"Load into the setting\" puts a saved snapshot or a",
                 "literature preset (Burke-Hsiang-Miguel 2015, Dell-Jones-Olken 2012, Kalkuhl-Wenz 2020,",
-                "Kotz-Levermann-Wenz 2024, the preferred and the xi exposure specifications) into it. The",
-                "presets use the app's options; the note under the menu says where they only approximate the paper.")
+                "Kotz-Levermann-Wenz 2024, Harding et al. 2025, the preferred and the xi exposure specifications) into it. The",
+                "presets use the app's options; the note under the menu says where they only approximate the paper."),
+        tags$li("Snapshots of the app (sidebar): \"Save\" keeps the whole app under a name: every setting and country,",
+                "the options of every page, the fitted models of the shown settings and the projections computed so",
+                "far (results/response_explorer/app_snapshots/, one file each). \"Load\" sets it all back, then runs",
+                "the climate scenarios and termination shocks again if they had been run, from the saved projections",
+                "(a few seconds). Projections are computed only for pages that have been open, so open the pages",
+                "you want to keep before saving.")
       )
     ),
     guide_section(
