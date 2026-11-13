@@ -1455,6 +1455,9 @@ ui <- page_navbar(
       card_header("Countries: each with its characteristics and the setting whose model it uses"),
       do.call(navset_pill, c(lapply(seq_len(N_SETTINGS), country_tab), list(id = "country_tabs")))
     ),
+    checkboxInput("response_first_lag",
+                  "Distributed lags: show the year-0 coefficient (the effect in the year of the anomaly) instead of the sum over the lags",
+                  FALSE),
     layout_columns(
       col_widths = c(6, 6),
       card(card_header("Temperature: growth response to an annual anomaly"),
@@ -1876,7 +1879,7 @@ server <- function(input, output, session) {
         # The deviations in the model's units (SD, or C and m).
         x_model <- x * sd / deviation_scale(s$model, s$country, v)
         q <- s$support[s$support$variable == v, ]
-        d <- response_curve(s$model, v, x_model, s$country, s$cap)
+        d <- response_curve(s$model, v, x_model, s$country, s$cap, isTRUE(input$response_first_lag))
         d$x <- x
         d$anomaly <- x * sd * to_display(v)
         d$in_support <- x_model >= q$q01 & x_model <= q$q99
@@ -1889,7 +1892,8 @@ server <- function(input, output, session) {
   responses_P <- responses("RR")
   shift_points <- function(v) {
     do.call(rbind, lapply(pairs(), function(s) {
-      d <- response_curve(s$model, v, shift(v) / deviation_scale(s$model, s$country, v), s$country, s$cap)
+      d <- response_curve(s$model, v, shift(v) / deviation_scale(s$model, s$country, v), s$country, s$cap,
+                          isTRUE(input$response_first_lag))
       d$anomaly <- shift(v) * to_display(v)
       d$setting <- s$label
       d
@@ -1944,7 +1948,7 @@ server <- function(input, output, session) {
       scale_fill_manual(values = colours(), guide = "none") +
       labs(x = paste0("Annual anomaly against the baseline (", unit, ")"),
            y = if (any(vapply(pairs(), function(s) (s$model$lags %||% 0L) > 0, TRUE))) {
-             "Effect on growth (pp; lags summed)"
+             if (isTRUE(input$response_first_lag)) "Effect on growth that year (pp; year-0 coefficient)" else "Effect on growth (pp; lags summed)"
            } else "Effect on growth that year (pp)",
            subtitle = paste0("Bands: 95% CI. Dashed: beyond the 1st-99th percentile of the ",
                              "deviations in the data. Points: the shift.")) +

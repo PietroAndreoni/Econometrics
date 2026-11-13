@@ -467,8 +467,11 @@ point_beta <- function(model) matrix(model$coef, nrow = 1, dimnames = list(NULL,
 
 # Effect on growth (log points) of a year at each deviation x (SD) of variable v,
 # whose value is the country's long-run climate plus the anomaly (x times the
-# deviation's scale), last year's at the long-run climate.
-response_curve <- function(model, v, x, country, cap = FALSE) {
+# deviation's scale), last year's at the long-run climate. With distributed
+# lags, the sum over the lags (the cumulative effect of the year), or with
+# `first_lag` the year-0 coefficients only (the effect in the year itself).
+response_curve <- function(model, v, x, country, cap = FALSE, first_lag = FALSE) {
+  lags <- if (isTRUE(first_lag)) 0L
   cap <- isTRUE(of_variable(cap, v))
   modifiers <- modifier_matrix(model, country, v, rep(0, length(x)), cur = x * deviation_scale(model, country, v))
   off <- deviation_offset(model, country, v)
@@ -477,13 +480,13 @@ response_curve <- function(model, v, x, country, cap = FALSE) {
   inputs <- if (isTRUE(model$both)) list(x = x, d = x) else x
   at_offset <- offset_inputs(inputs, off)
   if (!cap) {
-    G <- deviation_weights(model, v, plus_offset(inputs, off), modifiers)
-    if (off != 0) G <- G - deviation_weights(model, v, at_offset, modifiers)
+    G <- deviation_weights(model, v, plus_offset(inputs, off), modifiers, lags = lags)
+    if (off != 0) G <- G - deviation_weights(model, v, at_offset, modifiers, lags = lags)
     return(cbind(x = x, linear_combination(model, G)))
   }
   growth <- function(beta) {
-    out <- growth_matrix(beta, model, v, plus_offset(inputs, off), modifiers, TRUE)
-    if (off != 0) out <- out - growth_matrix(beta, model, v, at_offset, modifiers, TRUE)
+    out <- growth_matrix(beta, model, v, plus_offset(inputs, off), modifiers, TRUE, lags = lags)
+    if (off != 0) out <- out - growth_matrix(beta, model, v, at_offset, modifiers, TRUE, lags = lags)
     out
   }
   cbind(x = x, capped_summary(drop(growth(point_beta(model))), growth(coefficient_draws(model))))
