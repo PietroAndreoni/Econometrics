@@ -153,7 +153,11 @@ guide_ui <- function() {
                    "unchanged."),
         guide_item("Outputs:", "the warming paths, the world loss (or the world growth rate and its change), maps of",
                    "the loss by country in 2050 and 2100 (setting, forcing, T and / or P), the physical drivers (each",
-                   "country's change of T and P) and a table.")
+                   "country's change of T and P) and a table."),
+        guide_item("Countries (also on the Termination page):", "the global chart, its hover readout and the",
+                   "historical growth show one country, or the GDP-weighted aggregate of the selected countries (their",
+                   "SSP GDP, with its CI and noise bands), in place of the world; no new run needed. Maps and tables stay",
+                   "global.")
       )
     ),
     guide_section(

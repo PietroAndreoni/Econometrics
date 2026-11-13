@@ -259,12 +259,17 @@ world_growth <- function(world_gdp, loss) {
 # (build_models.R; NULL: none), resampled as `noise` (a value of
 # VARIABILITY_CHOICES) in `n_paths` paths.
 #
+# `region`: iso3 codes of the countries to aggregate (NULL: every country, the
+# world); the loss and growth are then those of the region's GDP, and the
+# coverage is the share of the region's SSP GDP the projected countries cover.
+#
 # `no_gains`: in the global aggregation a country's gain counts as its baseline
 # GDP (its effect capped at zero, year by year, at each draw and noise path);
 # the countries keep their GDP weights, and the country results stay as they
 # are.
 project_setting <- function(spec, scen_data, scenario, ssp = NULL, gmt = NULL,
-                            variability = NULL, noise = "none", n_paths = 500L, no_gains = FALSE) {
+                            variability = NULL, noise = "none", n_paths = 500L, no_gains = FALSE,
+                            region = NULL) {
   agg <- function(x) if (isTRUE(no_gains)) pmin(x, 0) else x
   model <- spec$model
   ssp <- ssp %||% scen_data$ssp$of_scenario[[scenario]]
@@ -302,8 +307,11 @@ project_setting <- function(spec, scen_data, scenario, ssp = NULL, gmt = NULL,
   # With noise, the countries with the whole historical climate.
   with_noise <- noise != "none" && !is.null(variability)
   if (with_noise) countries <- dplyr::filter(countries, GID_0 %in% rownames(variability$TM))
+  if (!is.null(region)) countries <- dplyr::filter(countries, GID_0 %in% region)
+  if (!nrow(countries)) stop("None of the selected countries can be projected with this setting.")
   weights <- gdp_wide[countries$GID_0, as.character(years), drop = FALSE]
-  coverage <- sum(weights[, 1]) / sum(gdp_wide[, 1], na.rm = TRUE)
+  universe <- if (is.null(region)) rownames(gdp_wide) else intersect(region, rownames(gdp_wide))
+  coverage <- sum(weights[, 1]) / sum(gdp_wide[universe, 1], na.rm = TRUE)
   # The SSP's GDP of the countries (no climate change), for the growth rates.
   world_gdp <- colSums(weights)
   weights <- sweep(weights, 2, colSums(weights), "/")

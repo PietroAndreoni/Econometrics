@@ -59,33 +59,42 @@ SCEN <- readRDS(SCENARIOS_FILE)
 # estimation horizon's first year on; its median, interquartile range and
 # range over those years.
 HISTORY_FROM <- 1971L
-PWT_WORLD_GROWTH <- local({
+PWT_GDP <- local({
   file <- file.path(APP_DIR, "..", "..", "data", "pwt110.xlsx")
   if (!file.exists(file)) return(NULL)
   d <- readxl::read_excel(file, sheet = "Data")
   d <- data.frame(GID_0 = d$countrycode, year = as.integer(d$year), gdp = suppressWarnings(as.numeric(d$rgdpna)))
   d <- d[is.finite(d$gdp) & d$gdp > 0, ]
   key <- paste(d$GID_0, d$year)
-  before <- d$gdp[match(paste(d$GID_0, d$year - 1L), key)]
-  ok <- is.finite(before)
-  g <- tapply(d$gdp[ok], d$year[ok], sum) / tapply(before[ok], d$year[ok], sum)
-  out <- data.frame(year = as.integer(names(g)), growth = 100 * (as.numeric(g) - 1),
-                    countries = as.integer(table(d$year[ok])[names(g)]))
-  out[out$year >= HISTORY_FROM, ]
+  d$before <- d$gdp[match(paste(d$GID_0, d$year - 1L), key)]
+  d[is.finite(d$before), ]
 })
-PWT_GROWTH_SUMMARY <- if (!is.null(PWT_WORLD_GROWTH)) {
-  q <- stats::quantile(PWT_WORLD_GROWTH$growth, c(0, 0.25, 0.5, 0.75, 1), names = FALSE)
-  data.frame(min = q[1], q25 = q[2], median = q[3], q75 = q[4], max = q[5])
+# Historical growth (% a year, from HISTORY_FROM) of the summed GDP of the
+# countries `region` (iso3; NULL: every country, the world) with GDP in both
+# years, with its summary (range, quartiles, median); NULL without PWT or
+# without data for the region.
+pwt_growth <- function(region = NULL) {
+  if (is.null(PWT_GDP)) return(NULL)
+  d <- if (is.null(region)) PWT_GDP else PWT_GDP[PWT_GDP$GID_0 %in% region, ]
+  if (!nrow(d)) return(NULL)
+  g <- tapply(d$gdp, d$year, sum) / tapply(d$before, d$year, sum)
+  out <- data.frame(year = as.integer(names(g)), growth = 100 * (as.numeric(g) - 1),
+                    countries = as.integer(table(d$year)[names(g)]))
+  out <- out[out$year >= HISTORY_FROM, ]
+  if (!nrow(out)) return(NULL)
+  q <- stats::quantile(out$growth, c(0, 0.25, 0.5, 0.75, 1), names = FALSE)
+  list(series = out, summary = data.frame(min = q[1], q25 = q[2], median = q[3], q75 = q[4], max = q[5]))
 }
-# The layers of the historical growth on a growth chart: the annual series up
-# to its last year (left) and, right of the projections, its range (thin),
-# interquartile range (thick) and median (point), labelled.
-history_growth_layers <- function() {
-  if (is.null(PWT_WORLD_GROWTH)) return(NULL)
-  s <- PWT_GROWTH_SUMMARY
+PWT_WORLD <- pwt_growth()
+# The layers of the historical growth `h` (pwt_growth()) on a growth chart: the
+# annual series up to its last year (left) and, right of the projections, its
+# range (thin), interquartile range (thick) and median (point), labelled.
+history_growth_layers <- function(h = PWT_WORLD) {
+  if (is.null(h)) return(NULL)
+  s <- h$summary
   x <- PROJECTION_TO + 8
   list(
-    geom_line(data = PWT_WORLD_GROWTH, mapping = aes(year, growth), inherit.aes = FALSE,
+    geom_line(data = h$series, mapping = aes(year, growth), inherit.aes = FALSE,
               colour = INK_MUTED, linewidth = 0.6),
     geom_segment(data = s, mapping = aes(x = x, xend = x, y = min, yend = max), inherit.aes = FALSE,
                  colour = INK_MUTED, linewidth = 0.5),
@@ -97,12 +106,36 @@ history_growth_layers <- function() {
               inherit.aes = FALSE, colour = INK_MUTED, size = 3.2, hjust = 0)
   )
 }
-history_growth_note <- function() {
-  if (is.null(PWT_WORLD_GROWTH)) return("")
-  s <- PWT_GROWTH_SUMMARY
-  sprintf(paste0("; grey line: historical growth of world GDP in PWT 11.0 (%d-%d); right: its median %.1f%%, ",
+history_growth_note <- function(h = PWT_WORLD, name = "world") {
+  if (is.null(h)) return(paste("; no historical growth of", name, "GDP in PWT 11.0"))
+  s <- h$summary
+  sprintf(paste0("; grey line: historical growth of %s GDP in PWT 11.0 (%d-%d); right: its median %.1f%%, ",
                  "interquartile range %.1f to %.1f%% (thick) and range %.1f to %.1f%% (thin)"),
-          min(PWT_WORLD_GROWTH$year), max(PWT_WORLD_GROWTH$year), s$median, s$q25, s$q75, s$min, s$max)
+          name, min(h$series$year), max(h$series$year), s$median, s$q25, s$q75, s$min, s$max)
+}
+# The countries offered for the regional aggregates of the global charts: those
+# with SSP GDP, named as in the map borders (else by iso3), in name order.
+COUNTRY_CHOICES <- local({
+  iso <- sort(unique(SCEN$ssp$gdp$iso3))
+  name <- SCEN$world$name[match(iso, SCEN$world$iso3)]
+  name[is.na(name)] <- iso[is.na(name)]
+  o <- order(name)
+  stats::setNames(iso[o], paste0(name[o], " (", iso[o], ")"))
+})
+COUNTRY_NAMES <- stats::setNames(sub(" \\([A-Z]{3}\\)$", "", names(COUNTRY_CHOICES)), COUNTRY_CHOICES)
+# The name of region `region` (iso3; NULL: the world) on the charts.
+region_name <- function(region) {
+  if (is.null(region)) return("world")
+  if (length(region) <= 3) return(paste(COUNTRY_NAMES[region], collapse = " + "))
+  sprintf("%d selected countries'", length(region))
+}
+# The panels of the global charts: one y axis for all, or each its own.
+COMMON_Y_LABEL <- "Global chart: common y axis across the panels"
+y_scales <- function(common) if (isTRUE(common)) "fixed" else "free_y"
+REGION_LABEL <- "Global chart: countries (empty: the world; several: their aggregate GDP)"
+region_input <- function(id) {
+  selectizeInput(id, REGION_LABEL, COUNTRY_CHOICES, multiple = TRUE,
+                 options = list(placeholder = "World", plugins = list("remove_button")))
 }
 # The maps draw the sf borders of SCEN$world.
 loadNamespace("sf")
@@ -1487,8 +1520,10 @@ ui <- page_navbar(
           uiOutput("scenario_status")),
       radioButtons("scen_gmt_measure", "Warming chart", WARMING_CHOICES, selected = "level", inline = TRUE),
       radioButtons("global_measure", "Global chart", MEASURE_CHOICES, selected = "loss", inline = TRUE),
+      region_input("scen_region"),
+      checkboxInput("scen_common_y", COMMON_Y_LABEL, value = FALSE),
       conditionalPanel("input.global_measure == 'growth'",
-        checkboxInput("scen_history", "Show the historical growth of world GDP (PWT 11.0, 1971-2023: series, median, IQR, range)", value = TRUE)),
+        checkboxInput("scen_history", "Show the historical growth of world GDP, or of the selected countries' (PWT 11.0, 1971-2023: series, median, IQR, range)", value = TRUE)),
       layout_columns(
         col_widths = c(4, 8),
         plotOutput("gmt_plot", height = 380),
@@ -1571,8 +1606,10 @@ ui <- page_navbar(
           uiOutput("ts_status")),
       radioButtons("ts_gmt_measure", "Warming chart", WARMING_CHOICES, selected = "level", inline = TRUE),
       radioButtons("ts_measure", "Global chart", MEASURE_CHOICES, selected = "loss", inline = TRUE),
+      region_input("ts_region"),
+      checkboxInput("ts_common_y", COMMON_Y_LABEL, value = FALSE),
       conditionalPanel("input.ts_measure == 'growth'",
-        checkboxInput("ts_history", "Show the historical growth of world GDP (PWT 11.0, 1971-2023: series, median, IQR, range)", value = TRUE)),
+        checkboxInput("ts_history", "Show the historical growth of world GDP, or of the selected countries' (PWT 11.0, 1971-2023: series, median, IQR, range)", value = TRUE)),
       layout_columns(
         col_widths = c(3, 3, 3, 3),
         selectInput("ts_ref", "Exceedances: reference climate", EXCEEDANCE_REFERENCES, selected = "20"),
@@ -2267,10 +2304,27 @@ server <- function(input, output, session) {
     }
     d
   }
-  measure_axis <- function(measure, sp) {
-    switch(measure, growth = "Growth of world GDP (% a year)",
-           growth_change = "Change of world GDP growth by climate change (pp a year)",
-           paste("World", quantity_of(sp), "against no climate change (%)"))
+  measure_axis <- function(measure, sp, region = NULL) {
+    name <- region_name(region)
+    switch(measure, growth = sprintf("Growth of %s GDP (%% a year)", name),
+           growth_change = sprintf("Change of %s GDP growth by climate change (pp a year)", name),
+           paste(first_upper(name), quantity_of(sp), "against no climate change (%)"))
+  }
+  # The countries of a global chart (input `id`): NULL for the world.
+  region_of <- function(id) {
+    x <- input[[id]]
+    if (length(x)) sort(unique(x)) else NULL
+  }
+  # The history layers and note of a growth chart of `region`.
+  region_history <- function(region) if (is.null(region)) PWT_WORLD else pwt_growth(region)
+  # "; aggregate of 3 of the 4 selected countries (98% of their GDP)" when a
+  # region is chosen: the countries the setting projects, and their GDP share.
+  region_note <- function(region, results) {
+    if (is.null(region)) return("")
+    n <- min(vapply(results, function(r) r$n, 0))
+    coverage <- min(vapply(results, function(r) r$coverage, 0))
+    sprintf("; aggregate of %d of the %d selected countries (at least %.0f%% of their SSP GDP in %d)",
+            n, length(region), 100 * coverage, PROJECTION_FROM)
   }
   growth_allowed <- function(sp) !any(vapply(sp, function(s) identical(s$model$outcome, "capital"), TRUE))
   # Growth of world GDP of global series `g` of setting n of `sp` for the
@@ -2291,17 +2345,20 @@ server <- function(input, output, session) {
     else sprintf("%s, %d noise paths", tolower(names(VARIABILITY_CHOICES)[VARIABILITY_CHOICES == noise$type]), noise$n)
   }
   # A setting's projection with the natural variability of its panel.
-  project_with <- function(s, scenario, ssp, noise, gmt = NULL, no_gains = FALSE) {
+  project_with <- function(s, scenario, ssp, noise, gmt = NULL, no_gains = FALSE, region = NULL) {
     m <- s$model
     variability <- EXPLORER$variability[[paste(m$gdp, m$climate, m$weight %||% "population", sep = " | ")]]
-    project_setting(s, SCEN, scenario, ssp, gmt = gmt, variability = variability, noise = noise$type,
-                    n_paths = noise$n, no_gains = no_gains)
+    out <- tryCatch(project_setting(s, SCEN, scenario, ssp, gmt = gmt, variability = variability, noise = noise$type,
+                                    n_paths = noise$n, no_gains = no_gains, region = region),
+                    error = function(e) if (is.null(region)) stop(e) else NULL)
+    validate(need(!is.null(out), paste0("None of the selected countries can be projected with setting ", s$label, ".")))
+    out
   }
-  projection_of <- function(s, scenario, ssp, noise, no_gains = FALSE) {
+  projection_of <- function(s, scenario, ssp, noise, no_gains = FALSE, region = NULL) {
     key <- paste(s$model$key, s$sd_mode, s$clim_mode, paste(s$cap, collapse = "/"), scenario, ssp, noise_key(noise),
-                 if (no_gains) "no gains", sep = " | ")
+                 if (no_gains) "no gains", if (!is.null(region)) paste(region, collapse = "+"), sep = " | ")
     if (is.null(projection_cache[[key]])) {
-      projection_cache[[key]] <- project_with(s, scenario, ssp, noise, no_gains = no_gains)
+      projection_cache[[key]] <- project_with(s, scenario, ssp, noise, no_gains = no_gains, region = region)
     }
     projection_cache[[key]]
   }
@@ -2342,22 +2399,31 @@ server <- function(input, output, session) {
   })
   as_run_setting <- function(x) factor(x, levels = names(run_colours()))
   # Every setting and scenario of the last run: list of (setting, scenario, result).
-  projections <- reactive({
+  # (`region`: the countries aggregated, NULL: the world.)
+  projections_for <- function(region = NULL) {
     r <- run()
     jobs <- expand.grid(i = seq_along(r$specs), scenario = r$scenarios, stringsAsFactors = FALSE)
-    withProgress(message = "Projecting the scenarios", value = 0, {
+    withProgress(message = if (is.null(region)) "Projecting the scenarios" else "Projecting the selected countries",
+                 value = 0, {
       lapply(seq_len(nrow(jobs)), function(j) {
         s <- r$specs[[jobs$i[j]]]
         scenario <- jobs$scenario[j]
         incProgress(1 / nrow(jobs), detail = paste(s$label, "-", scenario_label(scenario, r$economy)))
         list(setting = s$label, n = s$n, scenario = scenario,
              label = scenario_label(scenario, r$economy),
-             result = projection_of(s, scenario, economy_of(scenario, r$economy), r$noise, r$no_gains))
+             result = projection_of(s, scenario, economy_of(scenario, r$economy), r$noise, r$no_gains, region))
       })
     })
+  }
+  projections <- reactive(projections_for())
+  # The global chart's: the world's, or the selected countries' aggregate.
+  scen_region <- reactive(region_of("scen_region")) |> debounce(600)
+  global_projections <- reactive({
+    region <- scen_region()
+    if (is.null(region)) projections() else projections_for(region)
   })
   global_losses <- reactive({
-    do.call(rbind, lapply(projections(), function(p) {
+    do.call(rbind, lapply(global_projections(), function(p) {
       cbind(setting = p$setting, scenario = p$scenario, label = p$label, p$result$global)
     }))
   })
@@ -2406,7 +2472,7 @@ server <- function(input, output, session) {
   output$gmt_plot <- renderPlot(gmt_plot(), bg = SURFACE)
 
   global_plot <- function() {
-    validate(need(input$run_scenarios > 0, NOT_RUN))
+    validate(need(scen_runs() > 0, NOT_RUN))
     measure <- input$global_measure %||% "loss"
     validate(need(measure == "loss" || growth_allowed(run()$specs), GROWTH_NOTE))
     d <- as_measure(global_losses(), measure)
@@ -2422,19 +2488,21 @@ server <- function(input, output, session) {
       geom_ribbon(aes(ymin = low, ymax = high), alpha = 0.10, colour = NA) +
       noise_lines(d) +
       baseline +
-      (if (measure == "growth" && isTRUE(input$scen_history)) history_growth_layers()) +
+      (if (measure == "growth" && isTRUE(input$scen_history)) history_growth_layers(region_history(scen_region()))) +
       geom_line(linewidth = 0.9) +
-      facet_wrap(~setting, ncol = min(3, nlevels(d$setting)), scales = "free_y",
+      facet_wrap(~setting, ncol = min(3, nlevels(d$setting)), scales = y_scales(input$scen_common_y),
                  labeller = labeller(setting = function(x) wrap_label(x, 50))) +
       scale_colour_manual(values = SCENARIO_COLOURS, labels = labels, name = NULL,
                           guide = guide_legend(direction = "horizontal", nrow = 1)) +
       scale_fill_manual(values = SCENARIO_COLOURS, guide = "none") +
-      labs(x = NULL, y = measure_axis(measure, run()$specs),
+      labs(x = NULL, y = measure_axis(measure, run()$specs, scen_region()),
            subtitle = wrap_label(paste0(
              "Best guess (median warming, CMIP6-median pattern, estimated coefficients",
              if (run()$noise$type != "none") ", mean over the noise paths", "); ",
              band_label(run()$noise),
-             if (measure == "growth") paste0("; dashed: the SSP's growth without climate change", if (isTRUE(input$scen_history)) history_growth_note())), 110)) +
+             region_note(scen_region(), lapply(global_projections(), `[[`, "result")),
+             if (measure == "growth") paste0("; dashed: the SSP's growth without climate change",
+                                             if (isTRUE(input$scen_history)) history_growth_note(region_history(scen_region()), region_name(scen_region())))), 110)) +
       theme_explorer() +
       theme(strip.text = element_text(colour = INK_MUTED, size = 9.5, hjust = 0))
   }
@@ -2442,7 +2510,7 @@ server <- function(input, output, session) {
 
   output$readout_global <- renderUI({
     hover <- input$hover_global
-    if (input$run_scenarios == 0) return(NULL)
+    if (scen_runs() == 0) return(NULL)
     if (is.null(hover)) return(helpText("Hover over the global chart to read the values."))
     measure <- input$global_measure %||% "loss"
     if (measure != "loss" && !growth_allowed(run()$specs)) return(NULL)
@@ -2758,12 +2826,14 @@ server <- function(input, output, session) {
   # Every setting and path of the last run: list of (setting, path, result).
   # Every alternative, setting and path of the last run: list of (variant,
   # setting, path, result).
-  ts_projections_all <- reactive({
+  # (`region`: the countries aggregated, NULL: the world.)
+  ts_projections_for <- function(region = NULL) {
     r <- ts_run()
     paths <- lapply(r$variants, function(v) ts_paths_of(ts_with(r, v)))
     jobs <- expand.grid(i = seq_along(r$specs), path = names(paths[[1]]), k = seq_along(r$variants),
                         stringsAsFactors = FALSE)
-    withProgress(message = "Projecting the termination scenarios", value = 0, {
+    withProgress(message = if (is.null(region)) "Projecting the termination scenarios" else "Projecting the selected countries",
+                 value = 0, {
       lapply(seq_len(nrow(jobs)), function(j) {
         s <- r$specs[[jobs$i[j]]]
         v <- r$variants[[jobs$k[j]]]
@@ -2771,21 +2841,29 @@ server <- function(input, output, session) {
         path <- jobs$path[j]
         incProgress(1 / nrow(jobs), detail = paste(s$label, "-", v$label, "-", path))
         key <- paste(s$model$key, s$sd_mode, s$clim_mode, paste(s$cap, collapse = "/"), v$forcing, ssp, r$held, v$tau, path,
-                     noise_key(r$noise), if (r$no_gains) "no gains", sep = " | ")
+                     noise_key(r$noise), if (r$no_gains) "no gains", if (!is.null(region)) paste(region, collapse = "+"),
+                     sep = " | ")
         if (is.null(projection_cache[[key]])) {
           projection_cache[[key]] <- project_with(s, v$forcing, ssp, r$noise, gmt = paths[[jobs$k[j]]][[path]],
-                                                  no_gains = r$no_gains)
+                                                  no_gains = r$no_gains, region = region)
         }
         list(variant = v$label, setting = s$label, n = s$n, path = path, result = projection_cache[[key]])
       })
     })
-  })
+  }
+  ts_projections_all <- reactive(ts_projections_for())
   # Those of the chosen alternative (map, table).
   ts_projections <- reactive({
     Filter(function(p) p$variant == ts_one()$variant, ts_projections_all())
   })
+  # The global chart's: the world's, or the selected countries' aggregate.
+  ts_region <- reactive(region_of("ts_region")) |> debounce(600)
+  ts_global_projections <- reactive({
+    region <- ts_region()
+    if (is.null(region)) ts_projections_all() else ts_projections_for(region)
+  })
   ts_global <- reactive({
-    do.call(rbind, lapply(ts_projections_all(), function(p) {
+    do.call(rbind, lapply(ts_global_projections(), function(p) {
       cbind(variant = p$variant, setting = p$setting, path = p$path, p$result$global)
     }))
   })
@@ -2961,7 +3039,7 @@ server <- function(input, output, session) {
   })
 
   ts_global_plot <- function() {
-    validate(need(input$run_termination > 0, TS_NOT_RUN))
+    validate(need(ts_runs() > 0, TS_NOT_RUN))
     sp <- ts_run()$specs
     measure <- input$ts_measure %||% "loss"
     validate(need(measure == "loss" || growth_allowed(sp), GROWTH_NOTE))
@@ -2981,25 +3059,27 @@ server <- function(input, output, session) {
       geom_ribbon(aes(ymin = low, ymax = high), alpha = 0.06, colour = NA) +
       noise_lines(d) +
       baseline +
-      (if (measure == "growth" && isTRUE(input$ts_history)) history_growth_layers()) +
+      (if (measure == "growth" && isTRUE(input$ts_history)) history_growth_layers(region_history(ts_region()))) +
       geom_line(aes(linetype = path == "no geoengineering"), linewidth = 0.9) +
       (if (many) {
         # Side by side: the alternatives in columns, the settings in rows (one y
         # scale per row).
-        facet_grid(setting ~ variant, scales = "free_y",
+        facet_grid(setting ~ variant, scales = y_scales(input$ts_common_y),
                    labeller = labeller(setting = function(x) wrap_label(x, 30), variant = function(x) wrap_label(x, 40)))
       } else {
-        facet_wrap(~setting, ncol = min(3, nlevels(d$setting)), scales = "free_y",
+        facet_wrap(~setting, ncol = min(3, nlevels(d$setting)), scales = y_scales(input$ts_common_y),
                    labeller = labeller(setting = function(x) wrap_label(x, 50)))
       }) +
       scale_colour_manual(values = ts_colours(), name = NULL, guide = guide_legend(ncol = 3)) +
       scale_fill_manual(values = ts_colours(), guide = "none") +
       scale_linetype_manual(values = c(`FALSE` = "solid", `TRUE` = "22"), guide = "none") +
-      labs(x = NULL, y = measure_axis(measure, sp),
-           subtitle = wrap_label(sprintf("%s; %s%s%s", if (many) paste("Held at", sprintf("%.1f C", ts_run()$held)) else ts_run()$variants[[1]]$label,
+      labs(x = NULL, y = measure_axis(measure, sp, ts_region()),
+           subtitle = wrap_label(sprintf("%s; %s%s%s%s", if (many) paste("Held at", sprintf("%.1f C", ts_run()$held)) else ts_run()$variants[[1]]$label,
                                          if (ts_run()$noise$type != "none") "mean over the noise paths; " else "",
                                          band_label(ts_run()$noise),
-                                         if (measure == "growth") paste0("; grey dotted: the SSP's growth without climate change", if (isTRUE(input$ts_history)) history_growth_note()) else ""),
+                                         region_note(ts_region(), lapply(ts_global_projections(), `[[`, "result")),
+                                         if (measure == "growth") paste0("; grey dotted: the SSP's growth without climate change",
+                                                                         if (isTRUE(input$ts_history)) history_growth_note(region_history(ts_region()), region_name(ts_region()))) else ""),
                                  110)) +
       theme_explorer() +
       theme(strip.text = element_text(colour = INK_MUTED, size = 9.5, hjust = 0),
@@ -3008,7 +3088,7 @@ server <- function(input, output, session) {
   output$ts_global_plot <- renderPlot(ts_global_plot(), bg = SURFACE)
 
   output$readout_ts <- renderUI({
-    if (input$run_termination == 0) return(NULL)
+    if (ts_runs() == 0) return(NULL)
     hover <- input$hover_ts
     if (is.null(hover)) return(helpText("Hover over the global chart to read the values."))
     measure <- input$ts_measure %||% "loss"
