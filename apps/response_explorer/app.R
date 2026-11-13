@@ -695,8 +695,11 @@ spec_definitions <- function(m) {
   if (!identical(m$convergence %||% "none", "none")) {
     growth <- m$convergence %in% c("growth1", "growth2")
     out <- c(out, sprintf(paste0(
-      "Convergence: \\(\\rho\\) on %s (%s, the GDP source's), a control whatever the interactions, not in the ",
-      "responses, paths or scenarios; %s %s"),
+      "Convergence: \\(\\rho\\) on %s (%s, the GDP source's), a control whatever the interactions; %s %s ",
+      "In the GDP paths and scenarios the climate's effect on GDP feeds back through it: each year adds ",
+      "\\(\\rho\\) times the change of the control by the effects of the years before (none before the first ",
+      "year; with the 5-year mean, a flat baseline; not for capital), at each draw of \\(\\rho\\) jointly with the ",
+      "other coefficients. The response curves are the year's own effect, without it."),
       switch(m$convergence, lag1 = "\\(\\ln \\mathrm{GDPpc}_{i,t-1}\\)",
              mean5 = "\\(\\ln\\big(\\frac{1}{5}\\sum_{k=1}^{5} \\mathrm{GDPpc}_{i,t-k}\\big)\\)",
              growth1 = "\\(\\Delta \\ln \\mathrm{GDPpc}_{i,t-1}\\)",
@@ -713,6 +716,26 @@ spec_definitions <- function(m) {
         else "Without country effects, it compares income levels across countries."
       } else paste0("With country effects it is a within-country ", if (growth) "coefficient" else "rate",
                     ", with a Nickell bias of order 1/T (T about 50 years).")))
+    rho <- m$convergence_coef[["estimate"]] %||% NA
+    if (!is.finite(rho)) {
+      out <- c(out, paste0("Here the control has no coefficient (collinear with the other terms, e.g. the trailing ",
+                           "income's level term): no feedback in the paths and scenarios."))
+    } else if (identical(m$outcome %||% "log", "capital")) {
+      out <- c(out, "With capital as the outcome there is no feedback (its control is GDP's).")
+    } else if (rho > 0 && m$convergence %in% c("lag1", "mean5") && !level_outcome(m)) {
+      out <- c(out, sprintf(paste0(
+        "Here \\(\\rho = %+.3f > 0\\): divergence, so in the paths and scenarios a loss compounds (by about ",
+        "%.0f%% of itself a year) and long horizons explode."), rho, 100 * rho))
+    }
+    if (isTRUE(m$convergence_iv)) {
+      out <- c(out, paste0(
+        "Instrumented (2SLS) with its value one year earlier, ", CONVERGENCE_IV_SHORT[[m$convergence]],
+        ", against the Nickell bias (as Harding et al. 2025 and Bond et al. 2010)",
+        if (is.finite(m$convergence_coef[["first_stage_f"]] %||% NA)) {
+          sprintf("; first-stage clustered Wald F = %.1f", m$convergence_coef[["first_stage_f"]])
+        }, ". With unit effects the instrument is not strictly exogenous either (its bias is smaller, of the ",
+        "order of the shocks it shares with the unit's mean)."))
+    }
   }
   for (ev_v in c("TM", "RR")) {
     if (!exposure_on(m$exposure, ev_v)) next
@@ -859,6 +882,12 @@ common_ui <- function(ns) {
     ),
     radioButtons(ns("convergence"), "Convergence control (on its own, whatever the interactions)",
                  CONVERGENCE_CHOICES, selected = "none"),
+    conditionalPanel(
+      "input.convergence != 'none'", ns = ns,
+      checkboxInput(ns("convergence_iv"), paste("Instrument it with its value one year earlier (2SLS; for last",
+                                                "year's log GDP: log GDP two years before, as Harding et al. 2025)"),
+                    value = FALSE)
+    ),
     checkboxGroupInput(ns("controls"), "Controls", CONTROL_CHOICES, selected = CONTROL_CHOICES, inline = TRUE),
     checkboxInput(ns("drop_outliers"), paste("Drop the growth outliers whose cause is not weather (annotated",
                                              "country-years in the tails of the GDP source's growth reversals",
@@ -1128,6 +1157,7 @@ setting_server <- function(id, n, default_country, first = NULL) {
                                   baseline = input$baseline, style = input$style,
                                   weight = input$weight, units_T = input$units_T, units_P = input$units_P, fe = input$fe,
                                   effects = input$effects, convergence = input$convergence,
+                                  convergence_iv = isTRUE(input$convergence_iv),
                                   quad_T = input$quad_T, quad_P = input$quad_P,
                                   form_T = input$form_T, form_P = input$form_P,
                                   symmetric_T = input$symmetric_T, symmetric_P = input$symmetric_P,
@@ -1171,6 +1201,7 @@ setting_server <- function(id, n, default_country, first = NULL) {
       # No unit trends without unit effects.
       fe <- if (effects == "year") "unit" else input$fe %||% "quadratic"
       convergence <- input$convergence %||% "none"
+      convergence_iv <- convergence != "none" && isTRUE(input$convergence_iv)
       quad <- c(TM = input$quad_T %||% "none", RR = input$quad_P %||% "none")
       u <- units()
       trailing <- input$baseline %in% TRAILING_BASELINES
@@ -1245,7 +1276,8 @@ setting_server <- function(id, n, default_country, first = NULL) {
                      if (!is.null(exposure)) paste0(" · ", exposure_label(exposure_options(exposure))),
                      if (effects != "both") paste0(" · ", EFFECTS_SHORT[[effects]]),
                      if (effects != "year" && fe != "quadratic") paste0(" · ", FE_SHORT[[fe]]),
-                     if (convergence != "none") paste0(" · convergence: ", CONVERGENCE_SHORT[[convergence]]),
+                     if (convergence != "none") paste0(" · convergence: ", CONVERGENCE_SHORT[[convergence]],
+                                                       if (convergence_iv) " (IV)"),
                      if (any(quad != "none")) paste0(" · quadratic control: ", paste(QUAD_SHORT[quad[quad != "none"]],
                                                     c("T", "P")[quad != "none"], collapse = ", ")),
                      if (moderators == "trailing") " · trailing characteristics",
@@ -1266,7 +1298,8 @@ setting_server <- function(id, n, default_country, first = NULL) {
                                        baseline = input$baseline, exposure = exposure,
                                        style = input$style %||% "simple",
                                        form = form, symmetric = symmetric, lags = lags, inter = inter, shape = shape, fe = fe,
-                                       effects = effects, convergence = convergence, quad = quad,
+                                       effects = effects, convergence = convergence,
+                                       convergence_iv = convergence_iv, quad = quad,
                                        moderators = moderators, share_trailing = share_trailing,
                                        outcome = outcome, income_form = income$income_form, xi = income$xi,
                                        controls = controls, outliers = outliers, low_threshold = low_threshold),
@@ -3258,8 +3291,12 @@ server <- function(input, output, session) {
         paste(if (effects == "unit") "unit effects only (no year effects)" else "year and unit effects", "with", FE_SHORT[[m$fe]])
       }
       convergence <- if (!is.null(m$convergence_coef)) {
-        sprintf(" Convergence control, %s: %+.4f (SE %.4f, p = %.3g).", CONVERGENCE_SHORT[[m$convergence]],
-                m$convergence_coef[["estimate"]], m$convergence_coef[["se"]], m$convergence_coef[["p"]])
+        paste0(sprintf(" Convergence control, %s%s: %+.4f (SE %.4f, p = %.3g)", CONVERGENCE_SHORT[[m$convergence]],
+                       if (isTRUE(m$convergence_iv)) paste0(", instrumented with ", CONVERGENCE_IV_SHORT[[m$convergence]]) else "",
+                       m$convergence_coef[["estimate"]], m$convergence_coef[["se"]], m$convergence_coef[["p"]]),
+               if (is.finite(m$convergence_coef[["first_stage_f"]] %||% NA)) {
+                 sprintf(", first-stage F %.1f", m$convergence_coef[["first_stage_f"]])
+               }, ".")
       } else ""
       if (!is.null(m$quad_coef)) {
         q <- m$quad_coef
@@ -3286,7 +3323,8 @@ server <- function(input, output, session) {
         "quadratic trend, fitted from 1960), except the innovations of the NRK filter and the",
         "deviations of symmetric models and of models without unit effects, which enter as they are;",
         "optionally a convergence control (last year's or the 5 years' log GDP per capita, or its",
-        "growth last year or two years before, not in the responses or projections); the ticked controls (by default all: conflict, minor",
+        "growth last year or two years before, not in the responses or projections; optionally instrumented",
+        "by 2SLS with its value one year earlier); the ticked controls (by default all: conflict, minor",
         "and war, and the post-Soviet, with Albania, and post-Yugoslav collapse years); errors",
         "clustered by country. Growth outliers: by default those whose annotated cause does not",
         "involve weather among the lowest and highest 5% of the growth reversals of the GDP source's",

@@ -191,8 +191,12 @@ project_country_noise <- function(model, country, anomalies, noise, sd_mode, cli
     alone <- growth(v, noise[[v]])
     out[[v]] <- list(point = with_signal$point - alone$point, draws = with_signal$draws - alone$draws)
   }
-  list(point = accumulated(model, out$TM$point + out$RR$point), point_T = accumulated(model, out$TM$point),
-       point_P = accumulated(model, out$RR$point), draws = accumulated(model, out$TM$draws + out$RR$draws))
+  # (The convergence control: rho at the estimate, and the draw paired with
+  # each path.)
+  rho <- convergence_rho(model)
+  rho_draws <- convergence_draws(model, n)
+  list(point = accumulated(model, out$TM$point + out$RR$point, rho), point_T = accumulated(model, out$TM$point, rho),
+       point_P = accumulated(model, out$RR$point, rho), draws = accumulated(model, out$TM$draws + out$RR$draws, rho_draws))
 }
 
 # Cumulative effect on log GDP of years PROJECTION_FROM..PROJECTION_TO of the
@@ -235,8 +239,11 @@ project_country <- function(model, country, anomalies, sd_mode, clim_mode, cap, 
     growth_point[[v]] <- drop(growth(point_beta(model)))
     growth_draws <- growth_draws + growth(draws)
   }
-  list(point = accumulated(model, growth_point$TM + growth_point$RR), point_T = accumulated(model, growth_point$TM),
-       point_P = accumulated(model, growth_point$RR), draws = accumulated(model, growth_draws))
+  # (The convergence control: rho at the estimate, and at each draw.)
+  rho <- convergence_rho(model)
+  rho_draws <- convergence_draws(model, nrow(draws))
+  list(point = accumulated(model, growth_point$TM + growth_point$RR, rho), point_T = accumulated(model, growth_point$TM, rho),
+       point_P = accumulated(model, growth_point$RR, rho), draws = accumulated(model, growth_draws, rho_draws))
 }
 
 # Growth (% a year; NA in the first year) of world GDP `world_gdp` (by year)

@@ -47,9 +47,87 @@ deviation_offset <- function(model, country, v) {
 }
 # The effects of the years so far on log GDP: the sum of the effects on growth
 # (by column of a matrix), or with a level outcome the effects themselves.
-accumulated <- function(model, x) {
-  if (level_outcome(model)) return(x)
-  if (is.matrix(x)) matrix(apply(x, 2, cumsum), nrow = nrow(x), dimnames = dimnames(x)) else cumsum(x)
+#
+# With a convergence control C_t (fit.R) and its coefficient `rho` (one value,
+# or one per column: convergence_rho(), convergence_draws()), the outcome also
+# responds to the change of C_t by the effects of the years before: year t
+# adds rho times that change to the direct effect e_t, L_t the effect on log
+# GDP so far (zero before the first year):
+#   lag1     L_{t-1}
+#   mean5    log of the mean of exp(L) over t-5..t-1 (the log mean GDP of the
+#            5 years before, with a flat baseline)
+#   growth1  L_{t-1} - L_{t-2}  (growth last year)
+#   growth2  L_{t-2} - L_{t-3}  (growth from t-3 to t-2)
+# so that L_t = L_{t-1} + e_t + rho C_t (growth outcomes) or e_t + rho C_t
+# (a level outcome).
+accumulated <- function(model, x, rho = NULL) {
+  if (is.null(rho) || all(rho == 0)) {
+    if (level_outcome(model)) return(x)
+    return(if (is.matrix(x)) matrix(apply(x, 2, cumsum), nrow = nrow(x), dimnames = dimnames(x)) else cumsum(x))
+  }
+  X <- as.matrix(x)
+  n <- nrow(X)
+  m <- ncol(X)
+  rho <- rep_len(rho, m)
+  level <- level_outcome(model)
+  L <- matrix(0, nrow = n, ncol = m)
+  before <- function(t, k) if (t - k >= 1) L[t - k, ] else rep(0, m)
+  for (t in seq_len(n)) {
+    C <- switch(model$convergence,
+                lag1 = before(t, 1),
+                mean5 = log(rowMeans(exp(vapply(1:5, function(k) before(t, k), numeric(m))))),
+                growth1 = before(t, 1) - before(t, 2),
+                growth2 = before(t, 2) - before(t, 3),
+                stop("Unknown convergence control ", model$convergence))
+    L[t, ] <- X[t, ] + rho * C + if (level) 0 else before(t, 1)
+  }
+  if (is.matrix(x)) {
+    dimnames(L) <- dimnames(x)
+    L
+  } else drop(L)
+}
+
+# The outcomes whose convergence control feeds back on them: GDP (per capita,
+# its log level, or per worker, with the labour force unchanged). Capital's
+# control is GDP's, whose path a capital model does not give: no feedback.
+CONVERGENCE_FEEDBACK_OUTCOMES <- c("log", "lgdp", "worker")
+# The estimated coefficient of the convergence control in the effects (NULL:
+# none, or an outcome without the feedback).
+convergence_rho <- function(model) {
+  if (identical(model$convergence %||% "none", "none") || is.null(model$convergence_coef) ||
+      !(model$outcome %||% "log") %in% CONVERGENCE_FEEDBACK_OUTCOMES) return(NULL)
+  unname(model$convergence_coef[["estimate"]])
+}
+# Draws of it, one per draw of coefficient_draws() (the same rows): from its
+# normal distribution given each draw of the other coefficients (their joint
+# clustered covariance; without it, independent with its SE). NULL: none.
+convergence_draws <- function(model, n = NULL) {
+  rho <- convergence_rho(model)
+  if (is.null(rho)) return(NULL)
+  key <- paste(model$key %||% paste(names(model$coef), collapse = ","), "| convergence")
+  if (is.null(draw_cache[[key]])) {
+    B <- coefficient_draws(model)
+    cv <- model$convergence_cov
+    se <- unname(model$convergence_coef[["se"]])
+    if (!is.null(cv) && all(c(names(model$coef), "conv_gdp") %in% names(cv))) {
+      s <- cv[names(model$coef)]
+      e <- eigen(model$vcov, symmetric = TRUE)
+      pos <- e$values > max(e$values) * 1e-10
+      w <- e$vectors[, pos, drop = FALSE] %*% ((t(e$vectors[, pos, drop = FALSE]) %*% s) / e$values[pos])
+      centre <- rho + drop(sweep(B, 2, model$coef) %*% w)
+      sd <- sqrt(max(cv[["conv_gdp"]] - sum(s * w), 0))
+    } else {
+      centre <- rep(rho, nrow(B))
+      sd <- se
+    }
+    old_seed <- if (exists(".Random.seed", envir = globalenv())) get(".Random.seed", envir = globalenv())
+    set.seed(20261111)
+    z <- stats::rnorm(nrow(B))
+    if (is.null(old_seed)) rm(".Random.seed", envir = globalenv()) else assign(".Random.seed", old_seed, envir = globalenv())
+    draw_cache[[key]] <- centre + sd * z
+  }
+  out <- draw_cache[[key]]
+  if (is.null(n)) out else out[seq_len(n)]
 }
 N_DRAWS <- 2000
 
@@ -481,20 +559,29 @@ gdp_path <- function(model, v, country, type, delta, horizon, sd_mode = "fixed",
   mods <- modifier_matrix(model, country, v, shift, cur = a[from], lag = c(0, a)[which(from)])
   off <- deviation_offset(model, country, v)
   at_offset <- offset_inputs(x, off)
+  # With a convergence control the effect is not linear in the coefficients
+  # (rho times the effects): the CI from the draws, as with the cap.
+  rho <- convergence_rho(model)
   if (cap) {
     growth <- function(beta) {
       out <- growth_matrix(beta, model, v, plus_offset(x, off), mods, TRUE, years = n)
       if (off != 0) out <- out - growth_matrix(beta, model, v, at_offset, mods, TRUE, years = n)
       out
     }
-    log_point <- accumulated(model, drop(growth(point_beta(model))))
-    log_draws <- accumulated(model, growth(coefficient_draws(model)))
+    log_point <- accumulated(model, drop(growth(point_beta(model))), rho)
+    log_draws <- accumulated(model, matrix(growth(coefficient_draws(model)), nrow = n), convergence_draws(model))
     lc <- capped_summary(log_point, matrix(log_draws, nrow = n))
   } else {
     G <- deviation_weights(model, v, plus_offset(x, off), mods, years = n)
     if (off != 0) G <- G - deviation_weights(model, v, at_offset, mods, years = n)
-    G <- accumulated(model, matrix(G, nrow = n, dimnames = list(NULL, names(model$coef))))
-    lc <- linear_combination(model, G)
+    G <- matrix(G, nrow = n, dimnames = list(NULL, names(model$coef)))
+    if (is.null(rho)) {
+      lc <- linear_combination(model, accumulated(model, G))
+    } else {
+      log_point <- accumulated(model, drop(G %*% model$coef), rho)
+      log_draws <- accumulated(model, G %*% t(coefficient_draws(model)), convergence_draws(model))
+      lc <- capped_summary(log_point, log_draws)
+    }
   }
   data.frame(year = seq(0, horizon), deviation = term_inputs(x, FALSE), log_effect = lc$estimate,
              pct = cumulative_pct(model, lc$estimate), pct_low = cumulative_pct(model, lc$low),

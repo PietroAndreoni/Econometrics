@@ -9,7 +9,7 @@
 default_model_inputs <- function(gdp = "PWT") {
   list(gdp = gdp, climate = "ERA5", outcome = "log", baseline = "20-year", style = "simple",
        weight = "population", units_T = "SD", units_P = "SD", fe = "quadratic", effects = "both",
-       convergence = "none", quad_T = "none", quad_P = "none",
+       convergence = "none", convergence_iv = FALSE, quad_T = "none", quad_P = "none",
        form_T = "Quadratic arms", form_P = "Quadratic arms", symmetric_T = FALSE, symmetric_P = FALSE,
        use_lags = FALSE, lags = 5, inter_T = DEFAULT_MODIFIERS$inter_T, inter_P = DEFAULT_MODIFIERS$inter_P,
        low_threshold = round(EXPLORER$low_income[[gdp]]), moderators = "trailing", share_trailing = FALSE,
@@ -68,6 +68,14 @@ LITERATURE_PRESETS <- list(
        inputs = literature_inputs(gdp = "WB", style = "diff", form_T = "Linear arms", form_P = "Linear arms",
                                   inter_T = "clim", inter_P = "clim", use_lags = TRUE, lags = min(10, EXPLORER$max_lags %||% 10),
                                   fe = "linear")),
+  list(name = "Harding et al. (2025), convergence, approx.",
+       note = paste("Table 1 col. (6): growth on T, T², P and P² (levels) and last year's log GDP per capita;",
+                    "country and year effects with country linear trends; WB GDP and UDelaware climate with",
+                    "population weights, as Burke et al. (2015). The lagged income is instrumented with its",
+                    "two-year lag (2SLS), as the paper; its Eq. (4) growth-effect and global-shock columns are not in the app."),
+       inputs = literature_inputs(gdp = "WB", climate = "UDelaware", form_T = "Linear + quadratic arms",
+                                  form_P = "Linear + quadratic arms", fe = "linear", convergence = "lag1",
+                                  convergence_iv = TRUE)),
   list(name = "Exposure specification of the xi analysis (2026-11-09)",
        note = paste("T: linear arms through Tmax > 29 C and Tmin < 0 C degree-day exposure (country slopes);",
                     "P: quadratic arms x climate and share; both scaled with xi = 0; country and year effects,",
@@ -116,7 +124,8 @@ apply_model_inputs <- function(session, m) {
               "clim_mode", "outlier_tail")) {
     if (has(k) && !is.null(m[[k]])) updateRadioButtons(session, k, selected = m[[k]])
   }
-  for (k in c("symmetric_T", "symmetric_P", "cap_T", "cap_P", "use_lags", "share_trailing", "drop_outliers")) {
+  for (k in c("symmetric_T", "symmetric_P", "cap_T", "cap_P", "use_lags", "share_trailing", "drop_outliers",
+              "convergence_iv")) {
     if (has(k)) updateCheckboxInput(session, k, value = isTRUE(m[[k]]))
   }
   for (k in c("lags", "exp_hot_value", "exp_cold_value", "low_threshold")) {

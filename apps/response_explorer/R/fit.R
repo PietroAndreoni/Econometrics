@@ -102,7 +102,8 @@ FE_SHORT <- c(unit = "no unit trends", linear = "unit linear trends",
 EFFECTS_CHOICES <- c("Year and unit effects" = "both", "Unit effects only (no year effects)" = "unit",
                      "Year effects only (no unit effects or trends; deviations not demeaned)" = "year")
 EFFECTS_SHORT <- c(both = "year and unit effects", unit = "unit effects only", year = "year effects only")
-# The convergence control, on its own (not in the responses or projections):
+# The convergence control, on its own (in the paths and projections through its
+# feedback, R/response.R accumulated(); not in the response curves):
 # last year's log GDP per capita of the GDP source, the log of its mean over
 # the 5 years before (the trailing income), or its growth last year (the lagged
 # dependent variable) or two years before (from t-3 to t-2, which leaves out
@@ -115,6 +116,15 @@ CONVERGENCE_COLUMNS <- c(lag1 = "gdp_l1", mean5 = "inc_trailing", growth1 = "gro
 CONVERGENCE_SHORT <- c(lag1 = "last year's log GDP per capita", mean5 = "log mean GDP per capita of the 5 years before",
                        growth1 = "last year's growth of GDP per capita",
                        growth2 = "growth of GDP per capita two years before")
+# Optionally the convergence control is instrumented (2SLS) with its own value
+# one year earlier (lag1: log GDP per capita at t-2, as Harding et al. 2025 and
+# Bond et al. 2010; growth1: growth at t-2; growth2: growth at t-3; mean5: the
+# log mean of the 5 years before t-1), against the Nickell bias of the lagged
+# income with unit effects.
+CONVERGENCE_IV_SHORT <- c(lag1 = "log GDP per capita two years before",
+                          mean5 = "log mean GDP per capita of the 5 years before last year",
+                          growth1 = "growth of GDP per capita two years before",
+                          growth2 = "growth of GDP per capita three years before")
 # The quadratic climate control of T and of P, on its own (Z + Z^2, not in the
 # responses or projections): this year's value, last year's, or the trailing
 # 20 or 30 year mean (years t-20..t-1 or t-30..t-1, as the baselines), in C and
@@ -271,6 +281,7 @@ model_options <- function(o) {
   o$effects <- o$effects %||% "both"
   if (o$effects == "year") o$fe <- "unit"
   o$convergence <- o$convergence %||% "none"
+  o$convergence_iv <- isTRUE(o$convergence_iv) && o$convergence != "none"
   # The quadratic climate control of T and of P (a single value: both).
   quad <- unlist(o$quad %||% "none")
   if (length(quad) == 1) quad <- c(TM = quad, RR = quad)
@@ -358,7 +369,7 @@ model_key <- function(o, panels) {
         if (o$lags > 0) paste0("lags: ", o$lags),
         if (o$diff) "first differences", if (o$both) "unit and first differences",
         if (o$effects != "both") paste0("effects: ", o$effects),
-        if (o$convergence != "none") paste0("convergence: ", o$convergence),
+        if (o$convergence != "none") paste0("convergence: ", o$convergence, if (o$convergence_iv) " (IV)"),
         if (any(o$quad != "none")) paste0("quadratic control T: ", o$quad[["TM"]], ", P: ", o$quad[["RR"]]),
         if (exposure_on(o$exposure)) exposure_key(o$exposure), sep = " | ")
 }
@@ -464,6 +475,13 @@ joint_tests <- function(m, inter, xi = c(TM = 0, RR = 0)) {
 model_rows <- function(o, panels) {
   d <- panels$panels[[paste(o$gdp, o$climate, o$weight, sep = " | ")]]$rows
   d$.row <- seq_len(nrow(d))
+  # The instrument of the convergence control: its value one year earlier, in
+  # the full panel (before any rows are dropped).
+  if (isTRUE(o$convergence_iv)) {
+    earlier <- match(paste(d$GID_1, d$year - 1), paste(d$GID_1, d$year))
+    d$conv_iv <- d[[CONVERGENCE_COLUMNS[[o$convergence]]]][earlier]
+    d <- d[is.finite(d$conv_iv), ]
+  }
   if (o$outliers != "none") d <- d[!d[[paste0("outlier_", o$outliers)]], ]
   if (o$moderators == "trailing") d <- d[is.finite(d$inc_trailing), ]
   if (o$share_trailing) d <- d[is.finite(d$agr_trailing), ]
@@ -693,7 +711,7 @@ explorer_model <- function(o, panels) {
     }))
     levels <- varying_levels(shape)
     lagged <- unlist(lapply(seq_len(o$lags), function(k) c(lag_of(deviation, k), if (length(levels)) paste0(levels, ".l", k))))
-    c(deviation, levels_of(shape), lagged, if (o$convergence != "none") "conv_gdp", quad_terms,
+    c(deviation, levels_of(shape), lagged, if (o$convergence != "none" && !o$convergence_iv) "conv_gdp", quad_terms,
       unlist(panels$control_sets[o$controls], use.names = FALSE))
   }
   # Each deviation term enters as a column of its own (the product of its
@@ -709,7 +727,9 @@ explorer_model <- function(o, panels) {
     }
     terms[startsWith(terms, "dev")] <- safe_term(terms[startsWith(terms, "dev")])
     f <- stats::as.formula(paste(".outcome ~", paste(terms, collapse = " + "), "|",
-                                 fixed_effects_formula(o$fe, panels$fe_slopes, o$effects)))
+                                 fixed_effects_formula(o$fe, panels$fe_slopes, o$effects),
+                                 # The instrumented convergence control (2SLS).
+                                 if (o$convergence_iv) "| conv_gdp ~ conv_iv"))
     m <- fixest::feols(f, data = d, cluster = ~GID_0, panel.id = ~GID_1 + year, notes = FALSE)
     m$country <- d$GID_0[fixest::obs(m)]
     m
@@ -725,7 +745,11 @@ explorer_model <- function(o, panels) {
                         aic = stats::AIC(m) - stats::AIC(linear), bic = stats::BIC(m) - stats::BIC(linear))
   }
   ct <- fixest::coeftable(m)
+  rownames(ct)[rownames(ct) == "fit_conv_gdp"] <- "conv_gdp"
   rownames(ct) <- term_name(rownames(ct))
+  # The first stage of the instrumented convergence control: its clustered
+  # Wald (F) statistic.
+  first_stage <- if (o$convergence_iv) fixest::fitstat(m, "ivwald1")[[1]]
   keep <- grep("^dev", rownames(ct), value = TRUE)
   lagged_levels <- varying_levels(o$shape)
   level_terms <- intersect(c(levels_of(o$shape), unlist(lapply(seq_len(o$lags), function(k) {
@@ -734,6 +758,8 @@ explorer_model <- function(o, panels) {
   coefs <- stats::setNames(stats::coef(m), term_name(names(stats::coef(m))))
   V <- stats::vcov(m)
   dimnames(V) <- list(term_name(rownames(V)), term_name(colnames(V)))
+  rownames(V)[rownames(V) == "fit_conv_gdp"] <- "conv_gdp"
+  colnames(V)[colnames(V) == "fit_conv_gdp"] <- "conv_gdp"
   model <- list(
     key = key, gdp = o$gdp, climate = o$climate, weight = o$weight, units = o$units,
     baseline = o$baseline, window = window, diff = o$diff, both = o$both, dev_fe = dev_fe,
@@ -749,10 +775,14 @@ explorer_model <- function(o, panels) {
       data.frame(term = k, estimate = ct[k, 1], se = ct[k, 2], p = ct[k, 4], row.names = NULL)
     },
     # The convergence control and its coefficient (NULL: none).
-    convergence = o$convergence,
+    convergence = o$convergence, convergence_iv = o$convergence_iv,
     convergence_coef = if (o$convergence != "none" && "conv_gdp" %in% rownames(ct)) {
-      c(estimate = ct["conv_gdp", 1], se = ct["conv_gdp", 2], p = ct["conv_gdp", 4])
+      c(estimate = ct["conv_gdp", 1], se = ct["conv_gdp", 2], p = ct["conv_gdp", 4],
+        if (!is.null(first_stage)) c(first_stage_f = first_stage$stat))
     },
+    # Its covariance with the deviation terms and its variance (the joint draws
+    # of the effects with its feedback, R/response.R).
+    convergence_cov = if (o$convergence != "none" && "conv_gdp" %in% rownames(V)) V["conv_gdp", c(keep, "conv_gdp")],
     outcome = o$outcome, income_form = o$income_form, xi = o$xi, controls = o$controls, outliers = o$outliers,
     # The exposure of the T terms and its table of slopes (NULL: none).
     exposure = o$exposure, exposure_table = exposure_tab,
