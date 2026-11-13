@@ -52,6 +52,11 @@ if (!file.exists(SCENARIOS_FILE)) {
   stop("No ", SCENARIOS_FILE, ": run Rscript apps/response_explorer/build_scenarios.R from the project root.")
 }
 SCEN <- readRDS(SCENARIOS_FILE)
+# Regional patterns of geoengineering by injection latitude (CIDER,
+# build_cider.R); without the file the geoengineering page has only the uniform
+# pattern.
+CIDER_FILE <- sub("panels[.]rds$", "cider.rds", PANELS_FILE)
+CIDER <- if (file.exists(CIDER_FILE)) readRDS(CIDER_FILE)
 # Historical growth of world GDP in PWT 11.0, for the growth charts of the
 # scenarios and termination shocks: in each year the growth of the sum of
 # rgdpna (constant national prices, millions of 2021 US$) over the countries
@@ -170,10 +175,35 @@ warming_rate <- function(years, g) {
 # The option of the world aggregate without gains (R/projection.R no_gains).
 NO_GAINS_LABEL <- paste("Ignore gains in the world aggregate: a country whose GDP gains counts at its",
                         "baseline GDP (zero effect; the maps and country results unchanged)")
-# What the termination page can compare side by side (each alternative takes
+# What the geoengineering page can compare side by side (each alternative takes
 # the place of that option, the others as set).
 TS_COMPARE_CHOICES <- c("Nothing" = "none", "Background forcings" = "forcing",
-                        "Economic developments" = "economy", "Catch-up times" = "tau")
+                        "Economic developments" = "economy", "Catch-up times" = "tau",
+                        if (!is.null(CIDER)) c("Geoengineering patterns" = "sai"))
+# The regional pattern of geoengineering: uniform (each country's CMIP6
+# pattern of global warming, perfect geoengineering) or CIDER's by injection
+# latitude, with the injection fractions as set ("mix") or all at one latitude.
+CIDER_LATS <- c("60N", "30N", "15N", "0N", "15S", "30S", "60S")
+CIDER_FRACTION_DEFAULTS <- c(`60N` = 0, `30N` = 0.25, `15N` = 0.25, `0N` = 0, `15S` = 0.25, `30S` = 0.25, `60S` = 0)
+# The injection rate of CIDER's single-latitude training runs (Tg SO2/yr).
+CIDER_TRAINING_TG <- 12
+TS_SAI_CHOICES <- c("Uniform (CMIP6 pattern)" = "uniform", "CIDER, fractions as set" = "mix",
+                    stats::setNames(CIDER_LATS, paste("CIDER,", CIDER_LATS, "only")))
+# The injection fractions of pattern `sai` ("mix": `fractions`, as set; a
+# latitude: all there).
+sai_fractions <- function(sai, fractions) {
+  if (sai == "mix") return(fractions)
+  stats::setNames(as.numeric(CIDER_LATS == sai), CIDER_LATS)
+}
+sai_label <- function(sai, model, fractions) {
+  if (sai == "uniform") return("uniform pattern")
+  f <- sai_fractions(sai, fractions)
+  f <- f / sum(f)
+  where <- if (sai == "mix") {
+    paste(sprintf("%s %.0f%%", names(f)[f > 0], 100 * f[f > 0]), collapse = " / ")
+  } else paste(sai, "only")
+  sprintf("CIDER %s, %s", sub("-.*$", "", CIDER$models[[model]]), where)
+}
 # The number of noise paths with natural variability (about 5 s a setting and
 # forcing per 200 paths).
 NOISE_PATH_CHOICES <- c("100", "200", "500", "1000")
