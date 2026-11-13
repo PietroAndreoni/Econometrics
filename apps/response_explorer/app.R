@@ -1605,10 +1605,38 @@ ui <- page_navbar(
         radioButtons("ts_econ", "Economic development (Follow SSP-RCP: the forcing's own SSP)",
                      ECONOMY_CHOICES, selected = "follow", inline = TRUE)
       ),
+      if (!is.null(CIDER)) tagList(
+        layout_columns(
+          col_widths = c(6, 3),
+          radioButtons("ts_sai", "Regional pattern of geoengineering",
+                       c("Uniform: each country's CMIP6 pattern of global warming (perfect geoengineering)" = "uniform",
+                         "CIDER: stratospheric aerosol injection at the latitudes below" = "cider"),
+                       selected = "uniform"),
+          conditionalPanel(
+            "input.ts_sai == 'cider' || input.ts_compare == 'sai'",
+            selectInput("ts_cider_model", "CIDER emulated model",
+                        stats::setNames(names(CIDER$models), unname(CIDER$models))))
+        ),
+        conditionalPanel(
+          "input.ts_sai == 'cider' || input.ts_compare == 'sai'",
+          div(class = "d-flex flex-wrap gap-2 align-items-end",
+              tags$span(class = "small me-2", "Injection fractions by latitude (non-negative, scaled to sum to one):"),
+              lapply(CIDER_LATS, function(l) {
+                div(style = "width: 6.5em;",
+                    numericInput(paste0("ts_f_", l), l, CIDER_FRACTION_DEFAULTS[[l]], min = 0, step = 0.05))
+              })),
+          uiOutput("ts_sai_info")
+        )
+      ),
       layout_columns(
         col_widths = c(3, 9),
         radioButtons("ts_compare", "Compare side by side", TS_COMPARE_CHOICES, selected = "none"),
         tagList(
+          conditionalPanel(
+            "input.ts_compare == 'sai'",
+            checkboxGroupInput("ts_cmp_sai", "Geoengineering patterns (in place of the one above; CIDER with the model and fractions above)",
+                               TS_SAI_CHOICES, selected = c("uniform", "mix"), inline = TRUE)
+          ),
           conditionalPanel(
             "input.ts_compare == 'forcing'",
             checkboxGroupInput("ts_cmp_forcings", "Background forcings (in place of the one above)", SCENARIO_CHOICES,
