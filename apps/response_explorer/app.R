@@ -800,7 +800,7 @@ theme_explorer <- function() {
           legend.text = element_text(colour = INK_MUTED, size = 10.5))
 }
 
-# Inputs of setting n: whether it is shown (settings 2 and 3), its label, its
+# Inputs of setting n: its label, its
 # model and its country.
 setting_ui <- function(id, n) {
   ns <- NS(id)
@@ -994,8 +994,7 @@ country_ui <- function(id, k) {
   tagList(
     layout_columns(
       col_widths = c(3, 3, 3, 3),
-      if (k > 1) checkboxInput(ns("active"), "Show this country", value = FALSE)
-      else helpText("Country 1 is always shown."),
+      checkboxInput(ns("active"), "Show this country", value = k == 1),
       textInput(ns("label"), "Name", placeholder = paste("Country", k)),
       selectInput(ns("setting"), "Model: setting", stats::setNames(seq_len(N_SETTINGS), paste("Setting", seq_len(N_SETTINGS))),
                   selected = 1),
@@ -1034,8 +1033,8 @@ preset_values <- function(row) {
     capital = signif(row$capital, 3))
 }
 
-# Setting n: its presets, the copy of setting 1's model, and two reactives:
-# whether it is shown, and its specification (label, model, country).
+# Setting n: its presets, the copy of setting 1's model, and its
+# specification (label, model, country).
 setting_server <- function(id, n, default_country, first = NULL) {
   moduleServer(id, function(input, output, session) {
     panel_key <- reactive({
@@ -1050,9 +1049,10 @@ setting_server <- function(id, n, default_country, first = NULL) {
     observeEvent(input$gdp, {
       pwt <- input$gdp == "PWT"
       modifiers <- if (pwt) MODIFIERS else MODIFIERS[!MODIFIERS %in% PWT_MODIFIERS]
+      # (The ticked ones kept; none ticked is NULL, and stays none.)
       for (k in c("inter_T", "inter_P")) {
         updateCheckboxGroupInput(session, k, choices = modifiers, inline = TRUE,
-                                 selected = intersect(isolate(input[[k]]) %||% DEFAULT_MODIFIERS[[k]], modifiers))
+                                 selected = intersect(isolate(input[[k]]) %||% character(0), modifiers))
       }
       outcomes <- if (pwt) OUTCOME_CHOICES else OUTCOME_CHOICES[!OUTCOME_CHOICES %in% PWT_OUTCOMES]
       current <- isolate(input$outcome) %||% "log"
@@ -1149,7 +1149,6 @@ setting_server <- function(id, n, default_country, first = NULL) {
                                   cap_T = input$cap_T, cap_P = input$cap_P, shape_T = input$shape_T, shape_P = input$shape_P,
                                   controls = input$controls,
                                   drop_outliers = input$drop_outliers, outlier_tail = input$outlier_tail))
-    active <- reactive(n == 1 || isTRUE(input$active))
     spec <- reactive({
       req(input$gdp, input$climate, input$baseline, input$form_T, input$form_P)
       form <- c(TM = input$form_T, RR = input$form_P)
@@ -1285,7 +1284,7 @@ setting_server <- function(id, n, default_country, first = NULL) {
            })),
            units = u, gdp = input$gdp)
     })
-    list(active = active, spec = spec, model_inputs = model_inputs, units = units, gdp = reactive(input$gdp),
+    list(spec = spec, model_inputs = model_inputs, units = units, gdp = reactive(input$gdp),
          load = load_model, label = reactive(trimws(input$label %||% "")))
   })
 }
@@ -1315,7 +1314,8 @@ country_server <- function(id, k, default_country, settings) {
     output$income_units <- renderUI({
       helpText(paste0("Long-run (sample mean) level, in ", EXPLORER$income_units[[setting()$gdp()]], "."))
     })
-    active <- reactive(k == 1 || isTRUE(input$active))
+    # (Country 1 shown until its box is read.)
+    active <- reactive(isTRUE(input$active %||% (k == 1)))
     # The country: its characteristics (P in m a year, share as a fraction),
     # its preset's code (the exposure slopes; NULL: custom) and its name.
     country <- reactive({
@@ -2258,6 +2258,9 @@ server <- function(input, output, session) {
   # The projections of a setting depend on its model and options only (every
   # country enters with its own characteristics), so they are cached by those.
   projection_cache <- new.env()
+  # The runs: the clicks on Run plus those a loaded app snapshot asks for.
+  scen_runs <- reactive(input$run_scenarios + scen_trigger())
+  ts_runs <- reactive(input$run_termination + ts_trigger())
   # The natural variability of a run: its type (VARIABILITY_CHOICES) and number
   # of noise paths.
   noise_of <- function(type, n) {
@@ -2366,7 +2369,8 @@ server <- function(input, output, session) {
   # forcings, the economic development and the variability at the moment of
   # the click.
   NOT_RUN <- "Press \"Run the climate scenarios\" to project the global losses and the maps."
-  run <- eventReactive(input$run_scenarios, {
+  run <- eventReactive(scen_runs(), {
+    req(scen_runs() > 0)
     validate(need(length(input$scen_sel) > 0, "Select at least one forcing."))
     list(specs = specs(), scenarios = input$scen_sel, economy = input$econ_ssp %||% "follow",
          noise = noise_of(input$scen_noise, input$scen_noise_n), no_gains = isTRUE(input$scen_no_gains))
@@ -2378,7 +2382,7 @@ server <- function(input, output, session) {
   # The label of a forcing of the last run, with its economy.
   run_label <- function(scenario) scenario_label(scenario, run()$economy)
   scenario_status <- function() {
-    if (input$run_scenarios == 0) return(helpText(class = "mb-0", "Not run yet."))
+    if (scen_runs() == 0) return(helpText(class = "mb-0", "Not run yet."))
     r <- run()
     current <- run_key(specs(), input$scen_sel, input$econ_ssp %||% "follow",
                        noise_of(input$scen_noise, input$scen_noise_n), isTRUE(input$scen_no_gains))
@@ -2525,7 +2529,7 @@ server <- function(input, output, session) {
   # Best-guess country losses of the map setting and scenario in `year`, with
   # one colour scale for the two maps.
   map_data_of <- reactive({
-    validate(need(input$run_scenarios > 0, NOT_RUN))
+    validate(need(scen_runs() > 0, NOT_RUN))
     req(input$map_setting, input$map_scenario)
     s <- Filter(function(x) as.character(x$n) == input$map_setting, run()$specs)
     req(length(s) == 1)
@@ -2574,7 +2578,7 @@ server <- function(input, output, session) {
   # long-run P) in 2050 and 2100 against the mean of the map setting's horizon,
   # the CMIP6 pattern times the global warming (as in the projections).
   driver_data <- reactive({
-    validate(need(input$run_scenarios > 0, NOT_RUN))
+    validate(need(scen_runs() > 0, NOT_RUN))
     req(input$map_setting, input$map_scenario)
     s <- Filter(function(x) as.character(x$n) == input$map_setting, run()$specs)
     req(length(s) == 1)
@@ -2625,7 +2629,7 @@ server <- function(input, output, session) {
   output$driver_P_2100 <- renderPlot(driver_map("dP", 2100), bg = SURFACE)
 
   global_table <- function() {
-    if (input$run_scenarios == 0) return(NULL)
+    if (scen_runs() == 0) return(NULL)
     out <- do.call(rbind, lapply(projections(), function(p) {
       g <- p$result$global
       cell <- function(y) loss_text(g[g$year == y, ])
@@ -2751,7 +2755,8 @@ server <- function(input, output, session) {
                                    intersect(SCENARIO_CHOICES, input$ts_cmp_forcings), input$ts_cmp_economies,
                                    ts_compare_taus(input$ts_cmp_taus)))
   }
-  ts_run <- eventReactive(input$run_termination, {
+  ts_run <- eventReactive(ts_runs(), {
+    req(ts_runs() > 0)
     x <- ts_inputs()
     validate(need(length(input$ts_years) > 0, "Select at least one termination year."),
              need(length(x$variants) > 0, "Select at least one alternative to compare."),
@@ -2769,7 +2774,7 @@ server <- function(input, output, session) {
           collapse = " || ")
   }
   ts_status <- function() {
-    if (input$run_termination == 0) return(helpText(class = "mb-0", "Not run yet."))
+    if (ts_runs() == 0) return(helpText(class = "mb-0", "Not run yet."))
     r <- ts_run()
     current <- ts_key(specs(), ts_inputs()$variants, as.numeric(input$ts_held), sort(as.integer(input$ts_years)),
                       noise_of(input$ts_noise, input$ts_noise_n), isTRUE(input$ts_no_gains))
@@ -2946,7 +2951,7 @@ server <- function(input, output, session) {
   # One panel per alternative of the run (a forcing and catch-up time; the
   # economy changes only the population weights of the natural SD).
   ts_gmt_plot <- function() {
-    validate(need(input$run_termination > 0, TS_NOT_RUN))
+    validate(need(ts_runs() > 0, TS_NOT_RUN))
     r <- ts_run()
     rate <- identical(input$ts_gmt_measure, "rate")
     parts <- lapply(r$variants, function(v) {
@@ -2971,14 +2976,14 @@ server <- function(input, output, session) {
         return(list(d = cbind(variant = v$label, d), ex = NULL, sd = NA_real_,
                     text = paste0(if (length(r$variants) > 1) paste0(v$label, ": "), paste(peaks, collapse = "; "))))
       }
-      # The bands: the warming above the reference climate plus k SD, in the
-      # years it exceeds it from the termination on (one ribbon per run of
-      # consecutive years).
+      # The bands: for each terminated path, a vertical band from the first to
+      # the last year its warming is above the reference climate plus k SD,
+      # from the termination on.
       ex0 <- ts_exceedance_of(paths, sg)
-      ex <- ex0
-      ex$above <- ex$above & ex$year >= ex$termination
-      ex$segment <- paste(ex$path, cumsum(c(TRUE, diff(ex$above) != 0 | ex$path[-1] != ex$path[-nrow(ex)])))
-      ex <- ex[ex$above, ]
+      ex <- ex0[ex0$above & ex0$year >= ex0$termination, ]
+      ex <- if (nrow(ex)) do.call(rbind, lapply(split(ex, ex$path), function(e) {
+        data.frame(path = e$path[1], start = min(e$year) - 0.5, end = max(e$year) + 0.5)
+      })) else ex[0, ]
       list(d = cbind(variant = v$label, d), ex = if (nrow(ex)) cbind(variant = v$label, ex),
            text = paste0(if (length(r$variants) > 1) paste0(v$label, ": "), paste(exceedance_text(ex0), collapse = "; ")),
            sd = sg$gmt)
@@ -2990,8 +2995,8 @@ server <- function(input, output, session) {
     bands <- if (!is.null(ex)) {
       ex$path <- ts_run_colours(ex$path)
       ex$variant <- ts_variant_factor(ex$variant)
-      geom_ribbon(data = ex, aes(x = year, ymin = threshold, ymax = warming, fill = path, group = segment),
-                  inherit.aes = FALSE, alpha = 0.3, colour = NA)
+      geom_rect(data = ex, aes(xmin = start, xmax = end, ymin = -Inf, ymax = Inf, fill = path),
+                inherit.aes = FALSE, alpha = 0.15, colour = NA)
     }
     sds <- unique(round(vapply(parts, `[[`, 0, "sd"), 2))
     many <- length(r$variants) > 1
@@ -3000,7 +3005,7 @@ server <- function(input, output, session) {
              "\n", paste(vapply(parts, `[[`, "", "text"), collapse = "\n"))
     } else {
       paste0(wrap_label(sprintf(
-        "Bands: warming above %s + %g SD of natural variability (1 SD = %s C of global warming). Years above it:",
+        "Bands: from the first to the last year after the termination with warming above %s + %g SD of natural variability (1 SD = %s C of global warming). Years above it:",
         ts_reference()$label, input$ts_k_gmt, paste(sprintf("%.2f", sds), collapse = " / ")), if (many) 140 else 70), "\n",
         paste(vapply(parts, `[[`, "", "text"), collapse = "\n"))
     }
@@ -3026,7 +3031,7 @@ server <- function(input, output, session) {
   output$ts_gmt_plot <- renderPlot(ts_gmt_plot(), bg = SURFACE)
   # The heights of the charts: the global chart grows with the settings when
   # the alternatives are in columns.
-  ts_many <- reactive(input$run_termination > 0 && length(ts_run()$variants) > 1)
+  ts_many <- reactive(ts_runs() > 0 && length(ts_run()$variants) > 1)
   ts_global_height <- function() if (ts_many()) 160 + 230 * length(ts_run()$specs) else 460
   output$ts_charts <- renderUI({
     if (ts_many()) {
@@ -3105,7 +3110,7 @@ server <- function(input, output, session) {
   # Map: the extra loss from terminating in the chosen year against sustained
   # geoengineering, by country in 2100 (pp of GDP; negative: a larger loss).
   ts_map <- function() {
-    validate(need(input$run_termination > 0, TS_NOT_RUN))
+    validate(need(ts_runs() > 0, TS_NOT_RUN))
     req(input$ts_map_setting, input$ts_map_year)
     pr <- Filter(function(p) as.character(p$n) == input$ts_map_setting, ts_projections())
     sustained <- Filter(function(p) startsWith(p$path, "sustained"), pr)[[1]]$result$countries
@@ -3131,7 +3136,7 @@ server <- function(input, output, session) {
   # Latitude chart: the share of the population exposed to years beyond k SD of
   # natural variability, by 5-degree latitude band and year, for each chosen path.
   ts_lat_plot <- function() {
-    validate(need(input$run_termination > 0, TS_NOT_RUN))
+    validate(need(ts_runs() > 0, TS_NOT_RUN))
     validate(need(length(input$ts_lat_paths) > 0, "Select at least one warming path."),
              need(isTRUE(input$ts_k_lat > 0), "k must be positive."))
     paths <- ts_paths()
@@ -3151,7 +3156,7 @@ server <- function(input, output, session) {
     ggplot(d, aes(year, lat, fill = exposed)) +
       geom_tile(width = 1, height = 5) +
       facet_wrap(~path, ncol = min(3, length(chosen))) +
-      scale_fill_gradientn(colours = SCEN$palettes$temp_seq, limits = c(0, max(d$exposed, na.rm = TRUE)),
+      scale_fill_gradientn(colours = SCEN$palettes$temp_seq, limits = c(0, 100),
                            name = "Population\nexposed (%)") +
       scale_x_continuous(expand = c(0, 0)) +
       scale_y_continuous(breaks = seq(-60, 90, by = 30), expand = c(0, 0)) +
@@ -3167,7 +3172,7 @@ server <- function(input, output, session) {
   output$ts_lat_plot <- renderPlot(ts_lat_plot(), bg = SURFACE)
 
   ts_table <- function() {
-    if (input$run_termination == 0) return(NULL)
+    if (ts_runs() == 0) return(NULL)
     pr <- ts_projections_all()
     many <- length(ts_run()$variants) > 1
     cell <- function(g, y) loss_text(g[g$year == y, ])
@@ -3480,7 +3485,7 @@ server <- function(input, output, session) {
                           input$shock_T, input$shock_P, as.integer(input$horizon), as.integer(input$ramp_years),
                           paste(unname(scenarios()), collapse = ", "))
     measure_text <- function(measure) names(MEASURE_CHOICES)[MEASURE_CHOICES == (measure %||% "loss")]
-    scenarios_part <- if (input$run_scenarios > 0) {
+    scenarios_part <- if (scen_runs() > 0) {
       component <- input$map_component %||% "loss"
       card("Climate scenarios: GDP losses under each setting's model, 2025-2100",
            tags$div(class = "muted", scenario_status()),
@@ -3493,7 +3498,7 @@ server <- function(input, output, session) {
            pair(chart(function() driver_map("dP", 2050), 320), chart(function() driver_map("dP", 2100), 320)),
            table_of(global_table()), scenario_notes())
     }
-    termination_part <- if (input$run_termination > 0) {
+    termination_part <- if (ts_runs() > 0) {
       card("Termination shocks: perfect geoengineering, 2025-2100",
            tags$div(class = "muted", ts_status()),
            tags$p(class = "muted", paste0("Global chart: ", measure_text(input$ts_measure), ".")),
