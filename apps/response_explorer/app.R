@@ -1664,6 +1664,11 @@ ui <- page_navbar(
         selectInput("ts_variant", "Map, latitude chart and exceedances: alternative", choices = NULL)
       ),
       plotOutput("ts_map", height = 380),
+      if (!is.null(CIDER)) tagList(
+        radioButtons("ts_sai_var", "Map of the regional pattern: climate left by geoengineering that offsets 1 C of global warming",
+                     c("Temperature (C)" = "T", "Precipitation (%)" = "P"), selected = "T", inline = TRUE),
+        plotOutput("ts_sai_map", height = 380)
+      ),
       selectInput("ts_lat_paths", "Latitude chart: warming paths", choices = NULL, multiple = TRUE,
                   width = "100%"),
       plotOutput("ts_lat_plot", height = 420),
@@ -3145,30 +3150,100 @@ server <- function(input, output, session) {
   })
 
   # Map: the extra loss from terminating in the chosen year against sustained
-  # geoengineering, by country in 2100 (pp of GDP; negative: a larger loss).
+  # geoengineering, by country in 2100 (pp of GDP; negative: a larger loss);
+  # without termination years, sustained geoengineering against none.
   ts_map <- function() {
     validate(need(ts_runs() > 0, TS_NOT_RUN))
-    req(input$ts_map_setting, input$ts_map_year)
+    req(input$ts_map_setting)
     pr <- Filter(function(p) as.character(p$n) == input$ts_map_setting, ts_projections())
     sustained <- Filter(function(p) startsWith(p$path, "sustained"), pr)[[1]]$result$countries
-    terminated <- Filter(function(p) p$path == paste("terminated in", input$ts_map_year), pr)
-    req(length(terminated) == 1)
-    terminated <- terminated[[1]]$result$countries
-    a <- terminated[terminated$year == PROJECTION_TO, ]
-    b <- sustained[sustained$year == PROJECTION_TO, ]
+    target <- geo_target_text(ts_run()$mode, ts_run()$held)
+    if (length(ts_run()$years)) {
+      req(input$ts_map_year)
+      terminated <- Filter(function(p) p$path == paste("terminated in", input$ts_map_year), pr)
+      req(length(terminated) == 1)
+      a <- terminated[[1]]$result$countries
+      b <- sustained
+      legend <- "terminated minus\nsustained (pp)"
+      title <- sprintf("%d: termination in %s against sustained geoengineering (%s)", PROJECTION_TO,
+                       input$ts_map_year, target)
+    } else {
+      a <- sustained
+      b <- Filter(function(p) p$path == "no geoengineering", pr)[[1]]$result$countries
+      legend <- "sustained minus no\ngeoengineering (pp)"
+      title <- sprintf("%d: sustained geoengineering (%s) against none", PROJECTION_TO, target)
+    }
+    a <- a[a$year == PROJECTION_TO, ]
+    b <- b[b$year == PROJECTION_TO, ]
     difference <- a$loss - b$loss[match(a$iso3, b$iso3)]
     limit <- max(abs(difference), na.rm = TRUE)
     ggplot(world_with(a$iso3, difference)) +
       geom_sf(aes(fill = value), colour = SURFACE, linewidth = 0.1) +
       scale_fill_gradient2(low = MAP_LOSS, mid = MAP_ZERO, high = MAP_GAIN, midpoint = 0,
                            limits = c(-limit, limit), na.value = MAP_NA,
-                           name = paste0(first_upper(quantity_of(ts_run()$specs)), ", terminated minus\nsustained (pp)")) +
-      labs(title = sprintf("%d: termination in %s against sustained geoengineering (%.1f C)",
-                           PROJECTION_TO, input$ts_map_year, ts_run()$held),
+                           name = paste0(first_upper(quantity_of(ts_run()$specs)), ", ", legend)) +
+      labs(title = title,
            subtitle = wrap_label(paste0(pr[[1]]$setting, "; ", ts_one()$variant))) +
       theme_map()
   }
   output$ts_map <- renderPlot(ts_map(), bg = SURFACE)
+
+  # Map of the regional pattern of the chosen alternative: the climate left
+  # when geoengineering offsets 1 C of global warming (global temperature
+  # unchanged), each country's CMIP6 change per C of warming plus CIDER's per C
+  # of SAI cooling: T t_slope - t_sai (C), P 100 (p_rel_slope - p_sai) (%),
+  # under the climate weights of the map's setting. Zero with the uniform
+  # pattern.
+  ts_sai_map <- function() {
+    validate(need(ts_runs() > 0, TS_NOT_RUN))
+    r <- ts_one()
+    sai <- ts_sai_of(r, r)
+    validate(need(!is.null(sai), paste("Uniform pattern: geoengineering that offsets global warming leaves every",
+                                       "country's climate unchanged. Choose a CIDER alternative to see its pattern.")))
+    weight <- ts_sigma_setting()$model$weight %||% "population"
+    mix <- cider_mix(CIDER, sai$model, sai$fractions, weight)
+    d <- merge(SCEN$pattern[[weight]], mix$pattern, by = "iso3")
+    is_T <- !identical(input$ts_sai_var, "P")
+    value <- if (is_T) d$t_slope - d$t_sai else 100 * (d$p_rel_slope - d$p_sai)
+    limit <- max(abs(value), na.rm = TRUE)
+    shares <- mix$shares[mix$shares > 0]
+    ggplot(world_with(d$iso3, value)) +
+      geom_sf(aes(fill = value), colour = SURFACE, linewidth = 0.1) +
+      (if (is_T) {
+        scale_fill_gradient2(low = "#2166ac", mid = MAP_ZERO, high = "#b2182b", midpoint = 0,
+                             limits = c(-limit, limit), na.value = MAP_NA, name = "T change (C)")
+      } else {
+        scale_fill_gradientn(colours = SCEN$palettes$prec_div, limits = c(-limit, limit), na.value = MAP_NA,
+                             name = "P change (%)")
+      }) +
+      labs(title = sprintf("%s left by geoengineering that offsets 1 C of global warming",
+                           if (is_T) "Temperature change" else "Precipitation change"),
+           subtitle = wrap_label(sprintf(
+             "%s. CMIP6 change per C of global warming plus %s's per C of SAI cooling; shares of the cooling: %s; %s weights",
+             r$variant, CIDER$models[[sai$model]],
+             paste(sprintf("%s %.0f%%", names(shares), 100 * shares), collapse = ", "), weight), 140)) +
+      theme_map()
+  }
+  if (!is.null(CIDER)) output$ts_sai_map <- renderPlot(ts_sai_map(), bg = SURFACE)
+
+  # What the injection fractions as set give (population weights).
+  output$ts_sai_info <- renderUI({
+    req(CIDER)
+    model <- input$ts_cider_model %||% names(CIDER$models)[[1]]
+    f <- ts_fractions()
+    if (!isTRUE(sum(pmax(f, 0), na.rm = TRUE) > 0)) {
+      return(helpText(class = "text-warning-emphasis", "The injection fractions must have a positive sum."))
+    }
+    mix <- cider_mix(CIDER, model, f)
+    e <- CIDER$efficiency[CIDER$efficiency$model == model, ]
+    shares <- mix$shares[mix$shares > 0]
+    helpText(class = "small", sprintf(
+      paste("%s, steady-state global cooling per Tg SO2/yr: %s. With these fractions: shares of the cooling %s;",
+            "1 C of cooling takes about %.0f Tg SO2/yr (linear: no saturation of the aerosol; CIDER is trained",
+            "on %g Tg/yr at one latitude)."),
+      CIDER$models[[model]], paste(sprintf("%s %.3f C", e$lat, e$cooling_per_tg), collapse = ", "),
+      paste(sprintf("%s %.0f%%", names(shares), 100 * shares), collapse = ", "), mix$tg_per_c, CIDER_TRAINING_TG))
+  })
 
   # Latitude chart: the share of the population exposed to years beyond k SD of
   # natural variability, by 5-degree latitude band and year, for each chosen path.
