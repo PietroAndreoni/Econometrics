@@ -332,11 +332,12 @@ modifier_matrix <- function(model, country, v, shift, income = NULL, share = NUL
 # With lags, the terms of lag k take the deviations and modifiers k years
 # before in a series of `years` years (stacked by path), or with `years` NULL
 # the same ones (the sum over the lags: the cumulative effect of one year).
-deviation_weights <- function(model, v, x, modifiers, years = NULL) {
+# `lags`: only the terms of these lags (NULL: all).
+deviation_weights <- function(model, v, x, modifiers, years = NULL, lags = NULL) {
   st <- model_structure(model)
   mods <- as_modifier_matrix(modifiers, n_inputs(x))
   G <- matrix(0, nrow = n_inputs(x), ncol = nrow(st), dimnames = list(NULL, st$term))
-  for (k in unique(st$lag[st$variable == v])) {
+  for (k in intersect(unique(st$lag[st$variable == v]), lags %||% st$lag)) {
     at <- lagged_inputs(x, mods, k, years)
     for (j in which(st$variable == v & st$lag == k)) {
       G[, j] <- arm_value(st$suffix[[j]], term_inputs(at$x, st$diff[[j]])) *
@@ -400,10 +401,21 @@ coefficient_draws <- function(model) {
 # x. With `cap`, each arm's own and income and share part is capped at zero
 # (see above), row by row. `paired`: beta has one row per element of x, each
 # element at its own coefficients (a one-column matrix). With lags, as
-# deviation_weights() (`years`), each lag capped on its own.
-growth_matrix <- function(beta, model, v, x, modifiers, cap, paired = FALSE, years = NULL) {
+# deviation_weights() (`years`, `lags`), each lag capped on its own.
+growth_matrix <- function(beta, model, v, x, modifiers, cap, paired = FALSE, years = NULL, lags = NULL) {
   # The cap of variable v (one value, or c(TM, RR)).
   cap <- isTRUE(of_variable(cap, v))
+  # Without the cap the effect is linear in the coefficients: the weights of
+  # deviation_weights() times each coefficient vector, in one product (the
+  # same values as the blocks below, much faster with many lags and draws).
+  if (!cap) {
+    G <- deviation_weights(model, v, x, modifiers, years = years, lags = lags)
+    used <- colSums(G != 0) > 0
+    if (!any(used)) return(matrix(0, nrow = nrow(G), ncol = if (paired) 1 else nrow(beta)))
+    G <- G[, used, drop = FALSE]
+    b <- beta[, colnames(G), drop = FALSE]
+    return(if (paired) matrix(rowSums(G * b), ncol = 1) else G %*% t(b))
+  }
   st <- model_structure(model)
   n <- n_inputs(x)
   all_mods <- as_modifier_matrix(modifiers, n)
@@ -421,7 +433,7 @@ growth_matrix <- function(beta, model, v, x, modifiers, cap, paired = FALSE, yea
   # With exposure (T), each channel's terms form blocks of their own too, then
   # times the channel's exposure.
   side <- paste0(sub("2$", "", st$suffix), ifelse(st$diff, "_d", ""), ifelse(is.na(st$expo), "", paste0(":", st$expo)))
-  for (k in unique(st$lag[st$variable == v])) {
+  for (k in intersect(unique(st$lag[st$variable == v]), lags %||% st$lag)) {
     at <- lagged_inputs(x, all_mods, k, years)
     mods <- at$mods
     of_k <- st$variable == v & st$lag == k

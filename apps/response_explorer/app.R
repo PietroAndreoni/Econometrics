@@ -871,8 +871,8 @@ common_ui <- function(ns) {
                                         "characteristics of its own year"), value = FALSE),
     conditionalPanel(
       "input.use_lags", ns = ns,
-      numericInput(ns("lags"), sprintf("Number of lags L (1-%d)", EXPLORER$max_lags %||% 10), 5,
-                   min = 1, max = EXPLORER$max_lags %||% 10, step = 1)
+      numericInput(ns("lags"), sprintf("Number of lags L (1-%d)", EXPLORER$max_lags %||% 20), 5,
+                   min = 1, max = EXPLORER$max_lags %||% 20, step = 1)
     ),
     radioButtons(ns("effects"), "Fixed effects", EFFECTS_CHOICES, selected = "both"),
     conditionalPanel(
@@ -1210,7 +1210,7 @@ setting_server <- function(id, n, default_country, first = NULL) {
       # The lags of the regressors (none unless ticked; 1 to the build's maximum).
       lags <- if (isTRUE(input$use_lags)) {
         req(is.finite(input$lags))
-        as.integer(min(max(round(input$lags), 1), EXPLORER$max_lags %||% 10))
+        as.integer(min(max(round(input$lags), 1), EXPLORER$max_lags %||% 20))
       } else 0L
       weight <- input$weight %||% "population"
       # Exposure of the T terms (R/exposure.R): thresholds on the histogram's
@@ -3379,12 +3379,13 @@ server <- function(input, output, session) {
           "a one-off year is a deviation that year only, while a permanent shift leaves (1 - sum_j phi_j)",
           "of itself every year.")),
         tags$li(paste(
-          "Lags (optional, L = 5 by default when ticked, up to 10): every deviation term, with its interactions and",
+          "Lags (optional, L = 5 by default when ticked, up to 20): every deviation term, with its interactions and",
           "income scaling, also enters at t-1, ..., t-L with coefficients of its own, each lag interacted with the",
           "characteristics of its own year (and the time-varying ones with their lagged level terms). The lags of",
           "the first years come from the climate of the 10 years before the start (deviations demeaned from 1960, as",
           "in the notebook), and those after a gap in the rows from the climate of the missing years; a model uses",
-          "the rows with every lagged value it needs (trailing income before 1970 is often missing). The response",
+          "the rows with every lagged value it needs (trailing income before 1970 is often missing; with L above 10",
+          "the rows start L - 10 years after the start, e.g. 1980 with 20 lags). The response",
           "is the cumulative effect of one year's anomaly over that year and the L after; in the paths and",
           "scenarios each year's growth sums the effects of its own deviation and of the L before (none before the",
           "shift, or before 2025 in the scenarios: the counterfactual shares that history). The cap applies lag by",

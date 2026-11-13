@@ -529,10 +529,14 @@ for (weight in names(EXPLORER_WEIGHTS)) for (gdp in EXPLORER_GDP) for (climate i
   }
 }
 
+# The most lags the app offers. The history stays from the start year minus
+# MAX_LAGS (the deviations are demeaned from then on), so with more than
+# MAX_LAGS lags a model's rows start lags - MAX_LAGS years after the start.
+APP_MAX_LAGS <- 20L
 out_dir <- file.path("results", "response_explorer")
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 saveRDS(list(panels = panels, units = units, support = support, variability = variability, filters = filters,
-             nrk_lags = NRK_LAGS, nrk_start = NRK_START, max_lags = MAX_LAGS, income_units = INCOME_UNITS,
+             nrk_lags = NRK_LAGS, nrk_start = NRK_START, max_lags = APP_MAX_LAGS, history_lags = MAX_LAGS, income_units = INCOME_UNITS,
              capital_units = CAPITAL_UNITS, outcome_columns = c(capital = "dlk_pc", worker = "dly_worker", lgdp = "lgdp_pc"),
              baselines = EXPLORER_BASELINES, units_suffix = EXPLORER_UNITS,
              fe_slopes = EXPLORER_FE_SLOPES, outcome = OUTCOME, controls = CONTROLS, control_sets = CONTROL_SETS,
