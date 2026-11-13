@@ -2818,56 +2818,123 @@ server <- function(input, output, session) {
   # The alternatives of a run: each a forcing, an economy and a catch-up time
   # (the options as set, the compared one taking each of its values), with its
   # label.
-  ts_variants_of <- function(compare, forcing, economy, tau, forcings, economies, taus) {
-    one <- function(f, e, t) list(forcing = f, economy = e, tau = t)
+  # (and a geoengineering pattern, `sai`: "uniform", "mix" or a latitude; the
+  # CIDER model and fractions are those of the run.)
+  ts_variants_of <- function(compare, forcing, economy, tau, forcings, economies, taus, sai = "uniform",
+                             sais = character(0), model = NULL, fractions = NULL) {
+    one <- function(f, e, t, s = sai) list(forcing = f, economy = e, tau = t, sai = s)
     v <- switch(compare,
                 forcing = lapply(forcings, function(f) one(f, economy, tau)),
                 economy = lapply(economies, function(e) one(forcing, e, tau)),
                 tau = lapply(taus, function(t) one(forcing, economy, t)),
+                sai = lapply(sais, function(s) one(forcing, economy, tau, s)),
                 list(one(forcing, economy, tau)))
     for (i in seq_along(v)) {
       v[[i]]$label <- switch(compare, tau = sprintf("%s, tau = %g years", scenario_label(v[[i]]$forcing, v[[i]]$economy), v[[i]]$tau),
                              scenario_label(v[[i]]$forcing, v[[i]]$economy))
+      if (compare == "sai" || v[[i]]$sai != "uniform") {
+        v[[i]]$label <- paste0(v[[i]]$label, "; ", sai_label(v[[i]]$sai, model, fractions))
+      }
     }
     v
   }
+  # The injection fractions as set (named by latitude).
+  ts_fractions <- function() {
+    stats::setNames(vapply(CIDER_LATS, function(l) as.numeric(input[[paste0("ts_f_", l)]] %||% NA_real_), 0), CIDER_LATS)
+  }
   ts_inputs <- function() {
     compare <- input$ts_compare %||% "none"
-    list(compare = compare,
+    model <- input$ts_cider_model %||% if (!is.null(CIDER)) names(CIDER$models)[[1]] else ""
+    fractions <- ts_fractions()
+    list(compare = compare, model = model, fractions = fractions,
          variants = ts_variants_of(compare, input$ts_forcing, input$ts_econ %||% "follow", input$ts_tau,
                                    intersect(SCENARIO_CHOICES, input$ts_cmp_forcings), input$ts_cmp_economies,
-                                   ts_compare_taus(input$ts_cmp_taus)))
+                                   ts_compare_taus(input$ts_cmp_taus),
+                                   sai = if (identical(input$ts_sai, "cider")) "mix" else "uniform",
+                                   sais = intersect(TS_SAI_CHOICES, input$ts_cmp_sai), model = model,
+                                   fractions = fractions))
   }
+  # The background warming of a forcing (FaIR median, named by year).
+  ts_background <- function(forcing) {
+    g <- SCEN$gmt[SCEN$gmt$scenario == forcing, ]
+    stats::setNames(g$median, g$year)
+  }
+  # The CIDER pattern of alternative v of run r: NULL (uniform) or list(model,
+  # fractions).
+  ts_sai_of <- function(r, v) {
+    if (is.null(v$sai) || v$sai == "uniform") return(NULL)
+    list(model = r$cider_model, fractions = sai_fractions(v$sai, r$fractions))
+  }
+  cider_key <- function(model, fractions) paste(model, paste(signif(fractions, 4), collapse = "/"))
+  # The injection of alternative r (a run with one pattern) with CIDER's
+  # pattern, linear in the steady-state cooling per Tg (no saturation of the
+  # aerosol): the largest global cooling of the sustained path, its injection
+  # and the latitudes beyond the rate of the training runs; "" if uniform.
+  # (A new line, after the label of the alternative when there are several.)
+  ts_injection_text <- function(r, many = FALSE) {
+    sai <- ts_sai_of(r, r)
+    if (is.null(sai)) return("")
+    mix <- cider_mix(CIDER, sai$model, sai$fractions)
+    paths <- ts_paths_of(r)
+    years <- as.character(seq(PROJECTION_FROM, PROJECTION_TO))
+    cooling <- paths[[1]][years] - paths[[2]][years]
+    i <- which.max(cooling)
+    total <- cooling[[i]] * mix$tg_per_c
+    per <- total * mix$fractions
+    over <- names(per)[per > CIDER_TRAINING_TG]
+    paste0("\n", if (many) paste0(r$variant, ": "),
+           sprintf("injection up to %.0f Tg SO2/yr (%s, %.2f C of cooling; linear in CIDER's steady-state cooling per Tg)%s",
+                   total, years[[i]], cooling[[i]],
+                   if (length(over)) sprintf(", beyond the %g Tg/yr of the training runs at %s", CIDER_TRAINING_TG,
+                                             paste(over, collapse = ", ")) else ""))
+  }
+  # The limit of geoengineering as set: list(mode = "level" or "rate", value),
+  # and its key.
+  ts_target <- function() {
+    mode <- if (identical(input$ts_mode, "rate")) "rate" else "level"
+    list(mode = mode, value = as.numeric(if (mode == "rate") input$ts_rate else input$ts_held))
+  }
+  target_key <- function(mode, value) paste(mode, value)
   ts_run <- eventReactive(ts_runs(), {
     req(ts_runs() > 0)
     x <- ts_inputs()
-    validate(need(length(input$ts_years) > 0, "Select at least one termination year."),
+    target <- ts_target()
+    uses_cider <- any(vapply(x$variants, function(v) v$sai != "uniform", TRUE))
+    validate(need(isTRUE(target$value >= 0), "The limit of geoengineering must be a number of at least 0."),
              need(length(x$variants) > 0, "Select at least one alternative to compare."),
-             need(all(vapply(x$variants, function(v) isTRUE(v$tau > 0), TRUE)), "The catch-up time must be positive."))
+             need(all(vapply(x$variants, function(v) isTRUE(v$tau > 0), TRUE)), "The catch-up time must be positive."),
+             need(!uses_cider || !is.null(CIDER), "No CIDER patterns: run Rscript apps/response_explorer/build_cider.R."),
+             need(!("mix" %in% vapply(x$variants, `[[`, "", "sai")) || isTRUE(sum(pmax(x$fractions, 0), na.rm = TRUE) > 0),
+                  "The injection fractions must have a positive sum."))
     v1 <- x$variants[[1]]
-    # (forcing, economy, tau: those of the first alternative.)
-    list(specs = specs(), forcing = v1$forcing, held = as.numeric(input$ts_held),
-         years = sort(as.integer(input$ts_years)), tau = v1$tau, economy = v1$economy,
+    # (forcing, economy, tau, pattern: those of the first alternative.)
+    list(specs = specs(), forcing = v1$forcing, mode = target$mode, held = target$value,
+         years = sort(as.integer(input$ts_years)), tau = v1$tau, economy = v1$economy, sai = v1$sai,
+         cider_model = x$model, fractions = x$fractions,
          compare = x$compare, variants = x$variants, noise = noise_of(input$ts_noise, input$ts_noise_n),
          no_gains = isTRUE(input$ts_no_gains))
   })
-  ts_key <- function(sp, variants, held, years, noise, no_gains) {
+  ts_key <- function(sp, variants, held, years, noise, no_gains, cider) {
     paste(c(vapply(sp, function(s) paste(s$label, s$model$key, s$sd_mode, s$clim_mode, paste(s$cap, collapse = "/")), ""),
-            vapply(variants, function(v) paste(v$forcing, v$economy, v$tau), ""), held, years, noise_key(noise), no_gains),
+            vapply(variants, function(v) paste(v$forcing, v$economy, v$tau, v$sai), ""), held, years, noise_key(noise), no_gains,
+            cider),
           collapse = " || ")
   }
   ts_status <- function() {
     if (ts_runs() == 0) return(helpText(class = "mb-0", "Not run yet."))
     r <- ts_run()
-    current <- ts_key(specs(), ts_inputs()$variants, as.numeric(input$ts_held), sort(as.integer(input$ts_years)),
-                      noise_of(input$ts_noise, input$ts_noise_n), isTRUE(input$ts_no_gains))
-    if (!identical(current, ts_key(r$specs, r$variants, r$held, r$years, r$noise, r$no_gains))) {
+    x <- ts_inputs()
+    target <- ts_target()
+    current <- ts_key(specs(), x$variants, target_key(target$mode, target$value), sort(as.integer(input$ts_years)),
+                      noise_of(input$ts_noise, input$ts_noise_n), isTRUE(input$ts_no_gains), cider_key(x$model, x$fractions))
+    if (!identical(current, ts_key(r$specs, r$variants, target_key(r$mode, r$held), r$years, r$noise, r$no_gains,
+                                   cider_key(r$cider_model, r$fractions)))) {
       return(helpText(class = "mb-0 text-warning-emphasis",
                       "Settings or options changed since the last run: press Run to update."))
     }
-    helpText(class = "mb-0", sprintf("Up to date: %d setting(s), %s, held at %.1f C, %d termination year(s); %s.",
+    helpText(class = "mb-0", sprintf("Up to date: %d setting(s), %s, %s, %d termination year(s); %s.",
                                      length(r$specs), paste(vapply(r$variants, `[[`, "", "label"), collapse = " | "),
-                                     r$held, length(r$years),
+                                     geo_target_text(r$mode, r$held), length(r$years),
                                      paste0(noise_label(r$noise), if (r$no_gains) "; gains ignored in the world aggregate")))
   }
   output$ts_status <- renderUI(ts_status())
@@ -2897,6 +2964,7 @@ server <- function(input, output, session) {
     r$forcing <- v$forcing
     r$economy <- v$economy
     r$tau <- v$tau
+    r$sai <- v$sai %||% "uniform"
     r$variant <- v$label
     r
   }
@@ -2965,9 +3033,9 @@ server <- function(input, output, session) {
                                vapply(r$specs, `[[`, "", "label"))
     updateSelectInput(session, "ts_map_setting", choices = choices, selected = choices[[1]])
     updateSelectInput(session, "ts_map_year", choices = as.character(r$years),
-                      selected = as.character(r$years[[1]]))
+                      selected = if (length(r$years)) as.character(r$years[[1]]) else character(0))
     p <- names(ts_paths_of(r))
-    updateSelectInput(session, "ts_lat_paths", choices = p, selected = p[c(2, 3)])
+    updateSelectInput(session, "ts_lat_paths", choices = p, selected = utils::head(p[-1], 2))
     labels <- vapply(r$variants, `[[`, "", "label")
     updateSelectInput(session, "ts_variant", choices = labels, selected = labels[[1]])
   })
@@ -3018,12 +3086,15 @@ server <- function(input, output, session) {
     validate(need(isTRUE(k > 0), "k must be positive."))
     ref <- ts_reference()
     years <- seq(PROJECTION_FROM, PROJECTION_TO)
-    do.call(rbind, lapply(grep("^terminated in", names(paths), value = TRUE), function(p) {
+    out <- do.call(rbind, lapply(grep("^terminated in", names(paths), value = TRUE), function(p) {
       d <- gmt_deviation(paths[[p]], years, ref$window, ref$horizon)
       data.frame(path = p, termination = as.integer(sub("^terminated in ", "", p)), year = years,
                  warming = d$warming, threshold = d$reference + k * sg$gmt,
                  above = d$deviation > k * sg$gmt)
     }))
+    # (No termination: no rows.)
+    out %||% data.frame(path = character(0), termination = integer(0), year = integer(0), warming = numeric(0),
+                        threshold = numeric(0), above = logical(0))
   }
   ts_exceedance <- reactive(ts_exceedance_of(ts_paths(), ts_sigma()))
   # "2040: 12 years (2041-2052)", the years from the termination on.
@@ -3061,7 +3132,8 @@ server <- function(input, output, session) {
           sprintf("%s: %.2f C per decade in %d", sub("^terminated in ", "", p), x$warming[i], x$year[i])
         }, "")
         return(list(d = cbind(variant = v$label, d), ex = NULL, sd = NA_real_,
-                    text = paste0(if (length(r$variants) > 1) paste0(v$label, ": "), paste(peaks, collapse = "; "))))
+                    text = paste0(if (length(r$variants) > 1) paste0(v$label, ": "), paste(peaks, collapse = "; "),
+                                  ts_injection_text(rv, length(r$variants) > 1))))
       }
       # The bands: for each terminated path, a vertical band from the first to
       # the last year its warming is above the reference climate plus k SD,
@@ -3072,7 +3144,8 @@ server <- function(input, output, session) {
         data.frame(path = e$path[1], start = min(e$year) - 0.5, end = max(e$year) + 0.5)
       })) else ex[0, ]
       list(d = cbind(variant = v$label, d), ex = if (nrow(ex)) cbind(variant = v$label, ex),
-           text = paste0(if (length(r$variants) > 1) paste0(v$label, ": "), paste(exceedance_text(ex0), collapse = "; ")),
+           text = paste0(if (length(r$variants) > 1) paste0(v$label, ": "), paste(exceedance_text(ex0), collapse = "; "),
+                         ts_injection_text(rv, length(r$variants) > 1)),
            sd = sg$gmt)
     })
     d <- do.call(rbind, lapply(parts, `[[`, "d"))
