@@ -2425,11 +2425,17 @@ server <- function(input, output, session) {
     else sprintf("%s, %d noise paths", tolower(names(VARIABILITY_CHOICES)[VARIABILITY_CHOICES == noise$type]), noise$n)
   }
   # A setting's projection with the natural variability of its panel.
-  project_with <- function(s, scenario, ssp, noise, gmt = NULL, no_gains = FALSE, region = NULL) {
+  # (`sai`: list(model, fractions), geoengineering with CIDER's pattern under
+  # the setting's climate weights; NULL: uniform.)
+  project_with <- function(s, scenario, ssp, noise, gmt = NULL, no_gains = FALSE, region = NULL, sai = NULL) {
     m <- s$model
     variability <- EXPLORER$variability[[paste(m$gdp, m$climate, m$weight %||% "population", sep = " | ")]]
+    sai_arg <- if (!is.null(sai)) {
+      list(pattern = cider_mix(CIDER, sai$model, sai$fractions, m$weight %||% "population")$pattern,
+           background = ts_background(scenario))
+    }
     out <- tryCatch(project_setting(s, SCEN, scenario, ssp, gmt = gmt, variability = variability, noise = noise$type,
-                                    n_paths = noise$n, no_gains = no_gains, region = region),
+                                    n_paths = noise$n, no_gains = no_gains, region = region, sai = sai_arg),
                     error = function(e) if (is.null(region)) stop(e) else NULL)
     validate(need(!is.null(out), paste0("None of the selected countries can be projected with setting ", s$label, ".")))
     out
@@ -2922,12 +2928,16 @@ server <- function(input, output, session) {
         ssp <- economy_of(v$forcing, v$economy)
         path <- jobs$path[j]
         incProgress(1 / nrow(jobs), detail = paste(s$label, "-", v$label, "-", path))
-        key <- paste(s$model$key, s$sd_mode, s$clim_mode, paste(s$cap, collapse = "/"), v$forcing, ssp, r$held, v$tau, path,
+        # (Without geoengineering the pattern does not matter.)
+        sai <- if (path != "no geoengineering") ts_sai_of(r, v)
+        key <- paste(s$model$key, s$sd_mode, s$clim_mode, paste(s$cap, collapse = "/"), v$forcing, ssp,
+                     target_key(r$mode, r$held), v$tau, path,
                      noise_key(r$noise), if (r$no_gains) "no gains", if (!is.null(region)) paste(region, collapse = "+"),
+                     if (!is.null(sai)) paste("CIDER", cider_key(sai$model, sai$fractions)),
                      sep = " | ")
         if (is.null(projection_cache[[key]])) {
           projection_cache[[key]] <- project_with(s, v$forcing, ssp, r$noise, gmt = paths[[jobs$k[j]]][[path]],
-                                                  no_gains = r$no_gains, region = region)
+                                                  no_gains = r$no_gains, region = region, sai = sai)
         }
         list(variant = v$label, setting = s$label, n = s$n, path = path, result = projection_cache[[key]])
       })
@@ -3293,9 +3303,18 @@ server <- function(input, output, session) {
     ref <- ts_reference()
     sign <- input$ts_sign %||% "warm"
     years <- seq(PROJECTION_FROM, PROJECTION_TO)
+    # With CIDER's pattern, geoengineering's own T pattern (the map setting's weights).
+    r <- ts_one()
+    sai <- ts_sai_of(r, r)
+    t_sai <- if (!is.null(sai)) {
+      mix <- cider_mix(CIDER, sai$model, sai$fractions, ts_sigma_setting()$model$weight %||% "population")
+      stats::setNames(mix$pattern$t_sai, mix$pattern$iso3)
+    }
+    background <- if (!is.null(sai)) ts_background(r$forcing)
     d <- do.call(rbind, lapply(chosen, function(p) {
       cbind(path = p, exposure_by_latitude(paths[[p]], years, ref$window, ref$horizon, sg,
-                                           ts_population(), LATITUDE_SHARES, input$ts_k_lat, sign))
+                                           ts_population(), LATITUDE_SHARES, input$ts_k_lat, sign,
+                                           background = background, t_sai = t_sai))
     }))
     d$path <- factor(d$path, levels = chosen)
     baseline <- 100 * if (sign == "both") 2 * stats::pnorm(-input$ts_k_lat) else stats::pnorm(-input$ts_k_lat)

@@ -274,9 +274,16 @@ world_growth <- function(world_gdp, loss) {
 # GDP (its effect capped at zero, year by year, at each draw and noise path);
 # the countries keep their GDP weights, and the country results stay as they
 # are.
+#
+# `sai`: geoengineering with its own regional pattern, list(pattern =
+# cider_mix()$pattern, background = the warming without it, named by year).
+# The forced anomaly is then the background's CMIP6 pattern plus the SAI
+# pattern times the global SAI change (gmt - background, zero before 2025):
+#   T: t_slope (B - ref) + t_sai (G - B),  P: mean_P (p_rel_slope (B - ref) + p_sai (G - B)).
+# A country without a SAI pattern keeps the CMIP6 one (counted in `sai_fallback`).
 project_setting <- function(spec, scen_data, scenario, ssp = NULL, gmt = NULL,
                             variability = NULL, noise = "none", n_paths = 500L, no_gains = FALSE,
-                            region = NULL) {
+                            region = NULL, sai = NULL) {
   agg <- function(x) if (isTRUE(no_gains)) pmin(x, 0) else x
   model <- spec$model
   ssp <- ssp %||% scen_data$ssp$of_scenario[[scenario]]
@@ -287,9 +294,18 @@ project_setting <- function(spec, scen_data, scenario, ssp = NULL, gmt = NULL,
     gmt <- stats::setNames(g$median, g$year)
   }
   horizon <- model$horizon %||% c(1970L, 2023L)
-  reference <- mean(gmt[as.character(seq(horizon[[1]], horizon[[2]]))])
   history <- seq(PROJECTION_FROM - 31L, PROJECTION_TO)
-  warming <- gmt[as.character(history)] - reference
+  if (is.null(sai)) {
+    reference <- mean(gmt[as.character(seq(horizon[[1]], horizon[[2]]))])
+    warming <- gmt[as.character(history)] - reference
+    sai_change <- 0 * warming
+  } else {
+    background <- sai$background
+    reference <- mean(background[as.character(seq(horizon[[1]], horizon[[2]]))])
+    warming <- background[as.character(history)] - reference
+    sai_change <- gmt[as.character(history)] - background[as.character(history)]
+    stopifnot(all(is.finite(sai_change)))
+  }
   years <- seq(PROJECTION_FROM, PROJECTION_TO)
   window <- EXPLORER_WINDOWS[[model$window]]
   # Income and share follow the SSP as trailing means: over the windows they
@@ -316,6 +332,19 @@ project_setting <- function(spec, scen_data, scenario, ssp = NULL, gmt = NULL,
   if (with_noise) countries <- dplyr::filter(countries, GID_0 %in% rownames(variability$TM))
   if (!is.null(region)) countries <- dplyr::filter(countries, GID_0 %in% region)
   if (!nrow(countries)) stop("None of the selected countries can be projected with this setting.")
+  sai_fallback <- 0L
+  if (is.null(sai)) {
+    countries$t_sai <- countries$t_slope
+    countries$p_sai <- countries$p_rel_slope
+  } else {
+    m <- match(countries$GID_0, sai$pattern$iso3)
+    countries$t_sai <- sai$pattern$t_sai[m]
+    countries$p_sai <- sai$pattern$p_sai[m]
+    missing <- !is.finite(countries$t_sai) | !is.finite(countries$p_sai)
+    countries$t_sai[missing] <- countries$t_slope[missing]
+    countries$p_sai[missing] <- countries$p_rel_slope[missing]
+    sai_fallback <- sum(missing)
+  }
   weights <- gdp_wide[countries$GID_0, as.character(years), drop = FALSE]
   universe <- if (is.null(region)) rownames(gdp_wide) else intersect(region, rownames(gdp_wide))
   coverage <- sum(weights[, 1]) / sum(gdp_wide[universe, 1], na.rm = TRUE)
@@ -344,7 +373,8 @@ project_setting <- function(spec, scen_data, scenario, ssp = NULL, gmt = NULL,
     cn <- countries[i, ]
     country <- list(GID_0 = cn$GID_0, mean_T = cn$mean_T, sd_T = cn$sd_T, mean_P = cn$mean_P, sd_P = cn$sd_P,
                     income = cn$income, share = cn$share, capital = cn$capital)
-    anomalies <- list(TM = cn$t_slope * warming, RR = cn$p_rel_slope * cn$mean_P * warming)
+    anomalies <- list(TM = cn$t_slope * warming + cn$t_sai * sai_change,
+                      RR = cn$mean_P * (cn$p_rel_slope * warming + cn$p_sai * sai_change))
     income <- share <- NULL
     if (follow_inc) {
       h <- income_history[income_history$iso3 == cn$GID_0, ]
@@ -420,7 +450,7 @@ project_setting <- function(spec, scen_data, scenario, ssp = NULL, gmt = NULL,
                            loss = as.vector(country_loss), loss_T = as.vector(country_loss_T),
                            loss_P = as.vector(country_loss_P)),
     coverage = coverage, n = nrow(countries), follow = follow, followed = followed, ssp = ssp,
-    no_gains = isTRUE(no_gains)
+    no_gains = isTRUE(no_gains), sai_fallback = sai_fallback
   )
 }
 
@@ -487,11 +517,21 @@ natural_sigma <- function(variability, pattern, population) {
 # around its forced deviation (`sign`: "warm", above +k SD, or "both", beyond
 # +-k SD), weighted by its population (`population`: iso3 x years) spread over
 # the latitude bands by area (`shares`: latitude_shares()).
+# With `background` and `t_sai` (named by iso3; cider_mix()), geoengineering has
+# its own pattern: the forced deviation is t_slope dev(B) + t_sai dev(G - B).
 exposure_by_latitude <- function(gmt, years, window, horizon, sigma, population, shares, k = 2.5,
-                                 sign = "warm") {
-  dev <- gmt_deviation(gmt, years, window, horizon)$deviation
+                                 sign = "warm", background = NULL, t_sai = NULL) {
   iso <- intersect(intersect(names(sigma$sd), rownames(population)), shares$iso3)
-  z <- outer(sigma$slope[iso] / sigma$sd[iso], dev)
+  if (is.null(t_sai)) {
+    dev <- gmt_deviation(gmt, years, window, horizon)$deviation
+    z <- outer(sigma$slope[iso] / sigma$sd[iso], dev)
+  } else {
+    sai <- gmt - background[names(gmt)]
+    t <- t_sai[iso]
+    t[!is.finite(t)] <- sigma$slope[iso][!is.finite(t)]
+    z <- (outer(sigma$slope[iso], gmt_deviation(background, years, window, horizon)$deviation) +
+            outer(t, gmt_deviation(sai, years, window, horizon)$deviation)) / sigma$sd[iso]
+  }
   p <- 1 - stats::pnorm(k - z)
   if (sign == "both") p <- p + stats::pnorm(-k - z)
   pop <- population[iso, as.character(years), drop = FALSE]
