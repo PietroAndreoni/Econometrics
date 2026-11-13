@@ -39,24 +39,67 @@ PROJECTION_TO <- 2100L
 # model's draws of coefficient_draws()).
 N_PROJECTION_DRAWS <- 1000L
 
-# Global warming with perfect geoengineering (a climate with the same global
-# temperature is the same with or without it): the background path `background`
-# (named by year) until PROJECTION_FROM; from then on held at `held` (or the
-# background where it is lower); from the termination year `termination` (NULL:
-# never) the gap to the background closes with characteristic time `tau`:
-#   G(t) = B(t) - max(B(T) - H, 0) exp(-(t - T) / tau).
-termination_path <- function(background, held, termination = NULL, tau = 4) {
+# Global warming with geoengineering: the background path `background` (named
+# by year) until PROJECTION_FROM; from then on, with `mode`
+#   "level"  held at `target` C (or the background where it is lower; 0 is the
+#            preindustrial climate): S(t) = min(B(t), target);
+#   "rate"   rising by at most `target` C per decade (or following the
+#            background where it is lower; 0 stops warming at the level of the
+#            year before PROJECTION_FROM): S(t) = min(B(t), S(t-1) + target / 10).
+# From the termination year `termination` (NULL: never) the gap to the
+# background closes with characteristic time `tau`:
+#   G(t) = B(t) - max(B(T) - S(T), 0) exp(-(t - T) / tau).
+termination_path <- function(background, target, termination = NULL, tau = 4, mode = "level") {
+  stopifnot(mode %in% c("level", "rate"), is.finite(target), target >= 0)
   years <- as.integer(names(background))
-  out <- background
-  geo <- years >= PROJECTION_FROM
-  if (!is.null(termination)) geo <- geo & years < termination
-  out[geo] <- pmin(background[geo], held)
-  if (!is.null(termination)) {
-    gap <- max(background[[as.character(termination)]] - held, 0)
-    after <- years >= termination
-    out[after] <- background[after] - gap * exp(-(years[after] - termination) / tau)
+  sustained <- background
+  geo <- which(years >= PROJECTION_FROM)
+  if (mode == "level") {
+    sustained[geo] <- pmin(background[geo], target)
+  } else {
+    for (i in geo) sustained[[i]] <- min(background[[i]], sustained[[i - 1L]] + target / 10)
   }
+  if (is.null(termination)) return(sustained)
+  out <- sustained
+  at <- as.character(termination)
+  gap <- max(background[[at]] - sustained[[at]], 0)
+  after <- years >= termination
+  out[after] <- background[after] - gap * exp(-(years[after] - termination) / tau)
   out
+}
+# The limit of geoengineering in words: "held at 1.5 C", "warming at most 0.1 C
+# per decade".
+geo_target_text <- function(mode, target) {
+  if (mode == "rate") sprintf("warming at most %g C per decade", target) else sprintf("held at %g C", target)
+}
+
+# Regional patterns of geoengineering by injection latitude (CIDER) -----------
+# `cider`: build_cider.R. With injection fractions `fractions` (named by
+# latitude, any non-negative numbers: scaled to sum to one) in model `model`,
+# the cooling of each latitude per Tg SO2/yr e_l gives its share of the
+# global cooling, s_l = f_l e_l / sum f e, and the injection a degree of
+# global cooling takes (linear: no saturation of the aerosol), 1 / sum f e
+# Tg SO2/yr. A country's change per C of global SAI T change:
+#   t_sai = sum_l s_l t_l,   p_sai = sum_l s_l (dP/dT)_l p_rel_l
+# (t_l: its T per C of global T; p_rel_l: its relative P per mm/d of global
+# P; (dP/dT)_l: global mm/d per C of latitude l), under the pattern weight
+# `weight` (population or area).
+cider_mix <- function(cider, model, fractions, weight = "population") {
+  e <- cider$efficiency[cider$efficiency$model == model, ]
+  f <- fractions[e$lat]
+  f[!is.finite(f) | f < 0] <- 0
+  if (!(sum(f) > 0)) stop("The injection fractions must have a positive sum.")
+  f <- stats::setNames(f / sum(f), e$lat)
+  cooling <- f * e$cooling_per_tg
+  share <- stats::setNames(cooling / sum(cooling), e$lat)
+  dp <- stats::setNames(e$dp_per_dt, e$lat)
+  p <- cider$pattern[[weight]]
+  p <- p[p$model == model & p$source %in% e$lat, ]
+  t_sai <- tapply(p$t * share[p$source], p$iso3, sum)
+  p_sai <- tapply(p$p_rel * (share * dp)[p$source], p$iso3, sum)
+  list(pattern = data.frame(iso3 = names(t_sai), t_sai = as.numeric(t_sai),
+                            p_sai = as.numeric(p_sai[names(t_sai)])),
+       fractions = f, shares = share, tg_per_c = 1 / sum(cooling))
 }
 
 # Cumulative sums down the rows of a matrix (each column a path).

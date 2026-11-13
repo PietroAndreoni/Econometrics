@@ -2980,12 +2980,11 @@ server <- function(input, output, session) {
   ts_paths_of <- function(r) {
     g <- SCEN$gmt[SCEN$gmt$scenario == r$forcing, ]
     background <- stats::setNames(g$median, g$year)
-    held <- sprintf("%.1f C", r$held)
     paths <- c(stats::setNames(list(background), "no geoengineering"),
-               stats::setNames(list(termination_path(background, r$held)),
-                               paste("sustained at", held)))
+               stats::setNames(list(termination_path(background, r$held, mode = r$mode)),
+                               paste0("sustained, ", geo_target_text(r$mode, r$held))))
     for (y in r$years) {
-      paths[[paste("terminated in", y)]] <- termination_path(background, r$held, y, r$tau)
+      paths[[paste("terminated in", y)]] <- termination_path(background, r$held, y, r$tau, mode = r$mode)
     }
     paths
   }
@@ -3269,7 +3268,7 @@ server <- function(input, output, session) {
       scale_fill_manual(values = ts_colours(), guide = "none") +
       scale_linetype_manual(values = c(`FALSE` = "solid", `TRUE` = "22"), guide = "none") +
       labs(x = NULL, y = measure_axis(measure, sp, ts_region()),
-           subtitle = wrap_label(sprintf("%s; %s%s%s%s", if (many) paste("Held at", sprintf("%.1f C", ts_run()$held)) else ts_run()$variants[[1]]$label,
+           subtitle = wrap_label(sprintf("%s; %s%s%s%s", if (many) first_upper(geo_target_text(ts_run()$mode, ts_run()$held)) else ts_run()$variants[[1]]$label,
                                          if (ts_run()$noise$type != "none") "mean over the noise paths; " else "",
                                          band_label(ts_run()$noise),
                                          region_note(ts_region(), lapply(ts_global_projections(), `[[`, "result")),
