@@ -157,7 +157,9 @@ guide_ui <- function() {
         guide_item("Countries (also on the Geoengineering page):", "the global chart, its hover readout and the",
                    "historical growth show one country, or the GDP-weighted aggregate of the selected countries (their",
                    "SSP GDP, with its CI and noise bands), in place of the world; no new run needed. Maps and tables stay",
-                   "global.")
+                   "global. \"Country group\" fills the list with a group (OECD, EU + UK, BRICS and BRICS+, equatorial,",
+                   "northern- and southern-tropics countries by population-weighted latitude, World Bank income groups),",
+                   "which stays editable; build_country_groups.R defines them.")
       )
     ),
     guide_section(

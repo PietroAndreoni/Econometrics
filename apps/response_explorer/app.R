@@ -128,9 +128,18 @@ COUNTRY_CHOICES <- local({
   stats::setNames(iso[o], paste0(name[o], " (", iso[o], ")"))
 })
 COUNTRY_NAMES <- stats::setNames(sub(" \\([A-Z]{3}\\)$", "", names(COUNTRY_CHOICES)), COUNTRY_CHOICES)
-# The name of region `region` (iso3; NULL: the world) on the charts.
+# Country groups for the regional aggregates (build_country_groups.R): name ->
+# the members offered (with SSP GDP); none without the file.
+COUNTRY_GROUPS_FILE <- sub("panels[.]rds$", "country_groups.rds", PANELS_FILE)
+COUNTRY_GROUPS <- if (file.exists(COUNTRY_GROUPS_FILE)) {
+  Filter(length, lapply(readRDS(COUNTRY_GROUPS_FILE)$groups, function(x) sort(intersect(x, COUNTRY_CHOICES))))
+} else list()
+# The name of region `region` (iso3; NULL: the world) on the charts: a group's
+# when it is exactly one.
 region_name <- function(region) {
   if (is.null(region)) return("world")
+  group <- names(Filter(function(x) identical(x, sort(region)), COUNTRY_GROUPS))
+  if (length(group)) return(sub(" \\(.*\\)$", "", group[[1]]))
   if (length(region) <= 3) return(paste(COUNTRY_NAMES[region], collapse = " + "))
   sprintf("%d selected countries'", length(region))
 }
@@ -138,9 +147,17 @@ region_name <- function(region) {
 COMMON_Y_LABEL <- "Global chart: common y axis across the panels"
 y_scales <- function(common) if (isTRUE(common)) "fixed" else "free_y"
 REGION_LABEL <- "Global chart: countries (empty: the world; several: their aggregate GDP)"
+# (With the country groups: a group fills the countries, which stay editable.)
 region_input <- function(id) {
-  selectizeInput(id, REGION_LABEL, COUNTRY_CHOICES, multiple = TRUE,
-                 options = list(placeholder = "World", plugins = list("remove_button")))
+  countries <- selectizeInput(id, REGION_LABEL, COUNTRY_CHOICES, multiple = TRUE,
+                              options = list(placeholder = "World", plugins = list("remove_button")))
+  if (!length(COUNTRY_GROUPS)) return(countries)
+  layout_columns(
+    col_widths = c(3, 9),
+    selectInput(paste0(id, "_group"), "Global chart: country group",
+                c("Choose a group..." = "", stats::setNames(names(COUNTRY_GROUPS), names(COUNTRY_GROUPS)))),
+    countries
+  )
 }
 # The maps draw the sf borders of SCEN$world.
 loadNamespace("sf")
@@ -2427,6 +2444,14 @@ server <- function(input, output, session) {
     x <- input[[id]]
     if (length(x)) sort(unique(x)) else NULL
   }
+  # A country group chosen fills the countries of its chart (then editable).
+  for (id in c("scen_region", "ts_region")) local({
+    id <- id
+    observeEvent(input[[paste0(id, "_group")]], {
+      g <- input[[paste0(id, "_group")]]
+      if (nzchar(g %||% "")) updateSelectizeInput(session, id, selected = COUNTRY_GROUPS[[g]])
+    }, ignoreInit = TRUE)
+  })
   # The history layers and note of a growth chart of `region`.
   region_history <- function(region) if (is.null(region)) PWT_WORLD else pwt_growth(region)
   # "; aggregate of 3 of the 4 selected countries (98% of their GDP)" when a
