@@ -252,7 +252,8 @@ project_country_noise <- function(model, country, anomalies, noise, sd_mode, cli
   rho <- convergence_rho(model)
   rho_draws <- convergence_draws(model, n)
   list(point = accumulated(model, out$TM$point + out$RR$point, rho), point_T = accumulated(model, out$TM$point, rho),
-       point_P = accumulated(model, out$RR$point, rho), draws = accumulated(model, out$TM$draws + out$RR$draws, rho_draws))
+       point_P = accumulated(model, out$RR$point, rho), draws = accumulated(model, out$TM$draws + out$RR$draws, rho_draws),
+       draws_T = accumulated(model, out$TM$draws, rho_draws), draws_P = accumulated(model, out$RR$draws, rho_draws))
 }
 
 # Cumulative effect on log GDP of years PROJECTION_FROM..PROJECTION_TO of the
@@ -264,7 +265,7 @@ project_country <- function(model, country, anomalies, sd_mode, clim_mode, cap, 
                             income = NULL, share = NULL) {
   window <- EXPLORER_WINDOWS[[model$window]]
   growth_point <- list()
-  growth_draws <- 0
+  growth_draws <- list()
   for (v in c("TM", "RR")) {
     a <- anomalies[[v]]
     sd <- deviation_scale(model, country, v)
@@ -293,13 +294,15 @@ project_country <- function(model, country, anomalies, sd_mode, clim_mode, cap, 
       out
     }
     growth_point[[v]] <- drop(growth(point_beta(model)))
-    growth_draws <- growth_draws + growth(draws)
+    growth_draws[[v]] <- growth(draws)
   }
   # (The convergence control: rho at the estimate, and at each draw.)
   rho <- convergence_rho(model)
   rho_draws <- convergence_draws(model, nrow(draws))
   list(point = accumulated(model, growth_point$TM + growth_point$RR, rho), point_T = accumulated(model, growth_point$TM, rho),
-       point_P = accumulated(model, growth_point$RR, rho), draws = accumulated(model, growth_draws, rho_draws))
+       point_P = accumulated(model, growth_point$RR, rho),
+       draws = accumulated(model, growth_draws$TM + growth_draws$RR, rho_draws),
+       draws_T = accumulated(model, growth_draws$TM, rho_draws), draws_P = accumulated(model, growth_draws$RR, rho_draws))
 }
 
 # Growth (% a year; NA in the first year) of world GDP `world_gdp` (by year)
@@ -410,10 +413,13 @@ project_setting <- function(spec, scen_data, scenario, ssp = NULL, gmt = NULL,
 
   n_draws <- if (with_noise) n_paths else N_PROJECTION_DRAWS
   draws <- coefficient_draws(model)[seq_len(n_draws), , drop = FALSE]
-  global_point <- numeric(length(years))
-  global_draws <- matrix(0, nrow = length(years), ncol = nrow(draws))
-  # The global loss of each noise path at the estimated coefficients.
-  global_paths <- if (with_noise) matrix(0, nrow = length(years), ncol = n_paths)
+  # The global loss of each component (loss: T and P; loss_T: T only; loss_P:
+  # P only): at the estimate, at each draw and, with noise, of each noise path
+  # at the estimated coefficients.
+  COMPONENTS <- c(loss = "", loss_T = "_T", loss_P = "_P")
+  global_point <- lapply(COMPONENTS, function(k) numeric(length(years)))
+  global_draws <- lapply(COMPONENTS, function(k) matrix(0, nrow = length(years), ncol = nrow(draws)))
+  global_paths <- if (with_noise) lapply(COMPONENTS, function(k) matrix(0, nrow = length(years), ncol = n_paths))
   joint <- if (noise %in% c("joint", "blocks")) {
     with_seed(VARIABILITY_SEED, noise_indices(n_paths, length(history), length(variability$years),
                                               if (noise == "blocks") VARIABILITY_BLOCK else 1L))
@@ -460,46 +466,58 @@ project_setting <- function(spec, scen_data, scenario, ssp = NULL, gmt = NULL,
       r <- project_country_noise(model, country, anomalies,
                                  country_noise(variability, cn$GID_0, length(history), n_paths, joint),
                                  spec$sd_mode, spec$clim_mode, spec$cap, draws, income, share)
-      paths <- cumulative_pct(model, r$point)
-      country_loss[i, ] <- rowMeans(paths)
-      country_loss_T[i, ] <- rowMeans(cumulative_pct(model, r$point_T))
-      country_loss_P[i, ] <- rowMeans(cumulative_pct(model, r$point_P))
-      global_paths <- global_paths + weights[i, ] * agg(paths)
-      contribution <- rowMeans(agg(paths))
+      for (k in names(COMPONENTS)) {
+        paths <- cumulative_pct(model, r[[paste0("point", COMPONENTS[[k]])]])
+        global_paths[[k]] <- global_paths[[k]] + weights[i, ] * agg(paths)
+        global_point[[k]] <- global_point[[k]] + weights[i, ] * rowMeans(agg(paths))
+        if (k == "loss") country_loss[i, ] <- rowMeans(paths)
+        if (k == "loss_T") country_loss_T[i, ] <- rowMeans(paths)
+        if (k == "loss_P") country_loss_P[i, ] <- rowMeans(paths)
+      }
     } else {
       r <- project_country(model, country, anomalies, spec$sd_mode, spec$clim_mode, spec$cap, draws,
                            income, share)
       country_loss[i, ] <- cumulative_pct(model, r$point)
       country_loss_T[i, ] <- cumulative_pct(model, r$point_T)
       country_loss_P[i, ] <- cumulative_pct(model, r$point_P)
-      contribution <- agg(country_loss[i, ])
+      point <- list(loss = country_loss[i, ], loss_T = country_loss_T[i, ], loss_P = country_loss_P[i, ])
+      for (k in names(COMPONENTS)) global_point[[k]] <- global_point[[k]] + weights[i, ] * agg(point[[k]])
     }
-    global_point <- global_point + weights[i, ] * contribution
-    global_draws <- global_draws + weights[i, ] * agg(cumulative_pct(model, r$draws))
+    for (k in names(COMPONENTS)) {
+      global_draws[[k]] <- global_draws[[k]] + weights[i, ] * agg(cumulative_pct(model, r[[paste0("draws", COMPONENTS[[k]])]]))
+    }
   }
-  q <- apply(global_draws, 1, stats::quantile, probs = c(0.025, 0.975), names = FALSE)
-  global <- data.frame(year = years, estimate = global_point, low = q[1, ], high = q[2, ])
   # Growth of the countries' GDP (% a year, from the second year): without
   # climate change (the SSP's), and with it, whose level is the SSP's times one
   # plus the global loss (the loss is the GDP-weighted mean of the countries'),
   # draw by draw for the CI.
-  global$baseline_growth <- c(NA, 100 * (world_gdp[-1] / world_gdp[-length(years)] - 1))
-  global$growth <- world_growth(world_gdp, global_point)
-  qg <- apply(world_growth(world_gdp, global_draws), 1, stats::quantile, probs = c(0.025, 0.975),
-              names = FALSE, na.rm = TRUE)
-  global$growth_low <- qg[1, ]
-  global$growth_high <- qg[2, ]
-  if (with_noise) {
-    qv <- apply(global_paths, 1, stats::quantile, probs = c(0.025, 0.975), names = FALSE)
-    global$noise_low <- qv[1, ]
-    global$noise_high <- qv[2, ]
-    qv <- apply(world_growth(world_gdp, global_paths), 1, stats::quantile, probs = c(0.025, 0.975),
+  global_frame <- function(point, draws, paths) {
+    q <- apply(draws, 1, stats::quantile, probs = c(0.025, 0.975), names = FALSE)
+    out <- data.frame(year = years, estimate = point, low = q[1, ], high = q[2, ])
+    out$baseline_growth <- c(NA, 100 * (world_gdp[-1] / world_gdp[-length(years)] - 1))
+    out$growth <- world_growth(world_gdp, point)
+    qg <- apply(world_growth(world_gdp, draws), 1, stats::quantile, probs = c(0.025, 0.975),
                 names = FALSE, na.rm = TRUE)
-    global$growth_noise_low <- qv[1, ]
-    global$growth_noise_high <- qv[2, ]
+    out$growth_low <- qg[1, ]
+    out$growth_high <- qg[2, ]
+    if (!is.null(paths)) {
+      qv <- apply(paths, 1, stats::quantile, probs = c(0.025, 0.975), names = FALSE)
+      out$noise_low <- qv[1, ]
+      out$noise_high <- qv[2, ]
+      qv <- apply(world_growth(world_gdp, paths), 1, stats::quantile, probs = c(0.025, 0.975),
+                  names = FALSE, na.rm = TRUE)
+      out$growth_noise_low <- qv[1, ]
+      out$growth_noise_high <- qv[2, ]
+    }
+    out
   }
+  # (`global`: T and P; `global_by`: each component, the same columns.)
+  global_by <- lapply(stats::setNames(names(COMPONENTS), names(COMPONENTS)), function(k) {
+    global_frame(global_point[[k]], global_draws[[k]], if (with_noise) global_paths[[k]])
+  })
   list(
-    global = global, noise = if (with_noise) noise else "none", n_paths = if (with_noise) n_paths,
+    global = global_by$loss, global_by = global_by, noise = if (with_noise) noise else "none",
+    n_paths = if (with_noise) n_paths,
     countries = data.frame(iso3 = rep(countries$GID_0, times = length(years)),
                            country = rep(countries$country, times = length(years)),
                            year = rep(years, each = nrow(countries)),
