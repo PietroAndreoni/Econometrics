@@ -3150,13 +3150,23 @@ server <- function(input, output, session) {
     }, "")
   }
 
-  # One panel per alternative of the run (a forcing and catch-up time; the
-  # economy changes only the population weights of the natural SD).
+  # The alternatives of run r with their own warming paths: one for each forcing
+  # and catch-up time (the economy and the geoengineering pattern leave the
+  # global paths unchanged).
+  ts_gmt_variants <- function(r) {
+    r$variants[!duplicated(vapply(r$variants, function(v) paste(v$forcing, v$tau), ""))]
+  }
+  # One panel per alternative with its own warming paths (the economy changes
+  # only the population weights of the natural SD: one panel, with the first
+  # alternative's); the injection of each CIDER alternative in the caption.
   ts_gmt_plot <- function() {
     validate(need(ts_runs() > 0, TS_NOT_RUN))
     r <- ts_run()
     rate <- identical(input$ts_gmt_measure, "rate")
-    parts <- lapply(r$variants, function(v) {
+    shown <- ts_gmt_variants(r)
+    many <- length(shown) > 1
+    injection <- vapply(r$variants, function(v) ts_injection_text(ts_with(r, v), length(r$variants) > 1), "")
+    parts <- lapply(shown, function(v) {
       rv <- ts_with(r, v)
       paths <- ts_paths_of(rv)
       sg <- ts_sigma_of(rv)
@@ -3176,8 +3186,7 @@ server <- function(input, output, session) {
           sprintf("%s: %.2f C per decade in %d", sub("^terminated in ", "", p), x$warming[i], x$year[i])
         }, "")
         return(list(d = cbind(variant = v$label, d), ex = NULL, sd = NA_real_,
-                    text = paste0(if (length(r$variants) > 1) paste0(v$label, ": "), paste(peaks, collapse = "; "),
-                                  ts_injection_text(rv, length(r$variants) > 1))))
+                    text = paste0(if (many) paste0(v$label, ": "), paste(peaks, collapse = "; "))))
       }
       # The bands: for each terminated path, a vertical band from the first to
       # the last year its warming is above the reference climate plus k SD,
@@ -3188,8 +3197,7 @@ server <- function(input, output, session) {
         data.frame(path = e$path[1], start = min(e$year) - 0.5, end = max(e$year) + 0.5)
       })) else ex[0, ]
       list(d = cbind(variant = v$label, d), ex = if (nrow(ex)) cbind(variant = v$label, ex),
-           text = paste0(if (length(r$variants) > 1) paste0(v$label, ": "), paste(exceedance_text(ex0), collapse = "; "),
-                         ts_injection_text(rv, length(r$variants) > 1)),
+           text = paste0(if (many) paste0(v$label, ": "), paste(exceedance_text(ex0), collapse = "; ")),
            sd = sg$gmt)
     })
     d <- do.call(rbind, lapply(parts, `[[`, "d"))
@@ -3203,15 +3211,23 @@ server <- function(input, output, session) {
                 inherit.aes = FALSE, alpha = 0.15, colour = NA)
     }
     sds <- unique(round(vapply(parts, `[[`, 0, "sd"), 2))
-    many <- length(r$variants) > 1
-    caption <- if (rate) {
-      paste0(wrap_label(paste0(first_upper(RATE_TEXT), ". Fastest warming after each termination:"), if (many) 140 else 70),
-             "\n", paste(vapply(parts, `[[`, "", "text"), collapse = "\n"))
+    terminated <- length(r$years) > 0
+    # (One panel for several economies: the SD with the first one's population.)
+    first_sd <- !many && length(unique(vapply(r$variants, `[[`, "", "economy"))) > 1
+    width <- if (many) 140 else 70
+    injection <- vapply(sub("^\n", "", injection[nzchar(injection)]), wrap_label, "", width, USE.NAMES = FALSE)
+    caption <- if (!terminated) {
+      # No termination: no bands; the rate's definition and the injection only.
+      paste(c(if (rate) wrap_label(paste0(first_upper(RATE_TEXT), "."), width), injection), collapse = "\n")
+    } else if (rate) {
+      paste(c(wrap_label(paste0(first_upper(RATE_TEXT), ". Fastest warming after each termination:"), width),
+              vapply(parts, `[[`, "", "text"), injection), collapse = "\n")
     } else {
-      paste0(wrap_label(sprintf(
-        "Bands: from the first to the last year after the termination with warming above %s + %g SD of natural variability (1 SD = %s C of global warming). Years above it:",
-        ts_reference()$label, input$ts_k_gmt, paste(sprintf("%.2f", sds), collapse = " / ")), if (many) 140 else 70), "\n",
-        paste(vapply(parts, `[[`, "", "text"), collapse = "\n"))
+      paste(c(wrap_label(sprintf(
+        "Bands: from the first to the last year after the termination with warming above %s + %g SD of natural variability (1 SD = %s C of global warming%s). Years above it:",
+        ts_reference()$label, input$ts_k_gmt, paste(sprintf("%.2f", sds), collapse = " / "),
+        if (first_sd) sprintf(", population of %s", economy_of(shown[[1]]$forcing, shown[[1]]$economy)) else ""), width),
+        vapply(parts, `[[`, "", "text"), injection), collapse = "\n")
     }
     ggplot(d, aes(year, warming, colour = path)) +
       geom_vline(xintercept = PROJECTION_FROM, colour = GRID, linewidth = 0.5) +
@@ -3225,8 +3241,8 @@ server <- function(input, output, session) {
       scale_linetype_manual(values = c(`FALSE` = "solid", `TRUE` = "22"), guide = "none") +
       labs(x = NULL, y = if (rate) RATE_AXIS else "Global warming above 1850-1900 (C)",
            subtitle = if (many) "Background: FaIR median of each forcing"
-                      else sprintf("Background: %s (FaIR median); catch-up time %.1f years",
-                                   FORCING_LABELS[[r$forcing]], r$tau),
+                      else paste0(sprintf("Background: %s (FaIR median)", FORCING_LABELS[[r$forcing]]),
+                                  if (terminated) sprintf("; catch-up time %.1f years", r$tau)),
            caption = caption) +
       theme_explorer() +
       theme(plot.caption = element_text(colour = INK_MUTED, size = 9, hjust = 0),
@@ -3236,9 +3252,15 @@ server <- function(input, output, session) {
   # The heights of the charts: the global chart grows with the settings when
   # the alternatives are in columns.
   ts_many <- reactive(ts_runs() > 0 && length(ts_run()$variants) > 1)
+  # (Several panels of warming paths.)
+  ts_many_gmt <- reactive(ts_runs() > 0 && length(ts_gmt_variants(ts_run())) > 1)
   ts_global_height <- function() if (ts_many()) 160 + 230 * length(ts_run()$specs) else 460
   output$ts_charts <- renderUI({
-    if (ts_many()) {
+    if (ts_many() && !ts_many_gmt()) {
+      # The alternatives share the warming paths: one panel beside the global chart.
+      layout_columns(col_widths = c(4, 8), plotOutput("ts_gmt_plot", height = max(460, ts_global_height())),
+                     plotOutput("ts_global_plot", height = ts_global_height(), hover = hoverOpts("hover_ts", delay = 80)))
+    } else if (ts_many()) {
       tagList(plotOutput("ts_gmt_plot", height = 420),
               plotOutput("ts_global_plot", height = ts_global_height(), hover = hoverOpts("hover_ts", delay = 80)))
     } else {
