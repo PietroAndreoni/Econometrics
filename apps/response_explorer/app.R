@@ -1707,6 +1707,8 @@ ui <- page_navbar(
           uiOutput("ts_status")),
       radioButtons("ts_gmt_measure", "Warming chart", WARMING_CHOICES, selected = "level", inline = TRUE),
       radioButtons("ts_measure", "Global chart", MEASURE_CHOICES, selected = "loss", inline = TRUE),
+      radioButtons("ts_component", "Impact of (global chart, table and map)",
+                   c("T and P" = "loss", "T only" = "loss_T", "P only" = "loss_P"), selected = "loss", inline = TRUE),
       region_input("ts_region"),
       checkboxInput("ts_common_y", COMMON_Y_LABEL, value = FALSE),
       conditionalPanel("input.ts_measure == 'growth'",
@@ -3032,7 +3034,8 @@ server <- function(input, output, session) {
                      noise_key(r$noise), if (r$no_gains) "no gains", if (!is.null(region)) paste(region, collapse = "+"),
                      if (!is.null(sai)) paste("CIDER", cider_key(sai$model, sai$fractions)),
                      sep = " | ")
-        if (is.null(projection_cache[[key]])) {
+        # (Also when a saved projection lacks the T-only and P-only series.)
+        if (is.null(projection_cache[[key]]) || is.null(projection_cache[[key]]$global_by)) {
           projection_cache[[key]] <- project_with(s, v$forcing, ssp, r$noise, gmt = paths[[jobs$k[j]]][[path]],
                                                   no_gains = r$no_gains, region = region, sai = sai)
         }
@@ -3051,9 +3054,21 @@ server <- function(input, output, session) {
     region <- ts_region()
     if (is.null(region)) ts_projections_all() else ts_projections_for(region)
   })
+  # The global series of a projection for the chosen component (T and P, T
+  # only, P only); projections saved before the components were kept have
+  # only T and P.
+  ts_global_of <- function(result) {
+    component <- input$ts_component %||% "loss"
+    g <- result$global_by[[component]]
+    if (is.null(g)) {
+      validate(need(component == "loss", "This saved run has only the impact of T and P: press Run to update."))
+      g <- result$global
+    }
+    g
+  }
   ts_global <- reactive({
     do.call(rbind, lapply(ts_global_projections(), function(p) {
-      cbind(variant = p$variant, setting = p$setting, path = p$path, p$result$global)
+      cbind(variant = p$variant, setting = p$setting, path = p$path, ts_global_of(p$result))
     }))
   })
   observeEvent(ts_run(), {
@@ -3232,6 +3247,51 @@ server <- function(input, output, session) {
     }
   })
 
+  # Arrows of the T and P parts in 2100 (loss chart with T and P): for each
+  # geoengineering path, how its loss differs from that without geoengineering
+  # (same setting and alternative), split into the change of the T-only loss
+  # and of the P-only loss (pp of GDP), chained from the no-geoengineering loss:
+  # T solid, then P dashed, in the path's colour, one pair of arrows per path
+  # side by side after 2100, labelled with both changes. (The two parts add up
+  # in log points; in % the chain ends within the cross term of the total.)
+  ts_tp_arrows <- function(levels_setting, levels_variant) {
+    rows <- lapply(ts_global_projections(), function(p) {
+      gb <- p$result$global_by
+      if (is.null(gb)) return(NULL)
+      at <- function(k) gb[[k]]$estimate[gb[[k]]$year == PROJECTION_TO]
+      data.frame(variant = p$variant, setting = p$setting, path = p$path, total = at("loss"), T = at("loss_T"),
+                 P = at("loss_P"))
+    })
+    d <- do.call(rbind, rows)
+    if (is.null(d) || !any(d$path == "no geoengineering")) return(NULL)
+    base <- d[d$path == "no geoengineering", ]
+    d <- d[d$path != "no geoengineering", ]
+    if (!nrow(d)) return(NULL)
+    m <- match(paste(d$variant, d$setting), paste(base$variant, base$setting))
+    d$y0 <- base$total[m]
+    d$dT <- d$T - base$T[m]
+    d$dP <- d$P - base$P[m]
+    d <- d[!is.na(m), ]
+    # Side by side: path k of its panel at 2100 + 2 + 5 (k - 1), P 1.5 years on.
+    d$k <- stats::ave(seq_len(nrow(d)), d$variant, d$setting, FUN = seq_along)
+    d$x <- PROJECTION_TO + 2 + 5 * (d$k - 1)
+    d$path <- ts_run_colours(d$path)
+    d$setting <- factor(d$setting, levels = levels_setting)
+    d$variant <- factor(d$variant, levels = levels_variant)
+    arrow_head <- grid::arrow(length = grid::unit(0.14, "cm"), type = "closed")
+    seg_T <- d[abs(d$dT) > 1e-4, ]
+    seg_P <- d[abs(d$dP) > 1e-4, ]
+    list(
+      geom_segment(data = seg_T, aes(x = x, xend = x, y = y0, yend = y0 + dT, colour = path), inherit.aes = FALSE,
+                   linewidth = 0.7, linetype = "solid", arrow = arrow_head, show.legend = FALSE),
+      geom_segment(data = seg_P, aes(x = x + 1.5, xend = x + 1.5, y = y0 + dT, yend = y0 + dT + dP, colour = path),
+                   inherit.aes = FALSE, linewidth = 0.7, linetype = "22", arrow = arrow_head, show.legend = FALSE),
+      geom_text(data = d, aes(x = x + 2, y = y0 + dT + dP, label = sprintf("T %+.2f\nP %+.2f", dT, dP), colour = path),
+                inherit.aes = FALSE, hjust = 0, size = 2.7, lineheight = 0.9, show.legend = FALSE),
+      # (Room for the last labels.)
+      expand_limits(x = max(d$x) + 12)
+    )
+  }
   ts_global_plot <- function() {
     validate(need(ts_runs() > 0, TS_NOT_RUN))
     sp <- ts_run()$specs
@@ -3242,6 +3302,10 @@ server <- function(input, output, session) {
     d$variant <- ts_variant_factor(d$variant)
     d$path <- ts_run_colours(d$path)
     many <- length(ts_run()$variants) > 1
+    # The arrows of the T and P parts: loss chart, impact of T and P.
+    arrows <- if (measure == "loss" && identical(input$ts_component %||% "loss", "loss")) {
+      ts_tp_arrows(levels(d$setting), levels(d$variant))
+    }
     # Growth: the SSP's growth without climate change (the same for every
     # path), thin grey.
     baseline <- if (measure == "growth") {
@@ -3255,6 +3319,7 @@ server <- function(input, output, session) {
       baseline +
       (if (measure == "growth" && isTRUE(input$ts_history)) history_growth_layers(region_history(ts_region()))) +
       geom_line(aes(linetype = path == "no geoengineering"), linewidth = 0.9) +
+      arrows +
       (if (many) {
         # Side by side: the alternatives in columns, the settings in rows (one y
         # scale per row).
@@ -3264,16 +3329,25 @@ server <- function(input, output, session) {
         facet_wrap(~setting, ncol = min(3, nlevels(d$setting)), scales = y_scales(input$ts_common_y),
                    labeller = labeller(setting = function(x) wrap_label(x, 50)))
       }) +
+      # (Years on the axis up to 2100 only: the arrows sit after it.)
+      scale_x_continuous(breaks = function(lims) {
+        b <- pretty(c(lims[1], PROJECTION_TO))
+        b[b <= PROJECTION_TO]
+      }) +
       scale_colour_manual(values = ts_colours(), name = NULL, guide = guide_legend(ncol = 3)) +
       scale_fill_manual(values = ts_colours(), guide = "none") +
       scale_linetype_manual(values = c(`FALSE` = "solid", `TRUE` = "22"), guide = "none") +
       labs(x = NULL, y = measure_axis(measure, sp, ts_region()),
-           subtitle = wrap_label(sprintf("%s; %s%s%s%s", if (many) first_upper(geo_target_text(ts_run()$mode, ts_run()$held)) else ts_run()$variants[[1]]$label,
+           subtitle = wrap_label(sprintf("%s; %s; %s%s%s%s", if (many) first_upper(geo_target_text(ts_run()$mode, ts_run()$held)) else ts_run()$variants[[1]]$label,
+                                         COMPONENT_TITLES[[input$ts_component %||% "loss"]],
                                          if (ts_run()$noise$type != "none") "mean over the noise paths; " else "",
                                          band_label(ts_run()$noise),
                                          region_note(ts_region(), lapply(ts_global_projections(), `[[`, "result")),
                                          if (measure == "growth") paste0("; grey dotted: the SSP's growth without climate change",
-                                                                         if (isTRUE(input$ts_history)) history_growth_note(region_history(ts_region()), region_name(ts_region()))) else ""),
+                                                                         if (isTRUE(input$ts_history)) history_growth_note(region_history(ts_region()), region_name(ts_region())))
+                                         else if (!is.null(arrows)) paste0("; arrows after ", PROJECTION_TO, ": the change of the ", PROJECTION_TO,
+                                                                         " loss from no geoengineering due to T (solid) and P (dashed), pp of GDP")
+                                         else ""),
                                  110)) +
       theme_explorer() +
       theme(strip.text = element_text(colour = INK_MUTED, size = 9.5, hjust = 0),
@@ -3322,7 +3396,9 @@ server <- function(input, output, session) {
     }
     a <- a[a$year == PROJECTION_TO, ]
     b <- b[b$year == PROJECTION_TO, ]
-    difference <- a$loss - b$loss[match(a$iso3, b$iso3)]
+    component <- input$ts_component %||% "loss"
+    difference <- a[[component]] - b[[component]][match(a$iso3, b$iso3)]
+    legend <- paste0(legend, "\n", COMPONENT_TITLES[[component]])
     limit <- max(abs(difference), na.rm = TRUE)
     ggplot(world_with(a$iso3, difference)) +
       geom_sf(aes(fill = value), colour = SURFACE, linewidth = 0.1) +
@@ -3445,9 +3521,10 @@ server <- function(input, output, session) {
     many <- length(ts_run()$variants) > 1
     cell <- function(g, y) loss_text(g[g$year == y, ])
     out <- do.call(rbind, lapply(pr, function(p) {
-      g <- p$result$global
+      g <- ts_global_of(p$result)
       sustained <- Filter(function(q) q$variant == p$variant && q$setting == p$setting && startsWith(q$path, "sustained"), pr)[[1]]
-      s100 <- sustained$result$global$estimate[sustained$result$global$year == PROJECTION_TO]
+      gs <- ts_global_of(sustained$result)
+      s100 <- gs$estimate[gs$year == PROJECTION_TO]
       data.frame(Alternative = p$variant, Setting = p$setting, Path = p$path,
                  `World GDP 2050 (%)` = cell(g, 2050), `World GDP 2100 (%)` = cell(g, PROJECTION_TO),
                  `2100 against sustained (pp)` = sprintf("%+.2f", g$estimate[g$year == PROJECTION_TO] - s100),
@@ -3794,9 +3871,11 @@ server <- function(input, output, session) {
     termination_part <- if (ts_runs() > 0) {
       card("Geoengineering and termination shocks, 2025-2100",
            tags$div(class = "muted", ts_status()),
-           tags$p(class = "muted", paste0("Global chart: ", measure_text(input$ts_measure), ".")),
-           if (ts_many()) tagList(chart(ts_gmt_plot, 420, 1180), chart(ts_global_plot, ts_global_height(), 1180))
-           else pair(chart(ts_gmt_plot, 460, 520), chart(ts_global_plot, 460, 1040), "1fr 2fr"),
+           tags$p(class = "muted", paste0("Global chart: ", measure_text(input$ts_measure), "; ",
+                                          COMPONENT_TITLES[[input$ts_component %||% "loss"]], ".")),
+           if (ts_many_gmt()) tagList(chart(ts_gmt_plot, 420, 1180), chart(ts_global_plot, ts_global_height(), 1180))
+           else pair(chart(ts_gmt_plot, max(460, ts_global_height()), 520), chart(ts_global_plot, ts_global_height(), 1040),
+                     "1fr 2fr"),
            chart(ts_map, 380, 1180),
            if (length(input$ts_lat_paths)) chart(ts_lat_plot, 420, 1180),
            table_of(ts_table()), ts_notes())
