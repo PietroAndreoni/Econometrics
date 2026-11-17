@@ -1,0 +1,383 @@
+---
+title: "Weather shocks, growth and geoengineering: methods"
+subtitle: "Estimation, projections and the coupling with the CIDER SAI emulator"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 2
+    number_sections: true
+    self_contained: true
+    theme: flatly
+    df_print: kable
+  pdf_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+    latex_engine: xelatex
+    df_print: kable
+    fig_caption: true
+mainfont: Cambria
+mathfont: Cambria Math
+geometry: margin=2.2cm
+fontsize: 10pt
+linkcolor: blue
+---
+
+```{r setup, include = FALSE}
+# Methods handout of the preferred specification and of the response
+# explorer's projections, including the geoengineering page and its coupling
+# with CIDER. Needs, from the project root:
+#   Rscript handout_preferred_specification.R        (estimates.rds)
+#   Rscript handout_sources.R                        (sources.rds)
+#   Rscript apps/response_explorer/build_scenarios.R (scenarios.rds)
+#   Rscript apps/response_explorer/build_cider.R     (cider.rds)
+# Render:
+#   rmarkdown::render("handout_methods.Rmd", output_format = "all", output_dir = "results/handout_methods")
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, dpi = 150, fig.align = "center")
+library(ggplot2)
+library(sf)
+e <- readRDS(file.path("results", "handout_preferred_specification", "estimates.rds"))
+src <- readRDS(file.path("results", "handout_preferred_specification", "sources.rds"))
+scen <- readRDS(file.path("results", "response_explorer", "scenarios.rds"))
+cider <- readRDS(file.path("results", "response_explorer", "cider.rds"))
+# The app's own functions: termination_path(), cider_mix(), PROJECTION_FROM.
+source(file.path("apps", "response_explorer", "R", "projection.R"))
+ybar <- exp(e$inc_mean)
+pp <- function(x, d = 2) formatC(100 * x, format = "f", digits = d)
+f2 <- function(x, d = 2) formatC(x, format = "f", digits = d)
+# Figure captions: numbered by hand in HTML, by LaTeX in the PDF.
+fignum <- function(n, text) if (knitr::is_latex_output()) text else paste0("Figure ", n, ". ", text)
+theme_handout <- function() {
+  theme_minimal(base_size = 10) +
+    theme(panel.grid.minor = element_blank(), legend.position = "top",
+          plot.caption = element_text(hjust = 0, colour = "grey35"))
+}
+```
+
+<style>
+body { font-size: 15px; line-height: 1.55; max-width: 980px; }
+h1 { font-size: 1.6em; margin-top: 1.6em; }
+h2 { font-size: 1.25em; }
+.note { background: #f4f6f8; border-left: 4px solid #2a78d6; padding: 0.6em 1em; margin: 1em 0; }
+.caveat { background: #fbf4ec; border-left: 4px solid #e8702a; padding: 0.6em 1em; margin: 1em 0; }
+table { font-size: 0.92em; }
+</style>
+
+**Purpose.** This note sets out the methods behind the preferred specification of the growth response to weather shocks and behind the projections of the response explorer: the climate-change scenarios and the geoengineering page. It adds the new coupling with the CIDER emulator of stratospheric aerosol injection (SAI). That coupling lets geoengineering have its own regional pattern by injection latitude, rather than being the mirror image of greenhouse warming. Results are shown only where they illustrate a method. The Word handout of the preferred specification has the tests that led to it.
+
+**The chain, in five steps.**
+
+1. **Estimate** the growth response of each country to deviations of its annual temperature and precipitation from its own recent climate (Sections 1–2).
+2. **Build the climate of a scenario**: a global warming path (FaIR), scaled to each country by its CMIP6 pattern, optionally plus natural variability (Sections 3 and 5).
+3. **Project** the growth effects year by year and cumulate them into GDP losses against a world without further climate change (Section 4).
+4. **Geoengineering** changes the global path: it limits warming to a level or a rate, and may stop in a termination year (Section 6).
+5. **CIDER** gives the part of the climate that geoengineering changes its own regional pattern, by injection latitude (Section 7).
+
+# Data and weather deviations
+
+*Data.* Growth of real GDP per capita from the Penn World Table 11.0 (rgdpna / pop, constant national prices). Annual temperature $T$ and precipitation $P$ from ERA5, aggregated to countries with 2000 population-density weights; the app also offers area weights. The sample has `r format(e$sample[["rows"]], big.mark = ",")` country-years and `r e$sample[["countries"]]` countries over `r e$sample[["first"]]`–`r e$sample[["last"]]`.
+
+*Outliers.* The `r 100 * src$outliers$share / 2`% lowest and highest growth rates from `r src$outliers$start_year` (`r format(src$outliers$tails, big.mark = ",")` country-years) are annotated by cause. The `r src$outliers$dropped` with non-weather causes (wars, commodity shocks, reforms and booms, crises, COVID-19, unidentified) are dropped, `r src$outliers$dropped_sample` of them within the estimation rows. The `r src$outliers$weather_kept` caused by weather stay.
+
+*Agricultural share.* From the World Bank WDI: agriculture over the value added of the three sectors, averaged over `r e$horizon[1]`–`r e$horizon[2]` (previous year's share), so constant within a country in the estimation.
+
+*Weather deviations.* Each year is measured against the country's own trailing 20-year climate and scaled by its long-run variability:
+
+$$x_{v,it} = \frac{v_{it} - \mu^{20}_{v,it}}{\sigma_{v,i}}, \qquad \mu^{20}_{v,it} = \frac{1}{20}\sum_{k=1}^{20} v_{i,t-k}, \qquad v \in \{T, P\}$$
+
+$\sigma_{v,i}$ is the SD of $v_{it}$ over `r e$horizon[1]`–`r e$horizon[2]`. In the estimation the deviation is demeaned by the country's quadratic trend, $d_{v,it} = x_{v,it} - (\hat a_i + \hat b_i t + \hat c_i t^2)$, and split into **arms**:
+
+$$D^{+}_{v,it} = \max(d_{v,it}, 0), \qquad D^{-}_{v,it} = \max(-d_{v,it}, 0)$$
+
+so a warm (wet) year and a cold (dry) year of the same size can have different effects.
+
+*Characteristics* (trailing, apart from the share): climate $c_{v,it} = \mu^{20}_{v,it} - \operatorname{med}_j \bar v_j$; income $Y_{it}$, the 5-year trailing mean of GDP per capita, with $y_{it} = \ln Y_{it}$ less its mean; agricultural share $s_i$ less its mean.
+
+# Preferred specification
+
+$$\begin{aligned}
+\Delta \ln \mathrm{GDPpc}_{it} = {} & \left(\frac{\bar Y}{Y_{it}}\right)^{1-\xi} \sum_{a \in \{+,-\}} \big(\tilde\beta^{a}_{T} + \tilde\gamma^{a}_{T,c}\, c_{T,it}\big)\, D^{a}_{T,it} \\
+& + \sum_{a \in \{+,-\}} \big(\beta^{a}_{P} + \gamma^{a}_{P,c}\, c_{P,it} + \gamma^{a}_{P,s}\, s_{i}\big)\, D^{a}_{P,it} \\
+& + \phi_T c_{T,it} + \phi_P c_{P,it} + \phi_y y_{it} + \kappa' C_{it} + \lambda_t + \alpha_i + \delta_i t + \eta_i t^2 + \varepsilon_{it}
+\end{aligned}$$
+
+- **Temperature**: warm and cold arms, interacted with the trailing climate, and scaled by income. $\bar Y$ = US\$`r format(round(ybar, -1), big.mark = ",")`, the geometric mean of trailing income over the rows. $\xi$ is the income elasticity of the dollar loss per person; the preferred **$\xi$ = `r e$xi_preferred`** means a warm year costs the same dollars per person at every income, so its growth effect falls in proportion to $1/Y$. $\xi$ is weakly identified: $\xi = 0$ is never rejected, $\xi = 1$ (equal growth effects) is rejected or at the margin.
+- **Precipitation**: wet and dry arms, interacted with the trailing climate and the agricultural share, unscaled.
+- **Controls**: the levels of trailing climate and income, conflict dummies and the Soviet and Yugoslav collapse years ($C_{it}$); year effects $\lambda_t$; country effects and country linear and quadratic trends. Errors are clustered by country.
+
+**Table 1. Preferred specification (linear arms, ξ = `r e$xi_preferred`): pp of growth per SD of deviation; interactions per unit of the characteristic (°C, m/yr, share); scaled terms at income Ȳ.**
+
+```{r table-coefs}
+labels <- c("pTM:r" = "Warm arm (scaled)", "pTM:clim_TM:r" = "Warm × climate (scaled)",
+            "nTM:r" = "Cold arm (scaled)", "nTM:clim_TM:r" = "Cold × climate (scaled)",
+            "pRR" = "Wet arm", "pRR:clim_RR" = "Wet × climate", "pRR:agr" = "Wet × agricultural share",
+            "nRR" = "Dry arm", "nRR:clim_RR" = "Dry × climate", "nRR:agr" = "Dry × agricultural share",
+            "clim_TM" = "Trailing climate, T", "clim_RR" = "Trailing climate, P", "y" = "Trailing income (log)")
+cf <- e$coefs$Pref
+stars <- function(p) ifelse(p < 0.01, "***", ifelse(p < 0.05, "**", ifelse(p < 0.1, "*", "")))
+knitr::kable(data.frame(Term = unname(labels[cf$term]),
+                        Estimate = paste0(pp(cf$estimate), stars(cf$p)), `Clustered SE` = pp(cf$se),
+                        check.names = FALSE), align = "lrr")
+```
+
+*\*\*\* p < 0.01, \*\* p < 0.05, \* p < 0.1. The app can re-estimate any variant (ξ, quadratic arms, other moderators, other GDP and climate sources); its default setting uses ξ = 0.6, so set ξ = 0 to reproduce this table's model.*
+
+# Climate of a scenario
+
+*Global warming.* $B(t)$ is the median over the 1,001 members of FaIR v2.1 (AR6 calibration) for SSP1-1.9 to SSP5-8.5, warming above 1850–1900.
+
+*Downscaling to countries.* Each country has a CMIP6 pattern: the median over the models of its best-fit linear relationship with global temperature. For $T$ the slope $\theta^{T}_i$ (°C per °C of global warming); for $P$ the relative slope $\theta^{P}_i$ (each model's slope over its own intercept, so the change does not depend on the model's bias in the level of $P$). With $\bar P_i$ the country's long-run ERA5 precipitation and $\mathrm{ref}$ the mean of $B$ over the estimation horizon:
+
+$$\Delta T_{it} = \theta^{T}_i\,\big(B(t) - \mathrm{ref}\big), \qquad \Delta P_{it} = \bar P_i\, \theta^{P}_i\,\big(B(t) - \mathrm{ref}\big)$$
+
+The patterns are population- or area-weighted, as the setting's climate data.
+
+# Projected growth effects and losses
+
+*Deviations in the projection.* The projected deviation of each year is the anomaly path against its own trailing 20-year mean, divided by the country's long-run SD, as in the estimation. The anomaly paths start in 1994 with the history of $B$, so the trailing means of 2025 exist. The climate in the interactions moves with the same trailing mean.
+
+*Income and agricultural share.* Fixed at the country's values, or following the SSP: trailing means (5 years for income, 20 for the share) of the country's own history continued with the SSP's relative change.
+
+*Losses.* With $g_i(\cdot)$ the growth effect of the specification, the effect on log GDP per capita cumulates from 2025, against no further climate change:
+
+$$L_i(t) = \sum_{k=2025}^{t} g_i(k), \qquad \text{loss}_i(t) = 100\,\big(e^{L_i(t)} - 1\big)\ \%$$
+
+The world (or regional) loss weights the countries by the SSP's GDP of each year. Growth of world GDP follows from the loss and the SSP's growth.
+
+*T only and P only.* $g_i = g^{T}_i + g^{P}_i$, the temperature and precipitation terms. The geoengineering page and the maps show either part alone, $100\,(e^{\sum g^{T}} - 1)$ and $100\,(e^{\sum g^{P}} - 1)$, or both. In log points the parts add up to the total.
+
+*Uncertainty.* 1,000 draws of the coefficients from $N(\hat\beta, \hat V_{\text{cluster}})$, the same draws for every country; the 95% CI is the 2.5–97.5% range of the world loss over the draws, computed for each component.
+
+# Natural variability (optional)
+
+The forced paths are smooth. Since the response is not linear (kink between arms, trailing interactions), adding realistic variability changes the expected loss. The noise pool of each country is its detrended historical $T$ and $P$:
+
+$$\nu_{v,i\tau} = v_{i\tau} - (\hat a_{v,i} + \hat b_{v,i}\tau + \hat c_{v,i}\tau^2), \qquad \tau = `r e$horizon[1]`, \dots, `r e$horizon[2]`$$
+
+A noise path draws a historical year for each projection year: independently by country, jointly (the same calendar year everywhere, keeping the spatial correlation) or jointly in 5-year blocks (also keeping persistence). The scenario adds the noise to the forced signal and the counterfactual has the noise alone, so the noise matters only through the nonlinearity:
+
+$$L_i(t) = \sum_{k=2025}^{t} \big[\, g_i\big(S_{ik} + \nu_{i\tau_k}\big) - g_i\big(\nu_{i\tau_k}\big) \big]$$
+
+Each noise path is paired with a coefficient draw. The estimate is the mean over the paths at the estimated coefficients.
+
+# Geoengineering paths
+
+The geoengineering page changes the global path from 2025, with the background $B(t)$ of the chosen forcing. Two kinds of limit:
+
+$$\text{level } H \ge 0:\quad S(t) = \min\big(B(t),\, H\big) \qquad\qquad \text{rate } r \ge 0:\quad S(t) = \min\big(B(t),\, S(t-1) + r/10\big)$$
+
+$H$ in °C above 1850–1900 (0 is the preindustrial climate; a level below today's warming is an immediate cooling in 2025). $r$ in °C per decade (0 stops warming at the 2024 level). After termination in year $T_e$, the gap to the background closes with characteristic time $\tau$:
+
+$$G(t) = B(t) - \max\big(B(T_e) - S(T_e),\, 0\big)\, e^{-(t - T_e)/\tau}, \qquad t \ge T_e$$
+
+Without a termination year only the background and sustained geoengineering run. The page also reports, for each termination, the years in which global warming exceeds its reference climate (trailing 20- or 30-year mean, or the horizon mean) by more than $k$ SD of natural variability, and the share of the population, by 5° latitude band, exposed to years beyond $k$ SD of local variability.
+
+```{r fig-paths, fig.width = 7.5, fig.height = 3.3, fig.cap = fignum(1, "Global warming paths of the geoengineering page under SSP2-4.5 (FaIR median): level limit at 1.5 °C and rate limit at 0.1 °C per decade, sustained and terminated in 2060 (τ = 4 years).")}
+g <- scen$gmt[scen$gmt$scenario == "ssp245", ]
+B <- stats::setNames(g$median, g$year)
+paths <- list(
+  "No geoengineering" = B,
+  "Level 1.5 °C, sustained" = termination_path(B, 1.5),
+  "Level 1.5 °C, terminated 2060" = termination_path(B, 1.5, 2060, 4),
+  "Rate 0.1 °C/decade, sustained" = termination_path(B, 0.1, mode = "rate"),
+  "Rate 0.1 °C/decade, terminated 2060" = termination_path(B, 0.1, 2060, 4, mode = "rate"))
+d <- do.call(rbind, lapply(names(paths), function(k) data.frame(path = k, year = as.integer(names(paths[[k]])),
+                                                               warming = unname(paths[[k]]))))
+d <- d[d$year >= 2000, ]
+d$limit <- ifelse(grepl("^Level", d$path), "Level limit", ifelse(grepl("^Rate", d$path), "Rate limit", "none"))
+d2 <- rbind(transform(d[d$limit != "Rate limit", ], panel = "Level limit (1.5 °C)"),
+            transform(d[d$limit != "Level limit", ], panel = "Rate limit (0.1 °C per decade)"))
+d2$kind <- ifelse(d2$path == "No geoengineering", "No geoengineering",
+                  ifelse(grepl("sustained", d2$path), "Sustained", "Terminated in 2060"))
+ggplot(d2, aes(year, warming, colour = kind, linetype = kind == "No geoengineering")) +
+  geom_vline(xintercept = PROJECTION_FROM, colour = "grey80") +
+  geom_line(linewidth = 0.8) +
+  facet_wrap(~panel) +
+  scale_colour_manual(values = c("No geoengineering" = "#52514e", "Sustained" = "#2a78d6", "Terminated in 2060" = "#eb6834"),
+                      name = NULL) +
+  scale_linetype_manual(values = c(`FALSE` = "solid", `TRUE` = "22"), guide = "none") +
+  labs(x = NULL, y = "Global warming above 1850–1900 (°C)") +
+  theme_handout()
+```
+
+**Two ways to place the geoengineering in space.**
+
+- **Uniform (perfect geoengineering).** A climate with the same global temperature is the same with or without geoengineering. Each country's climate is its CMIP6 pattern times $G(t)$, so the cooling is the mirror image of greenhouse warming and leaves no regional residual at constant global temperature.
+- **CIDER (Section 7).** The change that geoengineering causes, $G(t) - B(t)$, has its own regional pattern, set by where the aerosol is injected.
+
+# Coupling with the CIDER SAI emulator
+
+## The emulator
+
+CIDER, the Climate Intervention Dynamical EmulatoR (Farley et al., *Geosci. Model Dev.* 19, 1809–1831, 2026; code and parameters v1.1.0, Zenodo 10.5281/zenodo.17553537, CC BY 4.0), is trained separately on **CESM2-WACCM6** and **UKESM1**. Each was run with 12 Tg SO₂/yr injected at one of seven latitudes (60N, 30N, 15N, 0, 15S, 30S, 60S) for 35 years over an SSP2-4.5 background. In the full emulator (monthly):
+
+$$\mathrm{AOD}_l(t) = \sum_{j} \beta_l\, e^{-(\alpha_l + \gamma_l q_l(t-j))\,j}\, q_l(t-j), \qquad y_{l}(t) = \sum_j h_{l}(j)\, \mathrm{AOD}_l(t-j), \qquad Y_l(x, t) = y_l(t)\,\Pi_l(x)$$
+
+The injection $q_l$ gives the aerosol optical depth (with saturation through $\gamma_l$); a diffusive impulse response $h_l$ gives the global-mean $T$ or $P$ response $y_l$; a fixed pattern $\Pi_l$ (mean of the last 20 years of the step run, scaled to a global mean of one) spreads it over the grid. The latitudes add up linearly, and the non-SAI forcing has its own pattern.
+
+## What the app uses
+
+<div class="note">
+The app keeps its own global paths (FaIR and the level or rate limits of Section 6) and takes from CIDER only the <b>regional patterns</b> by injection latitude and two <b>steady-state constants</b> of each latitude. It does not run the injection → AOD → temperature dynamics: geoengineering's global change and its termination follow Section 6.
+</div>
+
+*Steady-state constants.* For each model and latitude $l$, the emulator's global response to the 12 Tg/yr step, averaged over the same last 20 years as the patterns, gives:
+
+$$e_l = -\frac{\overline{\Delta T}_l}{12} \ \ (\text{°C of cooling per Tg SO}_2\text{/yr}), \qquad r_l = \frac{\overline{\Delta P}_l}{\overline{\Delta T}_l} \ \ (\text{mm/d of global } P \text{ per °C})$$
+
+```{r fig-eff, fig.width = 7.5, fig.height = 3, fig.cap = fignum(2, "Steady-state constants of the injection latitudes: global cooling per Tg SO₂/yr (left) and global precipitation change per °C of global temperature change (right), by emulated model and their mean.")}
+ef <- cider$efficiency
+ef$model <- unname(cider$models[ef$model])
+mean_ef <- aggregate(cbind(cooling_per_tg, dp_per_dt) ~ lat, ef, mean)
+mean_ef$model <- "Mean of the two"
+ef <- rbind(ef[, c("model", "lat", "cooling_per_tg", "dp_per_dt")], mean_ef[, c("model", "lat", "cooling_per_tg", "dp_per_dt")])
+ef$lat <- factor(ef$lat, levels = rev(cider$lats))
+long <- rbind(data.frame(ef[, c("model", "lat")], what = "Cooling per Tg SO2/yr (°C)", value = ef$cooling_per_tg),
+              data.frame(ef[, c("model", "lat")], what = "Global P per °C (mm/d)", value = ef$dp_per_dt))
+ggplot(long, aes(value, lat, colour = model, shape = model)) +
+  geom_point(size = 2.4) +
+  facet_wrap(~what, scales = "free_x") +
+  scale_colour_manual(values = c("CESM2-WACCM6" = "#5598e7", "UKESM1" = "#eb6834", "Mean of the two" = "#1d1d1b"), name = NULL) +
+  scale_shape_manual(values = c("CESM2-WACCM6" = 16, "UKESM1" = 17, "Mean of the two" = 4), name = NULL) +
+  labs(x = NULL, y = "Injection latitude") +
+  theme_handout()
+```
+
+*Country patterns.* Each model grid cell (288 × 192, 1.25° × 0.94°) gets the population (Kummu et al. 2025, year 2000, as the climate data) or the area of each country within it: every 5-arcmin cell goes to the nearest model cell, times the share of it inside the country's GADM 4.1 borders. A country without population takes area weights. With $w_{ic}$ these weights, $\Pi^{T}_l$ and $\Pi^{P}_l$ the patterns and $P^{\text{base}}$ the model's own precipitation climatology:
+
+$$t_{l,i} = \frac{\sum_c w_{ic}\, \Pi^{T}_l(c)}{\sum_c w_{ic}} \quad (\text{°C per °C of global } T), \qquad p_{l,i} = \frac{\sum_c w_{ic}\, \Pi^{P}_l(c)}{\sum_c w_{ic}\, P^{\text{base}}(c)} \quad (\text{relative } P \text{ per mm/d of global } P)$$
+
+Expressing $P$ relative to the model's own climatology, as for the CMIP6 patterns, keeps the change independent of the model's bias in the level of precipitation. The weights match the setting's climate data: population-weighted settings use the population patterns, area-weighted settings the area patterns.
+
+*Injection fractions.* The user sets non-negative fractions $f_l$ (normalised to sum to one). Since latitudes cool with different efficiency, the share of the global cooling coming from latitude $l$ is
+
+$$s_l = \frac{f_l\, e_l}{\sum_m f_m\, e_m}$$
+
+and the country's change per °C of global geoengineering change mixes the latitudes' patterns with these shares:
+
+$$t^{\text{SAI}}_i = \sum_l s_l\, t_{l,i}, \qquad p^{\text{SAI}}_i = \sum_l s_l\, r_l\, p_{l,i}$$
+
+A single-latitude scenario puts all the injection at one latitude ($f_l = 1$).
+
+*Two-model mean (default).* $t^{\text{SAI}}_i$, $p^{\text{SAI}}_i$, the shares and the injection per °C are computed for each model with its own constants and patterns, then averaged over CESM2-WACCM6 and UKESM1. Either model alone can be chosen for robustness.
+
+## The hybrid climate
+
+The background keeps the CMIP6 patterns; only the change caused by geoengineering, $G(t) - B(t)$ (zero before 2025, negative while it cools), takes CIDER's:
+
+$$\boxed{\;\Delta T_{it} = \theta^{T}_i\,\big(B(t) - \mathrm{ref}\big) + t^{\text{SAI}}_i\,\big(G(t) - B(t)\big), \qquad \Delta P_{it} = \bar P_i\,\Big[\theta^{P}_i\,\big(B(t) - \mathrm{ref}\big) + p^{\text{SAI}}_i\,\big(G(t) - B(t)\big)\Big]\;}$$
+
+With $t^{\text{SAI}}_i = \theta^{T}_i$ and $p^{\text{SAI}}_i = \theta^{P}_i$ this is the uniform case. Without geoengineering the two are identical. Everything downstream (deviations, trailing climate, natural variability, damages, uncertainty, the T-only and P-only components) is unchanged. The latitude-exposure chart uses the same decomposition for the forced deviation of each country, $\theta^{T}_i\,\mathrm{dev}(B) + t^{\text{SAI}}_i\,\mathrm{dev}(G - B)$.
+
+*Termination.* $G(t) - B(t)$ closes with $\tau$ as in Section 6, so each country's rebound is $t^{\text{SAI}}_i$ times the closing gap: a country that SAI over-cooled relative to its greenhouse warming gets a larger rebound, one it under-cooled a smaller one. The pattern keeps its shape during the rebound.
+
+*Injection (indicative).* Linear in the steady-state constants, without aerosol saturation:
+
+$$I(t) = \frac{B(t) - G(t)}{\sum_l f_l\, e_l}\ \ \text{Tg SO}_2\text{/yr}, \qquad I_l(t) = f_l\, I(t)$$
+
+The page reports the largest injection of the sustained path and flags latitudes beyond the 12 Tg/yr of the training runs.
+
+## The regional residual
+
+At constant global temperature, geoengineering that offsets 1 °C of greenhouse warming leaves each country with $\theta^{T}_i - t^{\text{SAI}}_i$ °C and $100\,(\theta^{P}_i - p^{\text{SAI}}_i)$ % of precipitation. The page maps this residual for the chosen alternative; Figures 3 and 4 show it for four single-latitude injections (two-model mean, population weights).
+
+```{r residuals, include = FALSE}
+lats_show <- c("60N", "15N", "15S", "60S")
+cmip <- scen$pattern$population
+world <- scen$world[scen$world$iso3 != "ATA", ]
+res <- do.call(rbind, lapply(lats_show, function(l) {
+  m <- cider_mix(cider, "mean", stats::setNames(as.numeric(cider$lats == l), cider$lats), "population")
+  d <- merge(cmip[, c("iso3", "t_slope", "p_rel_slope")], m$pattern, by = "iso3")
+  data.frame(iso3 = d$iso3, lat = paste(l, "only"), T = d$t_slope - d$t_sai, P = 100 * (d$p_rel_slope - d$p_sai),
+             tg = m$tg_per_c)
+}))
+res$lat <- factor(res$lat, levels = paste(lats_show, "only"))
+map_of <- function(v, limit, colours, name) {
+  sfl <- do.call(rbind, lapply(levels(res$lat), function(l) {
+    w <- world
+    x <- res[res$lat == l, ]
+    w$value <- x[[v]][match(w$iso3, x$iso3)]
+    w$lat <- l
+    w
+  }))
+  sfl$lat <- factor(sfl$lat, levels = levels(res$lat))
+  ggplot(sfl) +
+    geom_sf(aes(fill = value), colour = "white", linewidth = 0.05) +
+    facet_wrap(~lat, ncol = 2) +
+    coord_sf(expand = FALSE, ylim = c(-6.2e6, 8.4e6)) +
+    scale_fill_gradientn(colours = colours, limits = c(-limit, limit), oob = scales::squish, na.value = "#d9d8d4",
+                         name = name) +
+    theme_void(base_size = 9) +
+    theme(legend.position = "bottom", legend.key.width = grid::unit(1.4, "cm"), legend.key.height = grid::unit(0.3, "cm"))
+}
+tg <- tapply(res$tg, res$lat, unique)
+```
+
+```{r fig-res-T, fig.width = 8, fig.height = 4.6, fig.cap = fignum(3, "Temperature left by geoengineering that offsets 1 °C of global warming, by injection latitude (CIDER two-model mean; CMIP6 change per °C of warming plus CIDER's per °C of SAI cooling). Colours capped at ±1.2 °C.")}
+map_of("T", 1.2, c("#2166ac", "#92c5de", "#f0efec", "#f4a582", "#b2182b"), "°C per °C offset")
+```
+
+```{r fig-res-P, fig.width = 8, fig.height = 4.6, fig.cap = fignum(4, "Precipitation left by geoengineering that offsets 1 °C of global warming, by injection latitude, as Figure 3 (%, capped at ±30%).")}
+map_of("P", 30, scen$palettes$prec_div, "% per °C offset")
+```
+
+**Table 2. Size of the residual by injection strategy (two-model mean, population weights, per °C of warming offset): median and 90th percentile over countries of the absolute residual, and the precipitation residual of three countries.**
+
+```{r table-residual}
+strategies <- list("60N only" = "60N", "15N only" = "15N", "15S only" = "15S", "60S only" = "60S",
+                   "15N + 15S" = c("15N", "15S"), "30N + 15N + 15S + 30S (default)" = c("30N", "15N", "15S", "30S"))
+rt <- do.call(rbind, lapply(names(strategies), function(k) {
+  m <- cider_mix(cider, "mean", stats::setNames(as.numeric(cider$lats %in% strategies[[k]]), cider$lats), "population")
+  d <- merge(cmip[, c("iso3", "t_slope", "p_rel_slope")], m$pattern, by = "iso3")
+  rT <- d$t_slope - d$t_sai
+  rP <- 100 * (d$p_rel_slope - d$p_sai)
+  at <- function(iso) sprintf("%+.0f", rP[d$iso3 == iso])
+  data.frame(Injection = k, `Tg SO2/yr per °C` = sprintf("%.1f", m$tg_per_c),
+             `|T|, median (°C)` = f2(median(abs(rT))), `|T|, p90 (°C)` = f2(quantile(abs(rT), 0.9)),
+             `|P|, median (%)` = f2(median(abs(rP)), 1), `|P|, p90 (%)` = f2(quantile(abs(rP), 0.9), 1),
+             `Niger P (%)` = at("NER"), `India P (%)` = at("IND"), `Brazil P (%)` = at("BRA"), check.names = FALSE)
+}))
+knitr::kable(rt, align = "lrrrrrrrr")
+```
+
+**Reading.**
+
+- **Any single latitude leaves a residual**, because it puts the aerosol in one hemisphere. Injecting at 60N cools the northern mid- and high latitudes too much and the south too little, and shifts the tropical rain belt south: the Sahel and South Asia dry. Injecting at 60S does the opposite, wetting the Sahel and South Asia while drying Brazil.
+- **Tropical single latitudes are no cure.** 15N and 15S leave smaller temperature residuals than 60N or 60S, but shift precipitation as much (15N dries the Sahel by about 20% per °C offset, 15S wets it by about 30%).
+- **What matters is hemispheric balance.** Splitting the injection between the hemispheres (15N + 15S, or the default four-latitude mix) cuts the median residual by about two thirds for temperature and half for precipitation.
+- Offsetting 1 °C takes 10–16 Tg SO₂/yr (linear, two-model mean), so most single-latitude scenarios that hold warming need injection beyond the 12 Tg/yr training runs.
+
+The damage model turns these residuals into growth effects through the same arms and interactions as any other change of climate.
+
+## Caveats of the coupling
+
+<div class="caveat">
+
+- **Steady-state patterns in transient scenarios.** The patterns are those of 20 years of sustained injection. Right after deployment or termination the regional response may differ; the rebound keeps the pattern's shape and the global $\tau$, while in reality aerosols from different latitudes clear at different speeds and land responds faster than ocean.
+- **Linear injection.** The indicative injection ignores aerosol saturation. Holding warming with a single latitude often needs 15–25 Tg/yr, beyond the training runs, where the emulator's nonlinearity grows.
+- **Two models, one background.** The patterns come from two ESMs over an SSP2-4.5 background; the greenhouse part comes from the CMIP6 multi-model median. Adding the two linearly is the emulator's own assumption, but mixes sources. The two-model mean narrows, and the single-model runs show, the structural uncertainty.
+- **Precipitation.** CIDER's precipitation skill is weak relative to interannual variability, and there is no seasonal cycle (monsoon timing), AMOC response or injection longitude; 60N and 60S are spring-only injections.
+- **Damage function out of sample.** The growth response is estimated on historical weather deviations. SAI changes the climate through other channels (diffuse light, the diurnal cycle, the ratio of temperature to precipitation change) that historical weather does not span.
+
+</div>
+
+# Reproducing
+
+From the project root:
+
+```
+Rscript handout_preferred_specification.R          # estimates of the preferred specification
+Rscript apps/response_explorer/build_scenarios.R   # FaIR paths, CMIP6 patterns, SSP data
+Rscript apps/response_explorer/build_cider.R       # CIDER country patterns and constants (data/CIDER/*.mat)
+```
+
+The response explorer (`apps/response_explorer/app.R`, launched with `source()`) runs every projection of this note: the *Climate scenarios* page for Sections 3–5, the *Geoengineering* page for Sections 6–7.
+
+# References
+
+- Farley, J., MacMartin, D. G., Visioni, D., Kravitz, B., Bednarz, E. M., Duffey, A., Henry, M. and Akherati, A. (2026). CIDER: the Climate Intervention Dynamical EmulatoR. *Geoscientific Model Development* 19, 1809–1831. doi:10.5194/gmd-19-1809-2026. Code v1.1.0: doi:10.5281/zenodo.17553537.
+- Smith, C. (2023). FaIR v2.1 calibrated to IPCC AR6, SSP scenarios. Zenodo, doi:10.5281/zenodo.7838148.
+- Kummu, M. et al. (2025). Gridded GDP and population, 1990–2024. Zenodo record 18429133.
+- Feenstra, R. C., Inklaar, R. and Timmer, M. P. Penn World Table 11.0. Hersbach, H. et al. (2020), ERA5. GADM 4.1. IIASA SSP database (2025 release) and SSP extensions.
