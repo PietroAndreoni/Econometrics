@@ -84,7 +84,20 @@ geo_target_text <- function(mode, target) {
 # (t_l: its T per C of global T; p_rel_l: its relative P per mm/d of global
 # P; (dP/dT)_l: global mm/d per C of latitude l), under the pattern weight
 # `weight` (population or area).
+#
+# `model` "mean": the mean over the models of their mixes (each with its own
+# shares and patterns): the countries' t_sai and p_sai, the shares and the
+# injection per C (countries in every model only).
 cider_mix <- function(cider, model, fractions, weight = "population") {
+  if (model == "mean") {
+    mixes <- lapply(names(cider$models), function(m) cider_mix(cider, m, fractions, weight))
+    iso <- Reduce(intersect, lapply(mixes, function(x) x$pattern$iso3))
+    mean_of <- function(col) rowMeans(sapply(mixes, function(x) x$pattern[[col]][match(iso, x$pattern$iso3)]))
+    return(list(pattern = data.frame(iso3 = iso, t_sai = mean_of("t_sai"), p_sai = mean_of("p_sai")),
+                fractions = mixes[[1]]$fractions,
+                shares = Reduce(`+`, lapply(mixes, `[[`, "shares")) / length(mixes),
+                tg_per_c = mean(vapply(mixes, `[[`, 0, "tg_per_c"))))
+  }
   e <- cider$efficiency[cider$efficiency$model == model, ]
   f <- fractions[e$lat]
   f[!is.finite(f) | f < 0] <- 0

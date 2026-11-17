@@ -219,7 +219,15 @@ sai_label <- function(sai, model, fractions) {
   where <- if (sai == "mix") {
     paste(sprintf("%s %.0f%%", names(f)[f > 0], 100 * f[f > 0]), collapse = " / ")
   } else paste(sai, "only")
-  sprintf("CIDER %s, %s", sub("-.*$", "", CIDER$models[[model]]), where)
+  sprintf("CIDER %s, %s", cider_model_short(model), where)
+}
+# The emulated model of CIDER: "mean" (the default: the mean of the models'
+# patterns, cider_mix()) or one of them, for robustness.
+cider_model_label <- function(model) {
+  if (model == "mean") paste("mean of", paste(CIDER$models, collapse = " and ")) else CIDER$models[[model]]
+}
+cider_model_short <- function(model) {
+  if (model == "mean") paste0(length(CIDER$models), "-model mean") else sub("-.*$", "", CIDER$models[[model]])
 }
 # The number of noise paths with natural variability (about 5 s a setting and
 # forcing per 200 paths).
@@ -1668,8 +1676,10 @@ ui <- page_navbar(
                        selected = "uniform"),
           conditionalPanel(
             "input.ts_sai == 'cider' || input.ts_compare == 'sai'",
-            selectInput("ts_cider_model", "CIDER emulated model",
-                        stats::setNames(names(CIDER$models), unname(CIDER$models))))
+            selectInput("ts_cider_model", "CIDER emulated model (one only: robustness)",
+                        c(stats::setNames("mean", paste("Mean of", paste(CIDER$models, collapse = " and "))),
+                          stats::setNames(names(CIDER$models), unname(CIDER$models))),
+                        selected = "mean"))
         ),
         conditionalPanel(
           "input.ts_sai == 'cider' || input.ts_compare == 'sai'",
@@ -2901,7 +2911,7 @@ server <- function(input, output, session) {
   }
   ts_inputs <- function() {
     compare <- input$ts_compare %||% "none"
-    model <- input$ts_cider_model %||% if (!is.null(CIDER)) names(CIDER$models)[[1]] else ""
+    model <- input$ts_cider_model %||% "mean"
     fractions <- ts_fractions()
     list(compare = compare, model = model, fractions = fractions,
          variants = ts_variants_of(compare, input$ts_forcing, input$ts_econ %||% "follow", input$ts_tau,
@@ -3490,7 +3500,7 @@ server <- function(input, output, session) {
                            if (is_T) "Temperature change" else "Precipitation change"),
            subtitle = wrap_label(sprintf(
              "%s. CMIP6 change per C of global warming plus %s's per C of SAI cooling; shares of the cooling: %s; %s weights",
-             r$variant, CIDER$models[[sai$model]],
+             r$variant, cider_model_label(sai$model),
              paste(sprintf("%s %.0f%%", names(shares), 100 * shares), collapse = ", "), weight), 140)) +
       theme_map()
   }
@@ -3499,19 +3509,21 @@ server <- function(input, output, session) {
   # What the injection fractions as set give (population weights).
   output$ts_sai_info <- renderUI({
     req(CIDER)
-    model <- input$ts_cider_model %||% names(CIDER$models)[[1]]
+    model <- input$ts_cider_model %||% "mean"
     f <- ts_fractions()
     if (!isTRUE(sum(pmax(f, 0), na.rm = TRUE) > 0)) {
       return(helpText(class = "text-warning-emphasis", "The injection fractions must have a positive sum."))
     }
     mix <- cider_mix(CIDER, model, f)
-    e <- CIDER$efficiency[CIDER$efficiency$model == model, ]
+    e <- CIDER$efficiency[model == "mean" | CIDER$efficiency$model == model, ]
+    # (The mean of the models: the mean cooling per Tg of each latitude.)
+    e <- data.frame(lat = CIDER_LATS, cooling_per_tg = as.numeric(tapply(e$cooling_per_tg, e$lat, mean)[CIDER_LATS]))
     shares <- mix$shares[mix$shares > 0]
     helpText(class = "small", sprintf(
       paste("%s, steady-state global cooling per Tg SO2/yr: %s. With these fractions: shares of the cooling %s;",
             "1 C of cooling takes about %.0f Tg SO2/yr (linear: no saturation of the aerosol; CIDER is trained",
             "on %g Tg/yr at one latitude)."),
-      CIDER$models[[model]], paste(sprintf("%s %.3f C", e$lat, e$cooling_per_tg), collapse = ", "),
+      first_upper(cider_model_label(model)), paste(sprintf("%s %.3f C", e$lat, e$cooling_per_tg), collapse = ", "),
       paste(sprintf("%s %.0f%%", names(shares), 100 * shares), collapse = ", "), mix$tg_per_c, CIDER_TRAINING_TG))
   })
 
@@ -3603,8 +3615,10 @@ server <- function(input, output, session) {
         "latitudes by fraction times each latitude's steady-state cooling per Tg SO2/yr, and t_sai and",
         "p_sai mix the latitudes' patterns with those shares (P: relative to the model's own climatology,",
         "times its global P change per C of cooling). Patterns and efficiencies: the last 20 years of",
-        "CIDER's 12 Tg/yr single-latitude runs of the chosen model, averaged over each country with the",
-        "setting's climate weights (population 2000 or area, as its climate data).",
+        "CIDER's 12 Tg/yr single-latitude runs, averaged over each country with the setting's climate",
+        "weights (population 2000 or area, as its climate data); by default the mean of the two models'",
+        "mixes (CESM2-WACCM6 and UKESM1, each with its own shares, patterns and injection), or one of them",
+        "for robustness.",
         CIDER$source, "No injection -> AOD -> temperature dynamics: termination follows the catch-up",
         "time tau as with the uniform pattern; the injection shown is linear (no aerosol saturation).",
         "Caveats: trained over an SSP2-4.5 background; precipitation skill weak relative to",

@@ -172,7 +172,7 @@ guide_ui <- function() {
              "climate), the world loss, a map of the loss by country, the exposure by latitude and year (events",
              "beyond k SD), and a table."),
       tags$p("Regional pattern: uniform (each country's CMIP6 pattern of global warming: perfect geoengineering) or",
-             "CIDER's, stratospheric aerosol injection at the latitudes and fractions set (CESM2-WACCM6 or UKESM1),",
+             "CIDER's, stratospheric aerosol injection at the latitudes and fractions set (by default the mean of CESM2-WACCM6 and UKESM1, or one for robustness),",
              "which leaves a regional climate even at constant global temperature; its map shows that residual."),
       tags$p("\"Compare side by side\" runs several background forcings, economic developments (SSPs), catch-up",
              "times or geoengineering patterns at once, each in place of that option: the warming and world charts get one column per",
