@@ -340,7 +340,7 @@ deviation_weights <- function(model, v, x, modifiers, years = NULL, lags = NULL)
   for (k in intersect(unique(st$lag[st$variable == v]), lags %||% st$lag)) {
     at <- lagged_inputs(x, mods, k, years)
     for (j in which(st$variable == v & st$lag == k)) {
-      G[, j] <- arm_value(st$suffix[[j]], term_inputs(at$x, st$diff[[j]])) *
+      G[, j] <- arm_of(at$x, st$suffix[[j]], st$diff[[j]]) *
         (if (is.na(st$modifier[[j]])) 1 else at$mods[, st$modifier[[j]]]) *
         (if (st$scaled[[j]]) at$mods[, paste0("idol_", v)] else 1) *
         (if (is.na(st$expo[[j]])) 1 else at$mods[, st$expo[[j]]])
@@ -443,7 +443,7 @@ growth_matrix <- function(beta, model, v, x, modifiers, cap, paired = FALSE, yea
       x_k <- term_inputs(at$x, block$diff[[1]])
       for (suffix in unique(block$suffix)) {
         terms <- block[block$suffix == suffix, ]
-        a <- arm_value(suffix, x_k)
+        a <- arm_of(at$x, suffix, block$diff[[1]])
         own_term <- terms$term[is.na(terms$modifier)]
         own <- if (!length(own_term)) zero else if (paired) beta[, own_term, drop = FALSE] else {
           matrix(beta[, own_term], nrow = n, ncol = nrow(beta), byrow = TRUE)
@@ -561,11 +561,23 @@ gdp_path <- function(model, v, country, type, delta, horizon, sd_mode = "fixed",
   sd <- deviation_scale(model, country, v)
   if (identical(of_variable(model$units, v), "absolute")) sd_mode <- "fixed"
   a <- anomaly_path(type, delta, horizon, window, ramp_years)
-  x <- if (identical(model$window, "nrk")) innovation_path(a, filter_lags(model, country, v), sd)
-       else deviation_path(a, sd, window, sd_mode)
-  x <- model_deviations(model, x)
+  spells <- !is.null(spell_rule_of(clim_mode)) && is.finite(window)
+  x <- if (spells) {
+    # Held through spells: a pair of deviations, the warm (wet) and the cold
+    # (dry) side's (spells found from the year before the shift).
+    dev <- spell_deviation_path(a, sd, window, spell_rule_of(clim_mode), 0, pre = window - 1,
+                                scaled = !identical(of_variable(model$units, v), "absolute"))
+    model_spell_deviations(model, dev$up, dev$down)
+  } else {
+    model_deviations(model, if (identical(model$window, "nrk")) innovation_path(a, filter_lags(model, country, v), sd)
+                            else deviation_path(a, sd, window, sd_mode))
+  }
   n <- n_inputs(x)
-  shift <- if (clim_mode == "baseline") baseline_shift(a, window) else rep(0, n)
+  # (Spells: found from the year before the shock, the first that can start one.)
+  shift <- if (clim_mode == "baseline") baseline_shift(a, window)
+           else if (follows_baseline(clim_mode)) {
+             spell_shift(a, window, 0, spell_rule_of(clim_mode), trailing_sd(a, sd, window, sd_mode), pre = window - 1)
+           } else rep(0, n)
   # The modifiers of each year: the long-run climate of v shifted with the
   # baseline, this year's and last year's value with the anomalies (and their
   # spline terms recomputed).

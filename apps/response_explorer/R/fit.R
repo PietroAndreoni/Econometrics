@@ -33,7 +33,16 @@
 # their level terms too (for those in at least one interaction): without them
 # an interaction of a non-negative arm stands in for the omitted level. The
 # levels are controls: the app's responses and projections use the deviation
-# terms only. The trailing models run on the rows with all the trailing values
+# terms only. "spells": as "trailing", the deviations and the climate held through the unit's
+# local warm, cold, wet or dry spells (o$spell_rule, SPELL_RULES of
+# R/response.R) at the trailing mean (and SD) of the spell's start: the warm (wet) arms
+# from the warm (wet) spells, the cold (dry) arms from the cold (dry) ones.
+# The SD of deviations from a trailing baseline (SD units) goes with the
+# characteristics: fixed at the unit's (the median of its trailing SD) with
+# fixed characteristics; otherwise the trailing SD of the year, whose level is
+# then a control too, as 1 / SD as it enters the deviations (sdlev_<v>). The projections do the same (R/projection.R:
+# a fixed SD, or one widened by the shift, with the climate following the
+# baseline or held through spells). The trailing models run on the rows with all the trailing values
 # they use (the full window); a model with capital (or a PWT outcome other than
 # GDP per capita) on the rows with it.
 #
@@ -300,7 +309,9 @@ model_options <- function(o) {
   # explorer_model()).
   o$lags <- max(0L, as.integer(o$lags %||% 0L))
   o$moderators <- o$moderators %||% "fixed"
-  o$share_trailing <- isTRUE(o$share_trailing) && o$moderators == "trailing" && identical(o$gdp, "WB")
+  # Held through local spells (MODERATOR_CHOICES): their rule, SPELL_RULES.
+  o$spell_rule <- if (o$moderators == "spells") o$spell_rule %||% "sigma"
+  o$share_trailing <- isTRUE(o$share_trailing) && o$moderators != "fixed" && identical(o$gdp, "WB")
   # Controls (in CONTROL_CHOICES' order) and outliers dropped ("none" or one of
   # OUTLIER_CHOICES).
   o$controls <- intersect(CONTROL_CHOICES, o$controls %||% CONTROL_CHOICES)
@@ -355,7 +366,8 @@ interaction_key <- function(inter) {
   paste0("T: ", part(inter$TM), ", P: ", part(inter$RR))
 }
 model_key <- function(o, panels) {
-  moderators <- if (o$share_trailing) "trailing + share" else o$moderators
+  moderators <- paste0(if (o$moderators == "spells") paste0("spells ", o$spell_rule, ", held deviations") else o$moderators,
+                       if (o$share_trailing) " + share", if (o$moderators == "fixed") " (fixed SD)" else " (trailing SD, 1/SD a control)")
   per <- function(x) if (x[["TM"]] == x[["RR"]]) as.character(x[["TM"]]) else paste0("T ", x[["TM"]], ", P ", x[["RR"]])
   paste(o$gdp, o$climate, o$baseline, o$weight, per(o$units),
         paste0("T ", o$form[["TM"]], if (o$symmetric[["TM"]]) " (symmetric)",
@@ -483,12 +495,12 @@ model_rows <- function(o, panels) {
     d <- d[is.finite(d$conv_iv), ]
   }
   if (o$outliers != "none") d <- d[!d[[paste0("outlier_", o$outliers)]], ]
-  if (o$moderators == "trailing") d <- d[is.finite(d$inc_trailing), ]
+  if (o$moderators != "fixed") d <- d[is.finite(d$inc_trailing), ]
   if (o$share_trailing) d <- d[is.finite(d$agr_trailing), ]
   if (o$outcome != "log") d <- d[is.finite(d[[panels$outcome_columns[[o$outcome]]]]), ]
   if (o$convergence != "none") d <- d[is.finite(d[[CONVERGENCE_COLUMNS[[o$convergence]]]]), ]
   if ("kap" %in% unlist(o$inter)) {
-    d <- d[is.finite(d[[if (o$moderators == "trailing") "kap_trailing" else "kap_level"]]), ]
+    d <- d[is.finite(d[[if (o$moderators != "fixed") "kap_trailing" else "kap_level"]]), ]
   }
   d
 }
@@ -501,10 +513,111 @@ explorer_model <- function(o, panels) {
   if (!is.null(model_cache[[key]])) return(model_cache[[key]])
   panel <- panels$panels[[paste(o$gdp, o$climate, o$weight, sep = " | ")]]
   window <- panels$baselines[[o$baseline]]
-  trailing <- o$moderators == "trailing"
+  trailing <- o$moderators != "fixed"
   d <- model_rows(o, panels)
   # The demeaning of the deviations of each variable (symmetric ones as they are).
   dev_fe <- c(TM = deviation_fe(o$fe, o$symmetric[["TM"]], o$effects), RR = deviation_fe(o$fe, o$symmetric[["RR"]], o$effects))
+  # The SD of the deviations from a trailing baseline (SD units): with fixed
+  # characteristics, fixed at the unit's (the median of its trailing SD over
+  # the panel's rows, the SD of the projections: units$sd_T); otherwise the
+  # trailing SD of the year, with its level as a control (sd_level). A fixed
+  # SD is constant within the unit, so its demeaned deviations (and first
+  # differences) are the absolute ones over it.
+  sd_column <- function(v) paste0("sd_", v, "_", window)
+  fixed_sd <- c(TM = FALSE, RR = FALSE)
+  if (trailing_window(window)) for (v in c("TM", "RR")) fixed_sd[[v]] <- !trailing && o$units[[v]] == "SD"
+  sd_level <- trailing_window(window) & trailing & o$units == "SD"
+  names(sd_level) <- c("TM", "RR")
+  unit_sd <- lapply(c(TM = "TM", RR = "RR"), function(v) {
+    if (!fixed_sd[[v]]) return(NULL)
+    tapply(panel$rows[[sd_column(v)]], panel$rows$GID_1, stats::median, na.rm = TRUE)
+  })
+  # Held through local spells (o$spell_rule, SPELL_RULES of R/response.R), on
+  # each unit's whole series (its rows and the years before them; a missing
+  # year breaks a spell):
+  #   the climate of the interactions, the trailing mean held through the
+  #   spells of either direction (spell_held_mean()): held_<v>;
+  #   the deviations of each side, against the trailing mean and SD held
+  #   through the warm (wet) spells, for the warm (wet) arms, and through the
+  #   cold (dry) spells, for the cold (dry) arms (spell_deviations(); in
+  #   absolute units the anomaly from the held mean), and their first
+  #   differences, demeaned as the panel's deviations (the unit's mean and
+  #   trends over the years from the start less the lags): sdev_<v>_<side>[_d].
+  held_climate <- NULL
+  if (identical(o$moderators, "spells") && trailing_window(window)) {
+    cols <- c("GID_1", "year", "TM", "RR", paste0("mean_", c("TM", "RR"), "_", window), sd_column("TM"), sd_column("RR"))
+    series <- unique(rbind(panel$rows[cols], panel$history[cols]))
+    series <- series[order(series$GID_1, series$year), ]
+    held_climate <- series[c("GID_1", "year")]
+    # (t as in the panel: the year less its first row's year less t.)
+    t0 <- panel$rows$year[[1]] - panel$rows$t[[1]]
+    held_climate$t <- series$year - t0
+    held_climate$t2 <- held_climate$t^2
+    in_window <- series$year >= (panels$start_year %||% min(panel$rows$year)) - (panels$max_lags %||% 0L)
+    demean <- function(raw, fe) {
+      if (fe == "none") return(raw)
+      ok <- which(in_window & is.finite(raw))
+      slopes <- panels$fe_slopes[[fe]]
+      unit_fe <- if (length(slopes)) paste0("GID_1[", paste(slopes, collapse = ", "), "]") else "GID_1"
+      sub <- data.frame(GID_1 = held_climate$GID_1[ok], t = held_climate$t[ok], t2 = held_climate$t2[ok], x = raw[ok])
+      m <- fixest::feols(stats::as.formula(paste("x ~ 1 |", unit_fe)), sub, notes = FALSE)
+      out <- rep(NA_real_, length(raw))
+      out[ok[fixest::obs(m)]] <- stats::resid(m)
+      out
+    }
+    for (v in c("TM", "RR")) {
+      held <- rep(NA_real_, nrow(series))
+      side <- list(up = held, down = held)
+      side_d <- side
+      for (idx in split(seq_len(nrow(series)), series$GID_1)) {
+        y <- series$year[idx]
+        full <- seq(min(y), max(y))
+        at <- match(full, y)
+        x <- series[[v]][idx][at]
+        mu <- series[[paste0("mean_", v, "_", window)]][idx][at]
+        s <- series[[sd_column(v)]][idx][at]
+        back <- match(y, full)
+        held[idx] <- drop(spell_held_mean(x, mu, s, o$spell_rule))[back]
+        dev <- spell_deviations(x, mu, s, o$spell_rule, scaled = o$units[[v]] == "SD")
+        for (k in c("up", "down")) {
+          z <- drop(dev[[k]])
+          z[!is.finite(z)] <- NA_real_
+          side[[k]][idx] <- z[back]
+          side_d[[k]][idx] <- (z - c(NA, z[-length(z)]))[back]
+        }
+      }
+      held_climate[[paste0("held_", v)]] <- held
+      for (k in c("up", "down")) {
+        held_climate[[paste0("sdev_", v, "_", k)]] <- demean(side[[k]], dev_fe[[v]])
+        held_climate[[paste0("sdev_", v, "_", k, "_d")]] <- demean(side_d[[k]], dev_fe[[v]])
+      }
+    }
+  }
+  held_at <- function(x, column) {
+    held_climate[[column]][match(paste(x$GID_1, x$year), paste(held_climate$GID_1, held_climate$year))]
+  }
+  held_of <- function(x, v) held_at(x, paste0("held_", v))
+  # The deviations of v in rows x as the model enters them (`diff`: their first
+  # differences): one vector, or held through spells list(up, down).
+  dev_of <- function(x, v, diff) {
+    if (!is.null(held_climate)) {
+      return(lapply(c(up = "up", down = "down"), function(k) held_at(x, paste0("sdev_", v, "_", k, if (diff) "_d"))))
+    }
+    if (!fixed_sd[[v]]) return(deviation_values(x, v, window, panels$units_suffix[[o$units[[v]]]], dev_fe[[v]], diff))
+    deviation_values(x, v, window, panels$units_suffix[["absolute"]], dev_fe[[v]], diff) /
+      unname(unit_sd[[v]][x$GID_1])
+  }
+  # Whether rows x have the deviations (both sides when held through spells).
+  dev_ok <- function(x, v, diff) {
+    d <- dev_of(x, v, diff)
+    if (is.list(d)) is.finite(d$up) & is.finite(d$down) else is.finite(d)
+  }
+  # The arm term `s` of deviations `dev` (a pair: warm or wet arms from the
+  # first, cold or dry from the second; unsplit terms join the two sides).
+  arm_of_dev <- function(s, dev) {
+    if (!is.list(dev)) return(arm_value(s, dev))
+    arm_of(list(x = dev$up, x_neg = dev$down), s)
+  }
   # Exposure: the slopes of each variable's indices (R/exposure.R), on the
   # rows of the countries that have them (in both versions, so that the two
   # run on the same rows); the smooth at the unit's long-run (horizon) climate.
@@ -524,13 +637,16 @@ explorer_model <- function(o, panels) {
   }
   # First differences: the rows whose year before has the climate.
   if (o$diff || o$both) {
-    for (v in c("TM", "RR")) d <- d[is.finite(deviation_values(d, v, window, panels$units_suffix[[o$units[[v]]]], dev_fe[[v]], TRUE)), ]
+    for (v in c("TM", "RR")) d <- d[dev_ok(d, v, TRUE), ]
   }
   # The rows with the deviations themselves (all of them, except where a short
   # trailing window has no variability: CRU TS fill values).
   if (!o$diff) {
-    for (v in c("TM", "RR")) d <- d[is.finite(deviation_values(d, v, window, panels$units_suffix[[o$units[[v]]]], dev_fe[[v]], FALSE)), ]
+    for (v in c("TM", "RR")) d <- d[dev_ok(d, v, FALSE), ]
   }
+  # Held through spells: the rows whose held climate is known (every row with
+  # a trailing mean: the first year of its series has the moving one).
+  if (!is.null(held_climate)) for (v in c("TM", "RR")) d <- d[is.finite(held_of(d, v)), ]
 
   # The outcome (see the header).
   d$.outcome <- as.numeric(d[[if (o$outcome == "log") panels$outcome else panels$outcome_columns[[o$outcome]]]])
@@ -560,9 +676,9 @@ explorer_model <- function(o, panels) {
     has_inputs <- function(x) {
       ok <- rep(TRUE, nrow(x))
       for (v in c("TM", "RR")) {
-        ok <- ok & is.finite(deviation_values(x, v, window, panels$units_suffix[[o$units[[v]]]], dev_fe[[v]], o$diff))
-        if (o$both) ok <- ok & is.finite(deviation_values(x, v, window, panels$units_suffix[[o$units[[v]]]], dev_fe[[v]], TRUE))
-        if ("clim" %in% o$inter[[v]]) ok <- ok & is.finite(x[[paste0("mean_", v, "_", clim_window)]])
+        ok <- ok & dev_ok(x, v, o$diff)
+        if (o$both) ok <- ok & dev_ok(x, v, TRUE)
+        if ("clim" %in% o$inter[[v]]) ok <- ok & is.finite(if (!is.null(held_climate)) held_of(x, v) else x[[paste0("mean_", v, "_", clim_window)]])
         if ("lag" %in% o$inter[[v]]) ok <- ok & is.finite(x[[paste0(v, "_l1")]])
       }
       if (any(c("inc", "low") %in% unlist(o$inter)) || any(o$income_form != "standard")) ok <- ok & is.finite(x[[inc_column]])
@@ -594,13 +710,16 @@ explorer_model <- function(o, panels) {
   # the model's rows.
   with_moderators <- function(x) {
     for (v in c("TM", "RR")) {
-      dev <- deviation_values(x, v, window, panels$units_suffix[[o$units[[v]]]], dev_fe[[v]], o$diff)
-      for (s in arm_suffixes(o$form[[v]], o$symmetric[[v]])) x[[paste0("dev", v, s)]] <- arm_value(s, dev)
+      dev <- dev_of(x, v, o$diff)
+      for (s in arm_suffixes(o$form[[v]], o$symmetric[[v]])) x[[paste0("dev", v, s)]] <- arm_of_dev(s, dev)
       if (o$both) {
-        dev_d <- deviation_values(x, v, window, panels$units_suffix[[o$units[[v]]]], dev_fe[[v]], TRUE)
-        for (s in arm_suffixes(o$form[[v]], o$symmetric[[v]])) x[[paste0("dev", v, "_d", s)]] <- arm_value(s, dev_d)
+        dev_d <- dev_of(x, v, TRUE)
+        for (s in arm_suffixes(o$form[[v]], o$symmetric[[v]])) x[[paste0("dev", v, "_d", s)]] <- arm_of_dev(s, dev_d)
       }
-      x[[paste0("clim_", v)]] <- x[[paste0("mean_", v, "_", clim_window)]] - clim_median[[v]]
+      x[[paste0("clim_", v)]] <- (if (!is.null(held_climate)) held_of(x, v) else x[[paste0("mean_", v, "_", clim_window)]]) -
+        clim_median[[v]]
+      # The inverse of the trailing SD (a control, sd_level): the deviations are over it.
+      x[[paste0("sdlev_", v)]] <- if (sd_level[[v]]) 1 / x[[sd_column(v)]] else 0
       # Last year's and this year's value, centred in the same way.
       x[[paste0("lag_", v)]] <- x[[paste0(v, "_l1")]] - clim_median[[v]]
       x[[paste0("cur_", v)]] <- x[[v]] - clim_median[[v]]
@@ -641,7 +760,7 @@ explorer_model <- function(o, panels) {
     pool <- with_splines_of(with_moderators(pool))
     lag_columns <- c(grep("^dev(TM|RR)_", names(d), value = TRUE),
                      intersect(c(spline_columns, grep("_nl[0-9]+$", names(d), value = TRUE)), names(pool)),
-                     "low", "idol_TM", "idol_RR", if (uses_exposure) intersect(EXPOSURE_COLUMNS, names(d)))
+                     "low", "idol_TM", "idol_RR", "sdlev_TM", "sdlev_RR", if (uses_exposure) intersect(EXPOSURE_COLUMNS, names(d)))
     for (k in seq_len(o$lags)) {
       at <- match(paste(d$GID_1, d$year - k), pool_key)
       for (z in lag_columns) d[[paste0(z, ".l", k)]] <- pool[[z]][at]
@@ -655,6 +774,9 @@ explorer_model <- function(o, panels) {
                if (trailing && uses_kap) "kap",
                if (trailing && uses_low) "low",
                if (o$share_trailing && "agr" %in% unlist(o$inter)) "agr",
+               # The trailing SD of the deviations (not fixed: SD units, trailing
+               # baseline, characteristics not fixed): its level.
+               if (sd_level[["TM"]]) "sdlev_TM", if (sd_level[["RR"]]) "sdlev_RR",
                # Last year's and this year's value always vary.
                unlist(lapply(c("TM", "RR"), function(v) {
                  vapply(intersect(c("lag", "cur"), o$inter[[v]]), modifier_column, "", v, USE.NAMES = FALSE)
@@ -768,6 +890,9 @@ explorer_model <- function(o, panels) {
     # The coefficients g and h of the NRK filter of T and P (its baseline only).
     filter = if (window == "nrk") panels$filters[[paste(o$gdp, o$climate, o$weight, sep = " | ")]],
     fe = o$fe, effects = o$effects, moderators = o$moderators, share_trailing = o$share_trailing,
+    # The spells of held characteristics (NULL: none) and whether the SD of the
+    # deviations of T, P is the trailing one with its level as a control.
+    spell_rule = o$spell_rule, sd_level = sd_level,
     # The quadratic climate controls and their coefficients (NULL: none).
     quad = o$quad,
     quad_coef = if (length(intersect(quad_terms, rownames(ct)))) {
