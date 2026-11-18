@@ -140,6 +140,31 @@ arm_value <- function(suffix, x) {
          "_sym" = x, "_sym2" = x^2,
          stop("Unknown arm ", suffix))
 }
+# The arm term `suffix` of deviations x (a vector, or a list of them, see
+# term_inputs()) for the terms of the unit or of its first difference (`diff`).
+# Deviations held through spells come in pairs: x (d) for the warm or wet
+# side, x_neg (d_neg) for the cold or dry side (spell_deviations()); the
+# unsplit terms then join the two sides.
+arm_of <- function(x, suffix, diff = FALSE) {
+  if (!is.list(x) || is.null(x$x_neg)) return(arm_value(suffix, term_inputs(x, diff)))
+  up <- term_inputs(x, diff)
+  down <- if (diff) x$d_neg else x$x_neg
+  joined <- function() pmax(up, 0) - pmax(-down, 0)
+  switch(suffix, "_pos" = , "_pos2" = arm_value(suffix, up), "_neg" = , "_neg2" = arm_value(suffix, down),
+         "_sym" = joined(), "_sym2" = joined()^2, stop("Unknown arm ", suffix))
+}
+# The deviations a model enters for the spell deviations `up` and `down` (as
+# model_deviations(), for each side): list(x, x_neg) and with a first
+# difference d, d_neg.
+model_spell_deviations <- function(model, up, down, years = NULL) {
+  if (isTRUE(model$both)) {
+    return(list(x = up, d = difference_path(up, years), x_neg = down, d_neg = difference_path(down, years)))
+  }
+  if (isTRUE(model$diff)) {
+    return(list(x = difference_path(up, years), x_neg = difference_path(down, years)))
+  }
+  list(x = up, x_neg = down)
+}
 
 # The weights of the lags of the NRK filter of variable v for a country:
 # phi_j = g_j + h_j vbar, vbar its long-run climate (C, m a year).
@@ -527,6 +552,158 @@ baseline_shift <- function(a, window, from = 0) {
   out <- years[years >= from]
   if (!is.finite(window)) return(rep(0, length(out)))
   vapply(out, function(t) mean(a[years >= t - window & years <= t - 1]), 0)
+}
+
+# Long-run climate of the interactions (clim_mode): "fixed" (the country's),
+# "baseline" (plus the shift of the trailing mean) or "spells_<rule>" (the
+# shift of the trailing mean, held through the local spells of `rule`).
+# The rules, as in the fixed-baseline sections of weather_arms_robustness.Rmd:
+#   sigma  one-SD spells (fix_sigma_spells(), functions/climate_runs.R): a warm
+#          (wet) spell starts at the year before a rise and holds that year's
+#          trailing mean; it ends with a fall larger than the SD or with the
+#          third consecutive smaller fall (a rise resets the count);
+#   runs   runs: held from the year before the first rise through the
+#          consecutive rises, ending with the first year that does not rise;
+#   side   spells above or below the baseline (fix_spells()): a warm (wet)
+#          spell starts in a year above its trailing mean, holds it, and ends
+#          with the first year at or below the held mean.
+# Cold (dry) spells alike with the signs reversed.
+SPELL_RULES <- c("One-SD spells (end with a fall beyond 1 SD or the 3rd fall in a row)" = "sigma",
+                 "Runs (consecutive rises or falls)" = "runs",
+                 "Spells above or below the held baseline" = "side")
+SPELL_RULE_SHORT <- c(sigma = "one-SD spells", runs = "runs", side = "above/below spells")
+SPELL_MAX_REVERSALS <- 3L
+follows_baseline <- function(clim_mode) clim_mode == "baseline" || startsWith(clim_mode, "spells_")
+spell_rule_of <- function(clim_mode) if (startsWith(clim_mode, "spells_")) sub("^spells_", "", clim_mode)
+
+# The trailing mean `mu` of series `x` (years x paths, consecutive years;
+# vectors: one path) held through the local spells of `rule` in either
+# direction: in a spell, the trailing mean of its first year (the year before
+# the first rise or fall for "sigma" and "runs"); where a warm and a cold
+# spell overlap, the older one's. `s`: the SD of the deviations (scalar, or
+# one per year), the threshold of the "sigma" rule.
+spell_held_mean <- function(x, mu, s, rule = "sigma", max_reversals = SPELL_MAX_REVERSALS) {
+  up <- spell_hold(x, mu, s, rule, 1, max_reversals)
+  down <- spell_hold(x, mu, s, rule, -1, max_reversals)
+  ifelse(up$position > 0L & up$position >= down$position, up$mean,
+         ifelse(down$position > 0L, down$mean, as.matrix(mu)))
+}
+# The trailing moments (mean `mu`, SD `s`) of series `x` (years x paths,
+# consecutive years) held through its spells of `rule` in direction `d` (1:
+# warm or wet, -1: cold or dry), as fix_sigma_spells() and fix_spells(): in a
+# spell, the moments of its first year (the year before the first rise or fall
+# for "sigma" and "runs"); outside spells, the moving ones. Returns the held
+# mean and SD and the position in the spell (0 outside), years x paths.
+spell_hold <- function(x, mu, s, rule = "sigma", d = 1, max_reversals = SPELL_MAX_REVERSALS) {
+  stopifnot(rule %in% SPELL_RULES)
+  x <- as.matrix(x)
+  mu <- as.matrix(mu)
+  n <- nrow(x)
+  k <- ncol(x)
+  s <- matrix(s, n, k)
+  out <- mu
+  out_sd <- s
+  position <- matrix(0L, n, k)
+  p <- integer(k)
+  held <- held_sd <- rep(NA_real_, k)
+  reversals <- integer(k)
+  if (rule == "side") {
+    for (i in seq_len(n)) {
+      on <- is.finite(x[i, ]) & is.finite(held) & d * (x[i, ] - held) > 0
+      cont <- p > 0L & on
+      fresh <- !cont
+      held[fresh] <- mu[i, fresh]
+      held_sd[fresh] <- s[i, fresh]
+      starts <- fresh & is.finite(x[i, ]) & is.finite(held) & d * (x[i, ] - held) > 0
+      p[cont] <- p[cont] + 1L
+      p[fresh] <- 0L
+      p[starts] <- 1L
+      inside <- p > 0L
+      out[i, inside] <- held[inside]
+      out_sd[i, inside] <- held_sd[inside]
+      position[i, ] <- p
+    }
+  } else {
+    for (i in seq_len(n)[-1]) {
+      change <- d * (x[i, ] - x[i - 1L, ])
+      ok <- is.finite(change)
+      if (rule == "runs") {
+        cont <- p > 0L & ok & change > 0
+      } else {
+        r <- ifelse(ok & change < 0, reversals + 1L, 0L)
+        cont <- p > 0L & ok & change >= -held_sd & r < max_reversals
+        cont[is.na(cont)] <- FALSE
+        reversals[cont] <- r[cont]
+      }
+      starts <- !cont & ok & change > 0 & is.finite(mu[i - 1L, ]) & is.finite(s[i - 1L, ])
+      p[cont] <- p[cont] + 1L
+      p[!cont] <- 0L
+      held[starts] <- mu[i - 1L, starts]
+      held_sd[starts] <- s[i - 1L, starts]
+      reversals[starts] <- 0L
+      p[starts] <- 2L
+      inside <- p > 0L
+      out[i, inside] <- held[inside]
+      out_sd[i, inside] <- held_sd[inside]
+      position[i, ] <- p
+    }
+  }
+  list(mean = out, sd = out_sd, position = position)
+}
+# The deviations of series `x` (years x paths) from its trailing moments (`mu`,
+# `s`) held through its spells of `rule`, in each direction: list(up, down),
+# (x - held mean) / held SD (with `scaled` FALSE, absolute units: x - held
+# mean; `s` then only the threshold of the one-SD rule). The warm (wet) arms
+# take `up`, the cold (dry) arms `down`.
+spell_deviations <- function(x, mu, s, rule, scaled = TRUE) {
+  x <- as.matrix(x)
+  lapply(c(up = 1, down = -1), function(d) {
+    h <- spell_hold(x, mu, s, rule, d)
+    if (scaled) (x - h$mean) / h$sd else x - h$mean
+  })
+}
+
+# Shift of the long-run climate of the interactions in the years from `from`
+# for anomaly path `a` (named by year, consecutive years) under clim_mode
+# "spells_<rule>": the trailing mean of `a` held through its spells, found from
+# `pre` years after the first year of `a` (by default a full window). `s`: the
+# SD of the deviations, scalar or one per year of `a`.
+spell_shift <- function(a, window, from, rule, s, pre = window) {
+  years <- as.integer(names(a))
+  if (!is.finite(window)) return(rep(0, sum(years >= from)))
+  start <- min(years) + pre
+  keep <- years >= start
+  mu <- baseline_shift(a, window, start)
+  if (length(s) > 1L) s <- s[keep]
+  held <- drop(spell_held_mean(a[keep], mu, s, rule))
+  held[years[keep] >= from]
+}
+# The deviations of the years from `from` of anomaly path `a` (named by year,
+# consecutive) held through its spells of `rule` (spell_deviations()): against
+# the trailing mean of the anomalies and the trailing SD widened by them
+# (trailing_sd(), "moving"), held through each spell, found from `pre` years
+# after the first year of `a`; in absolute units (`scaled` FALSE) the
+# anomalies less the held mean. list(up, down).
+spell_deviation_path <- function(a, sd, window, rule, from = 0, pre = window, scaled = TRUE) {
+  years <- as.integer(names(a))
+  start <- min(years) + pre
+  keep <- years >= start
+  mu <- baseline_shift(a, window, start)
+  s <- trailing_sd(a, sd, window, "moving")
+  if (length(s) > 1L) s <- s[keep]
+  dev <- spell_deviations(a[keep], mu, s, rule, scaled)
+  lapply(dev, function(x) drop(x)[years[keep] >= from])
+}
+# The SD of the deviations of each year of anomaly path `a`: `sd`, or with
+# sd_mode "moving" widened by the variance of the anomalies of the window
+# before (as deviation_path()).
+trailing_sd <- function(a, sd, window, sd_mode = "fixed") {
+  if (sd_mode != "moving" || !is.finite(window)) return(sd)
+  years <- as.integer(names(a))
+  vapply(years, function(t) {
+    past <- a[years >= t - window & years <= t - 1]
+    if (length(past)) sqrt(sd^2 + mean((past - mean(past))^2)) else sd
+  }, 0)
 }
 
 # Deviations (SD) of the years from `from` given the anomaly path `a` (named by
