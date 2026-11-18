@@ -18,7 +18,7 @@ default_model_inputs <- function(gdp = "PWT") {
        exp_hot_measure = "dd", exp_cold_src = "tmpmin", exp_cold_value = 0, exp_cold_measure = "dd",
        exposure_mode_P = "none", exposure_channels_P = "both", exp_wet_type = "pct", exp_wet_pct = "0.99",
        exp_wet_abs = "20", exp_wet_measure = "dd", exp_dry_value = "1", exp_dry_measure = "days",
-       sd_mode = "fixed", clim_mode = "baseline", cap_T = FALSE, cap_P = FALSE,
+       spell_rule = "sigma", cap_T = FALSE, cap_P = FALSE,
        shape_T = "linear", shape_P = "linear", controls = unname(CONTROL_CHOICES),
        drop_outliers = TRUE, outlier_tail = DEFAULT_OUTLIERS)
 }
@@ -35,7 +35,7 @@ literature_inputs <- function(...) {
   base <- list(baseline = "Level", units_T = "absolute", units_P = "absolute", symmetric_T = TRUE,
                symmetric_P = TRUE, inter_T = character(0), inter_P = character(0), income_form_T = "standard",
                income_form_P = "standard", xi_T = 0, controls = character(0), drop_outliers = FALSE,
-               moderators = "fixed", clim_mode = "fixed", fe = "unit")
+               moderators = "fixed", fe = "unit")
   x <- list(...)
   for (k in names(x)) base[k] <- list(x[[k]])
   do.call(preset_inputs, base)
@@ -120,8 +120,8 @@ apply_model_inputs <- function(session, m) {
   }
   for (k in c("moderators", "effects", "convergence", "style", "units_T", "units_P", "shape_T", "shape_P",
               "income_form_T", "income_form_P", "exposure_channels", "exp_hot_measure", "exp_cold_measure",
-              "exposure_channels_P", "exp_wet_type", "exp_wet_measure", "exp_dry_measure", "weight", "sd_mode",
-              "clim_mode", "outlier_tail")) {
+              "exposure_channels_P", "exp_wet_type", "exp_wet_measure", "exp_dry_measure", "weight", "spell_rule",
+              "outlier_tail")) {
     if (has(k) && !is.null(m[[k]])) updateRadioButtons(session, k, selected = m[[k]])
   }
   for (k in c("symmetric_T", "symmetric_P", "cap_T", "cap_P", "use_lags", "share_trailing", "drop_outliers",

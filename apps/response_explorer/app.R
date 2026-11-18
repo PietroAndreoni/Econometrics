@@ -347,6 +347,8 @@ term_label <- function(term) {
     parts <- strsplit(term, ":", fixed = TRUE)[[1]]
     paste0("Control: ", QUAD_SHORT[[parts[[2]]]], " ", if (grepl("TM", parts[[3]])) "T" else "P",
            if (endsWith(parts[[3]], "_sq")) " (squared)")
+  } else if (startsWith(term, "level:sdlev_")) {
+    paste0("Level: 1 / trailing SD of ", if (endsWith(term, "TM")) "T" else "P", " (control)")
   } else if (startsWith(term, "level:idol_")) {
     paste0("Level: (Ybar / Y)^(1 - xi_", if (endsWith(term, "TM")) "T" else "P", ")")
   } else if (startsWith(term, "level:")) {
@@ -375,7 +377,7 @@ term_label <- function(term) {
 # The specification of a model in LaTeX (MathJax): the equation, and the
 # definitions of its terms (HTML with inline maths).
 spec_symbols <- function(m) {
-  trailing <- identical(m$moderators, "trailing")
+  trailing <- isTRUE(m$moderators %in% c("trailing", "spells"))
   clim_t <- trailing && trailing_window(m$window)
   list(
     clim = function(v) paste0("c_{", v, if (clim_t) ",it" else ",i", "}"),
@@ -426,7 +428,7 @@ spec_equation <- function(m) {
   forms <- model_income_forms(m)
   ratio_of <- function(column) {
     power <- 1 - forms$xi[[column]]
-    base <- paste0("\\frac{\\bar Y}{Y_{", if (identical(m$moderators, "trailing")) "it" else "i", "}}")
+    base <- paste0("\\frac{\\bar Y}{Y_{", if (isTRUE(m$moderators %in% c("trailing", "spells"))) "it" else "i", "}}")
     if (power == 1) base else paste0("\\left(", base, "\\right)^{", format(power), "}")
   }
   # d: the block of the first differences (style "both": \Delta x, and the
@@ -954,12 +956,25 @@ common_ui <- function(ns) {
                                              "before, flagged in the second year)"), OUTLIER_CHOICES,
                    selected = DEFAULT_OUTLIERS)
     ),
-    radioButtons(ns("moderators"), "Characteristics in the interactions (estimation)",
+    radioButtons(ns("moderators"), "Characteristics in the interactions (estimation and projections)",
                  c("Fixed: sample means" = "fixed",
                    "Trailing: climate of the deviation's baseline, income of the 5 years before, with level terms" =
-                     "trailing"), selected = "trailing"),
+                     "trailing",
+                   "Trailing, but held through local warm, cold, wet or dry spells: the deviations and the climate against the trailing mean (and SD) of the spell's start" =
+                     "spells"), selected = "trailing"),
     conditionalPanel(
-      "input.moderators == 'trailing' && input.gdp == 'WB'", ns = ns,
+      "input.moderators == 'spells' && ['5-year', '10-year', '20-year', '30-year'].indexOf(input.baseline) > -1", ns = ns,
+      radioButtons(ns("spell_rule"), "Spells (as in the fixed-baseline robustness of the weather arms)",
+                   SPELL_RULES, selected = "sigma")
+    ),
+    helpText(paste("The same in the estimation and in the GDP paths and scenarios. With a trailing baseline in SD",
+                   "units, the SD of the deviations is fixed at the country's only with fixed characteristics;",
+                   "otherwise it is the trailing SD (in the projections, widened by the shift), whose inverse enters",
+                   "the estimation too. The level terms (of the trailing characteristics and of the SD) are",
+                   "controls: the GDP paths and projections use the deviation terms only. In the scenarios the",
+                   "trailing income and share follow the SSP.")),
+    conditionalPanel(
+      "input.moderators != 'fixed' && input.gdp == 'WB'", ns = ns,
       checkboxInput(ns("share_trailing"), "Trailing agricultural share too (5 years before)", value = FALSE),
       uiOutput(ns("share_warning"))
     ),
@@ -970,20 +985,6 @@ common_ui <- function(ns) {
       numericInput(ns("low_threshold"), "Low-income threshold (GDP per capita)",
                    round(EXPLORER$low_income[["PWT"]]), min = 1, step = 50),
       uiOutput(ns("low_threshold_note"))
-    ),
-    conditionalPanel(
-      "['5-year', '10-year', '20-year', '30-year'].indexOf(input.baseline) > -1 && (input.units_T == 'SD' || input.units_P == 'SD')", ns = ns,
-      radioButtons(ns("sd_mode"), "SD of the trailing baseline in the GDP path",
-                   c("Fixed at the country's SD" = "fixed",
-                     "Moving (widened by the shift)" = "moving"), selected = "fixed")
-    ),
-    conditionalPanel(
-      "['5-year', '10-year', '20-year', '30-year'].indexOf(input.baseline) > -1 || input.moderators == 'trailing'", ns = ns,
-      radioButtons(ns("clim_mode"),
-                   "Long-run characteristics of the interactions (GDP paths and climate scenarios)",
-                   c("Fixed at the sample mean" = "fixed",
-                     "Follow the trailing baseline (climate; in the scenarios also income and share along the SSP)" =
-                       "baseline"), selected = "baseline")
     )
   )
 }
@@ -1188,12 +1189,6 @@ setting_server <- function(id, n, default_country, first = NULL) {
     observeEvent(input$exposure_mode_P, {
       if (input$exposure_mode_P != "none") updateRadioButtons(session, "units_P", selected = "absolute")
     }, ignoreInit = TRUE)
-    # The characteristics estimated as trailing means are those the country has
-    # as its climate changes: by default they follow the baseline in the paths.
-    observeEvent(input$moderators, {
-      updateRadioButtons(session, "clim_mode",
-                         selected = if (input$moderators == "trailing") "baseline" else "fixed")
-    }, ignoreInit = TRUE)
     # The sample of the trailing share against the trailing income alone.
     output$share_warning <- renderUI({
       req(input$gdp == "WB")
@@ -1230,7 +1225,7 @@ setting_server <- function(id, n, default_country, first = NULL) {
                                   exp_wet_type = input$exp_wet_type, exp_wet_pct = input$exp_wet_pct,
                                   exp_wet_abs = input$exp_wet_abs, exp_wet_measure = input$exp_wet_measure,
                                   exp_dry_value = input$exp_dry_value, exp_dry_measure = input$exp_dry_measure,
-                                  sd_mode = input$sd_mode, clim_mode = input$clim_mode,
+                                  spell_rule = input$spell_rule,
                                   cap_T = input$cap_T, cap_P = input$cap_P, shape_T = input$shape_T, shape_P = input$shape_P,
                                   controls = input$controls,
                                   drop_outliers = input$drop_outliers, outlier_tail = input$outlier_tail))
@@ -1300,12 +1295,18 @@ setting_server <- function(id, n, default_country, first = NULL) {
                    RR = if (!is.null(exposure_P)) "absolute" else input$units_P %||% "SD")
       absolute <- units_v == "absolute"
       moderators <- input$moderators %||% "fixed"
-      share_trailing <- moderators == "trailing" && input$gdp == "WB" && isTRUE(input$share_trailing)
-      # Absolute deviations have no SD (the paths keep it fixed for them).
-      sd_mode <- if (trailing && !all(absolute)) input$sd_mode %||% "fixed" else "fixed"
-      # With the horizon baseline the climate stays at the horizon mean, but
-      # trailing income and share can still follow the SSP.
-      clim_mode <- if (trailing || moderators == "trailing") input$clim_mode %||% "fixed" else "fixed"
+      share_trailing <- moderators != "fixed" && input$gdp == "WB" && isTRUE(input$share_trailing)
+      # The characteristics set the rest, in the estimation and the paths alike
+      # (spells only with a trailing baseline: a trailing mean to hold; without
+      # it, as trailing):
+      #   SD of the deviations in the paths: fixed with fixed characteristics,
+      #   otherwise widened by the shift (absolute deviations: none to move);
+      #   long-run characteristics in the paths and scenarios: fixed, following
+      #   the baseline, or held through the spells ("spells_<rule>").
+      if (moderators == "spells" && !trailing) moderators <- "trailing"
+      spell_rule <- if (moderators == "spells") input$spell_rule %||% "sigma"
+      sd_mode <- if (trailing && !all(absolute) && moderators != "fixed") "moving" else "fixed"
+      clim_mode <- switch(moderators, fixed = "fixed", trailing = "baseline", spells = paste0("spells_", spell_rule))
       # Per variable: the cap (only with an income, share or capital
       # interaction) and the shape (splines only with an interaction).
       capped <- function(v, ticked) isTRUE(ticked) && any(c("inc", "agr", "kap", "low") %in% inter[[v]])
@@ -1336,13 +1337,12 @@ setting_server <- function(id, n, default_country, first = NULL) {
                      if (any(quad != "none")) paste0(" · quadratic control: ", paste(QUAD_SHORT[quad[quad != "none"]],
                                                     c("T", "P")[quad != "none"], collapse = ", ")),
                      if (moderators == "trailing") " · trailing characteristics",
+                     if (moderators == "spells") paste0(" · trailing characteristics held through ", SPELL_RULE_SHORT[[spell_rule]]),
                      if (share_trailing) " (with share)",
                      if (weight == "area") " · area weights",
                      which_vars(absolute, "absolute units"),
                      which_vars(shape == "splines", "splines"),
                      which_vars(cap, "capped"),
-                     if (sd_mode == "moving") " · moving SD",
-                     if (clim_mode == "baseline") " · characteristics follow baseline",
                      if (!is.null(sample_label(controls, outliers))) paste0(" · ", sample_label(controls, outliers)))
       # The user's name of the setting (empty: none; the charts of the
       # countries then say "Setting n").
@@ -1355,7 +1355,7 @@ setting_server <- function(id, n, default_country, first = NULL) {
                                        form = form, symmetric = symmetric, lags = lags, inter = inter, shape = shape, fe = fe,
                                        effects = effects, convergence = convergence,
                                        convergence_iv = convergence_iv, quad = quad,
-                                       moderators = moderators, share_trailing = share_trailing,
+                                       moderators = moderators, spell_rule = spell_rule, share_trailing = share_trailing,
                                        outcome = outcome, income_form = income$income_form, xi = income$xi,
                                        controls = controls, outliers = outliers, low_threshold = low_threshold),
                                   EXPLORER),
@@ -1751,9 +1751,14 @@ ui <- page_navbar(
       ),
       uiOutput("ts_charts"),
       uiOutput("readout_ts"),
+      radioButtons("ts_clim_unit", "Regional climate chart (the countries of the global chart, population-weighted)",
+                   c("Change from the horizon climate (C, mm a year)" = "level",
+                     "SD of natural variability from the exceedances' reference climate" = "sd"),
+                   selected = "level", inline = TRUE),
+      plotOutput("ts_clim_plot", height = 520),
       layout_columns(
         col_widths = c(4, 4, 4),
-        selectInput("ts_map_setting", "Map and exceedances: setting (its panel's climate data)", choices = NULL),
+        selectInput("ts_map_setting", "Map, exceedances and climate chart: setting (its panel's climate data)", choices = NULL),
         selectInput("ts_map_year", "Map: termination year", choices = NULL),
         selectInput("ts_variant", "Map, latitude chart and exceedances: alternative", choices = NULL)
       ),
@@ -3156,7 +3161,12 @@ server <- function(input, output, session) {
          label = if (ref == "horizon") {
            h <- ts_sigma_setting()$model$horizon %||% c(1970L, 2023L)
            sprintf("the %d-%d mean", h[[1]], h[[2]])
-         } else sprintf("the trailing %s-year mean", ref))
+         } else sprintf("the trailing %s-year mean%s", ref,
+                        if (!is.null(spell_rule_of(ts_sigma_setting()$clim_mode)))
+                          paste(", held through", SPELL_RULE_SHORT[[spell_rule_of(ts_sigma_setting()$clim_mode)]]) else ""),
+         # A trailing reference follows the setting's spells (characteristics
+         # held through local spells), if it has them.
+         rule = if (ref != "horizon") spell_rule_of(ts_sigma_setting()$clim_mode))
   })
   # For each terminated path, by year: warming, its reference plus k SD, and
   # whether the warming exceeds it.
@@ -3166,7 +3176,7 @@ server <- function(input, output, session) {
     ref <- ts_reference()
     years <- seq(PROJECTION_FROM, PROJECTION_TO)
     out <- do.call(rbind, lapply(grep("^terminated in", names(paths), value = TRUE), function(p) {
-      d <- gmt_deviation(paths[[p]], years, ref$window, ref$horizon)
+      d <- gmt_deviation(paths[[p]], years, ref$window, ref$horizon, rule = ref$rule, s = sg$gmt)
       data.frame(path = p, termination = as.integer(sub("^terminated in ", "", p)), year = years,
                  warming = d$warming, threshold = d$reference + k * sg$gmt,
                  above = d$deviation > k * sg$gmt)
@@ -3412,6 +3422,82 @@ server <- function(input, output, session) {
   }
   output$ts_global_plot <- renderPlot(ts_global_plot(), bg = SURFACE)
 
+  # Regional climate chart: the T and P of the global chart's countries (the
+  # world: all), population-weighted (SSP population of 2025 of each
+  # alternative), with the climate data of the map's setting; each path of
+  # each alternative, with the run's natural variability (the same noise draws
+  # as the GDP projection); in C and mm a year, or in SD of the region's
+  # natural variability from the exceedances' reference climate.
+  ts_climate <- reactive({
+    validate(need(ts_runs() > 0, TS_NOT_RUN))
+    r <- ts_run()
+    s <- ts_sigma_setting()
+    m <- s$model
+    weight <- m$weight %||% "population"
+    variability <- EXPLORER$variability[[paste(m$gdp, m$climate, weight, sep = " | ")]]
+    validate(need(!is.null(variability), "No historical variability for this setting's climate data."))
+    region <- ts_region()
+    units <- s$units
+    if (!is.null(region)) units <- units[units$GID_0 %in% region, ]
+    unit <- input$ts_clim_unit %||% "level"
+    ref <- ts_reference()
+    parts <- lapply(r$variants, function(v) {
+      rv <- ts_with(r, v)
+      sai <- ts_sai_of(r, v)
+      res <- tryCatch(
+        regional_climate(units, SCEN$pattern[[weight]], variability, ts_population_of(rv)[, as.character(PROJECTION_FROM)],
+                         ts_paths_of(rv), ts_background(v$forcing), m$horizon %||% c(1970L, 2023L),
+                         sai_pattern = if (!is.null(sai)) cider_mix(CIDER, sai$model, sai$fractions, weight)$pattern,
+                         noise = r$noise$type, n_paths = r$noise$n, unit = unit, window = ref$window, rule = ref$rule),
+        error = function(e) NULL)
+      validate(need(!is.null(res), "None of the selected countries has the climate data of this setting."))
+      res$data$variant <- v$label
+      res
+    })
+    list(data = do.call(rbind, lapply(parts, `[[`, "data")), n = parts[[1]]$n, sd = parts[[1]]$sd,
+         unit = unit, ref = ref, setting = s$label, noise = r$noise, region = region)
+  })
+  ts_clim_plot <- function() {
+    cl <- ts_climate()
+    d <- cl$data
+    sd_units <- cl$unit == "sd"
+    names_of <- if (sd_units) c(T = "Temperature (SD)", P = "Precipitation (SD)")
+                else c(T = "Temperature (C)", P = "Precipitation (mm a year)")
+    d$variable <- factor(names_of[d$variable], levels = names_of)
+    d$variant <- ts_variant_factor(d$variant)
+    d$path <- ts_run_colours(d$path)
+    many <- length(ts_run()$variants) > 1
+    with_noise <- "low" %in% names(d)
+    k <- input$ts_k_gmt
+    region <- if (is.null(cl$region)) "World" else first_upper(sub("'$", "", region_name(cl$region)))
+    ggplot(d, aes(year, estimate, colour = path, fill = path)) +
+      geom_hline(yintercept = 0, colour = INK_MUTED, linewidth = 0.4) +
+      (if (sd_units && isTRUE(k > 0)) geom_hline(yintercept = c(-k, k), colour = INK_MUTED, linewidth = 0.4, linetype = "dotted")) +
+      (if (with_noise) list(geom_ribbon(aes(ymin = low, ymax = high), alpha = 0.07, colour = NA),
+                            geom_line(aes(y = example), linewidth = 0.3, alpha = 0.6))) +
+      geom_line(aes(linetype = path == "no geoengineering"), linewidth = 0.9) +
+      (if (many) facet_grid(variable ~ variant, scales = "free_y", labeller = labeller(variant = function(x) wrap_label(x, 40)))
+       else facet_wrap(~variable, ncol = 2, scales = "free_y")) +
+      scale_colour_manual(values = ts_colours(), name = NULL, guide = guide_legend(ncol = 3)) +
+      scale_fill_manual(values = ts_colours(), guide = "none") +
+      scale_linetype_manual(values = c(`FALSE` = "solid", `TRUE` = "22"), guide = "none") +
+      labs(x = NULL, y = NULL,
+           title = sprintf("%s climate (%d countries, population-weighted)", region, cl$n),
+           subtitle = wrap_label(paste0(
+             sprintf("Climate data of %s. ", cl$setting),
+             if (sd_units) sprintf("Deviation from %s in SD of the region's natural variability (T %.2f C, P %.0f mm a year)%s",
+                                   cl$ref$label, cl$sd[["T"]], cl$sd[["P"]],
+                                   if (isTRUE(k > 0)) sprintf("; dotted: +-%g SD (the warming chart's k)", k) else "")
+             else sprintf("Change from the %d-%d climate", cl$ref$horizon[[1]], cl$ref$horizon[[2]]),
+             if (with_noise) sprintf("; %s: thick, mean over the noise paths; band, 95%% of them; thin, one noise path (the same natural variability in every path)",
+                                     noise_label(cl$noise))
+             else "; forced signal only (no natural variability)"), 140)) +
+      theme_explorer() +
+      theme(strip.text = element_text(colour = INK_MUTED, size = 9.5, hjust = 0),
+            strip.text.y = element_text(colour = INK_MUTED, size = 9, angle = 0, hjust = 0))
+  }
+  output$ts_clim_plot <- renderPlot(ts_clim_plot(), bg = SURFACE)
+
   output$readout_ts <- renderUI({
     if (ts_runs() == 0) return(NULL)
     hover <- input$hover_ts
@@ -3548,10 +3634,15 @@ server <- function(input, output, session) {
       stats::setNames(mix$pattern$t_sai, mix$pattern$iso3)
     }
     background <- if (!is.null(sai)) ts_background(r$forcing)
+    # With spells, the paths of natural variability of the setting's climate data.
+    mm <- ts_sigma_setting()$model
+    clim_noise <- if (!is.null(ref$rule)) EXPLORER$variability[[paste(mm$gdp, mm$climate, mm$weight %||% "population", sep = " | ")]]
     d <- do.call(rbind, lapply(chosen, function(p) {
       cbind(path = p, exposure_by_latitude(paths[[p]], years, ref$window, ref$horizon, sg,
                                            ts_population(), LATITUDE_SHARES, input$ts_k_lat, sign,
-                                           background = background, t_sai = t_sai))
+                                           background = background, t_sai = t_sai, rule = ref$rule,
+                                           variability = clim_noise, noise = ts_run()$noise$type,
+                                           n_paths = if (ts_run()$noise$n > 0) ts_run()$noise$n else 200L))
     }))
     d$path <- factor(d$path, levels = chosen)
     baseline <- 100 * if (sign == "both") 2 * stats::pnorm(-input$ts_k_lat) else stats::pnorm(-input$ts_k_lat)
@@ -3565,10 +3656,15 @@ server <- function(input, output, session) {
       scale_y_continuous(breaks = seq(-60, 90, by = 30), expand = c(0, 0)) +
       labs(x = NULL, y = "Latitude (degrees)",
            title = sprintf("Share of the population with a year of T %s of natural variability", events),
-           subtitle = wrap_label(sprintf(
+           subtitle = wrap_label(paste0(sprintf(
              "%s; deviation from %s; each country's normal with its SD of detrended historical T (%s), population (%s) spread over its area; %.1f%% with no forced deviation",
              ts_one()$variant, ref$label,
-             ts_sigma_setting()$label, economy_of(ts_one()$forcing, ts_one()$economy), baseline), 140)) +
+             ts_sigma_setting()$label, economy_of(ts_one()$forcing, ts_one()$economy), baseline),
+             if (!is.null(ref$rule)) sprintf(
+               "; with spells, the share of %d paths of the forced signal plus natural variability (%s) beyond k SD of the held baseline",
+               if (ts_run()$noise$n > 0) ts_run()$noise$n else 200L,
+               if (ts_run()$noise$type == "none") "independent years" else tolower(names(VARIABILITY_CHOICES)[VARIABILITY_CHOICES == ts_run()$noise$type]))),
+             140)) +
       theme_explorer() +
       theme(strip.text = element_text(colour = INK_MUTED, size = 9.5, hjust = 0), legend.position = "right")
   }
@@ -3672,12 +3768,16 @@ server <- function(input, output, session) {
                 paste(sprintf("%s %+.4f (SE %.4f, p = %.3g)", m$levels$term, m$levels$estimate,
                               m$levels$se, m$levels$p), collapse = "; "))
       } else ""
-      moderators <- if (m$moderators == "trailing") {
+      moderators <- if (m$moderators %in% c("trailing", "spells")) {
         paste0("trailing characteristics (climate: ",
                if (!trailing_window(m$window)) "horizon mean"
-               else paste0("trailing ", sub("lag_", "", m$window), "-year mean"),
-               "; income: 5 years before; share: ", if (m$share_trailing) "5 years before" else "sample mean", ")")
-      } else "fixed characteristics (sample means)"
+               else paste0("trailing ", sub("lag_", "", m$window), "-year mean",
+                           if (!is.null(m$spell_rule)) paste0(", held through ", SPELL_RULE_SHORT[[m$spell_rule]])),
+               "; income: 5 years before; share: ", if (m$share_trailing) "5 years before" else "sample mean",
+               if (any(m$sd_level %||% FALSE)) "; trailing SD of the deviations, its inverse a control",
+               ")")
+      } else paste0("fixed characteristics (sample means",
+                    if (trailing_window(m$window)) "; the deviations over the country's fixed SD", ")")
       effects <- m$effects %||% "both"
       effects_text <- if (effects == "year") "year effects only (no unit effects or trends)" else {
         paste(if (effects == "unit") "unit effects only (no year effects)" else "year and unit effects", "with", FE_SHORT[[m$fe]])
@@ -3937,6 +4037,7 @@ server <- function(input, output, session) {
            if (ts_many_gmt()) tagList(chart(ts_gmt_plot, 420, 1180), chart(ts_global_plot, ts_global_height(), 1180))
            else pair(chart(ts_gmt_plot, max(460, ts_global_height()), 520), chart(ts_global_plot, ts_global_height(), 1040),
                      "1fr 2fr"),
+           chart(ts_clim_plot, 520, 1180),
            chart(ts_map, 380, 1180),
            if (length(input$ts_lat_paths)) chart(ts_lat_plot, 420, 1180),
            table_of(ts_table()), ts_notes())
