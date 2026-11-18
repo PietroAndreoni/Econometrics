@@ -233,8 +233,40 @@ project_country_noise <- function(model, country, anomalies, noise, sd_mode, cli
       D <- X - as.vector(deviations_at(rows - 1L)$X)
       X <- if (isTRUE(model$both)) list(x = X, d = D) else D
     }
+    # Held through spells: the deviations of each side (warm or wet, cold or
+    # dry) against the trailing moments held through the spells of each path
+    # (noise included), found from the first year with a full window.
+    spells <- !is.null(spell_rule_of(clim_mode)) && is.finite(window) && !identical(model$window, "nrk")
+    if (spells) {
+      full <- seq(window + 1L, nrow(A))
+      a <- anomalies[[v]]
+      s_full <- vapply(full, function(k) sqrt(sd^2 + mean((a[k - window:1] - mean(a[k - window:1]))^2)), 0)
+      if (identical(of_variable(model$units, v), "absolute")) s_full <- rep(sd, length(full))
+      held_dev <- spell_deviations(A[full, , drop = FALSE], window_means(A, full, window), s_full,
+                                   spell_rule_of(clim_mode), scaled = !identical(of_variable(model$units, v), "absolute"))
+      side_at <- function(side, r) as.vector(held_dev[[side]][match(r, full), , drop = FALSE])
+      up <- side_at("up", rows)
+      down <- side_at("down", rows)
+      X <- if (isTRUE(model$both)) {
+        list(x = up, d = up - side_at("up", rows - 1L), x_neg = down, d_neg = down - side_at("down", rows - 1L))
+      } else if (isTRUE(model$diff)) {
+        list(x = up - side_at("up", rows - 1L), x_neg = down - side_at("down", rows - 1L))
+      } else list(x = up, x_neg = down)
+    }
     X <- plus_offset(X, deviation_offset(model, country, v))
-    shift <- if (clim_mode == "baseline") as.vector(M) else rep(0, n_inputs(X))
+    shift <- if (clim_mode == "baseline") as.vector(M)
+             else if (follows_baseline(clim_mode) && is.finite(window) && !identical(model$window, "nrk")) {
+               # The trailing mean held through the spells of each path (noise
+               # included), found from the first year with a full window.
+               full <- seq(window + 1L, nrow(A))
+               s_full <- if (sd_mode == "moving") {
+                 a <- anomalies[[v]]
+                 vapply(full, function(k) sqrt(sd^2 + mean((a[k - window:1] - mean(a[k - window:1]))^2)), 0)
+               } else sd
+               held <- spell_held_mean(A[full, , drop = FALSE], window_means(A, full, window), s_full,
+                                       spell_rule_of(clim_mode))
+               as.vector(held[match(rows, full), , drop = FALSE])
+             } else rep(0, n_inputs(X))
     # This year's and last year's value: the anomalies with the noise.
     mods <- modifier_matrix(model, country, v, shift, income, share,
                             cur = as.vector(A[rows, , drop = FALSE]), lag = as.vector(A[rows - 1, , drop = FALSE]))
@@ -280,8 +312,19 @@ project_country <- function(model, country, anomalies, sd_mode, clim_mode, cap, 
       innovation_path(a, filter_lags(model, country, v), sd, from = from)
     } else deviation_path(a, sd, window, sd_mode_v, from = from)
     if (isTRUE(model$both)) x <- list(x = x[-1], d = diff(x)) else if (differenced) x <- diff(x)
+    # Held through spells: the warm (wet) and the cold (dry) side's deviations.
+    if (!is.null(spell_rule_of(clim_mode)) && is.finite(window)) {
+      dev <- spell_deviation_path(a, sd, window, spell_rule_of(clim_mode), from = from,
+                                  scaled = !identical(of_variable(model$units, v), "absolute"))
+      x <- if (isTRUE(model$both)) {
+        list(x = dev$up[-1], d = diff(dev$up), x_neg = dev$down[-1], d_neg = diff(dev$down))
+      } else if (differenced) list(x = diff(dev$up), x_neg = diff(dev$down)) else list(x = dev$up, x_neg = dev$down)
+    }
     n <- n_inputs(x)
-    shift <- if (clim_mode == "baseline") baseline_shift(a, window, PROJECTION_FROM) else rep(0, n)
+    shift <- if (clim_mode == "baseline") baseline_shift(a, window, PROJECTION_FROM)
+             else if (follows_baseline(clim_mode)) {
+               spell_shift(a, window, PROJECTION_FROM, spell_rule_of(clim_mode), trailing_sd(a, sd, window, sd_mode_v))
+             } else rep(0, n)
     rows <- which(as.integer(names(a)) >= PROJECTION_FROM)
     mods <- modifier_matrix(model, country, v, shift, income, share, cur = a[rows], lag = a[rows - 1])
     # The level as it is: the effects of the country's level plus the
@@ -374,8 +417,8 @@ project_setting <- function(spec, scen_data, scenario, ssp = NULL, gmt = NULL,
   # spec$follow_econ = FALSE: the climate follows the baseline, but income and
   # share stay at the country's values (default: they follow too).
   follow_econ <- !isFALSE(spec$follow_econ)
-  follow_inc <- spec$clim_mode == "baseline" && follow_econ && is.finite(inc_window)
-  follow_share <- spec$clim_mode == "baseline" && follow_econ && is.finite(share_window)
+  follow_inc <- follows_baseline(spec$clim_mode) && follow_econ && is.finite(inc_window)
+  follow_share <- follows_baseline(spec$clim_mode) && follow_econ && is.finite(share_window)
   follow <- follow_inc || follow_share
 
   ssp_gdp <- scen_data$ssp$gdp[scen_data$ssp$gdp$ssp == ssp & scen_data$ssp$gdp$year %in% years, ]
@@ -559,9 +602,19 @@ latitude_shares <- function(world, width = 5) {
 # Global warming `gmt` (named by year) in `years`, its reference climate (the
 # mean of the `window` years before each year, or with `window` NA the mean
 # over the years `horizon`) and its deviation from it.
-gmt_deviation <- function(gmt, years, window, horizon) {
+# With `rule` (SPELL_RULES) and a trailing window, the trailing mean is held
+# through the spells of `gmt` (spell_held_mean(); `s` the SD of its natural
+# variability, the threshold of the one-SD rule).
+gmt_deviation <- function(gmt, years, window, horizon, rule = NULL, s = NULL) {
   reference <- if (is.na(window)) {
     rep(mean(gmt[as.character(seq(horizon[[1]], horizon[[2]]))]), length(years))
+  } else if (!is.null(rule)) {
+    y <- as.integer(names(gmt))
+    # (Spells found from the projection's history on, as in the GDP projections.)
+    gmt <- gmt[y >= PROJECTION_FROM - 31L]
+    y <- as.integer(names(gmt))
+    held <- spell_shift(gmt, window, years[[1]], rule, s)
+    held[match(years, y[y >= years[[1]]])]
   } else {
     trailing_mean(gmt, years, window)
   }
@@ -594,20 +647,61 @@ natural_sigma <- function(variability, pattern, population) {
 # With `background` and `t_sai` (named by iso3; cider_mix()), geoengineering has
 # its own pattern: the forced deviation is t_slope dev(B) + t_sai dev(G - B).
 exposure_by_latitude <- function(gmt, years, window, horizon, sigma, population, shares, k = 2.5,
-                                 sign = "warm", background = NULL, t_sai = NULL) {
+                                 sign = "warm", background = NULL, t_sai = NULL, rule = NULL,
+                                 variability = NULL, noise = "none", n_paths = 200L) {
   iso <- intersect(intersect(names(sigma$sd), rownames(population)), shares$iso3)
-  if (is.null(t_sai)) {
-    dev <- gmt_deviation(gmt, years, window, horizon)$deviation
-    z <- outer(sigma$slope[iso] / sigma$sd[iso], dev)
+  if (!is.null(rule) && is.finite(window)) {
+    # Spells (`rule`): exceedance is a property of each noisy path, not of the
+    # smooth forced signal (on which a one-SD spell would never end). Each
+    # country's forced T (t_slope G, or t_slope B + t_sai (G - B)) plus noise
+    # paths of its detrended historical T (`variability`; drawn as in
+    # project_setting(): `noise`, `n_paths`, the same seeds; independent years
+    # when the run has none), over the projection's history; the deviation of
+    # each path against its trailing mean and SD held through its own spells
+    # (spell_deviations(); the warm side for warm events, the cold side too
+    # for "both"), in the country's natural SD; p: the share of the paths
+    # beyond k.
+    stopifnot(!is.null(variability))
+    iso <- intersect(iso, rownames(variability$TM))
+    history <- seq(PROJECTION_FROM - 31L, PROJECTION_TO)
+    y <- as.character(history)
+    X <- if (is.null(t_sai)) {
+      outer(unname(gmt[y]), sigma$slope[iso])
+    } else {
+      t <- t_sai[iso]
+      t[!is.finite(t)] <- sigma$slope[iso][!is.finite(t)]
+      b <- unname(background[y])
+      outer(b, sigma$slope[iso]) + outer(unname(gmt[y]) - b, t)
+    }
+    if (noise == "none") noise <- "iid"
+    joint <- if (noise %in% c("joint", "blocks")) {
+      with_seed(VARIABILITY_SEED, noise_indices(n_paths, length(history), length(variability$years),
+                                                if (noise == "blocks") VARIABILITY_BLOCK else 1L))
+    }
+    full <- seq(window + 1L, length(history))
+    r <- match(as.character(years), y[full])
+    p <- t(vapply(seq_along(iso), function(i) {
+      A <- X[, i] + country_noise(variability, iso[[i]], length(history), n_paths, joint)$TM
+      dev <- spell_deviations(A[full, , drop = FALSE], window_means(A, full, window), sigma$sd[[iso[[i]]]], rule)
+      out <- rowMeans(dev$up[r, , drop = FALSE] > k)
+      if (sign == "both") out <- out + rowMeans(dev$down[r, , drop = FALSE] < -k)
+      out
+    }, numeric(length(years))))
+    dimnames(p) <- list(iso, NULL)
   } else {
-    sai <- gmt - background[names(gmt)]
-    t <- t_sai[iso]
-    t[!is.finite(t)] <- sigma$slope[iso][!is.finite(t)]
-    z <- (outer(sigma$slope[iso], gmt_deviation(background, years, window, horizon)$deviation) +
-            outer(t, gmt_deviation(sai, years, window, horizon)$deviation)) / sigma$sd[iso]
+    if (is.null(t_sai)) {
+      dev <- gmt_deviation(gmt, years, window, horizon)$deviation
+      z <- outer(sigma$slope[iso] / sigma$sd[iso], dev)
+    } else {
+      sai <- gmt - background[names(gmt)]
+      t <- t_sai[iso]
+      t[!is.finite(t)] <- sigma$slope[iso][!is.finite(t)]
+      z <- (outer(sigma$slope[iso], gmt_deviation(background, years, window, horizon)$deviation) +
+              outer(t, gmt_deviation(sai, years, window, horizon)$deviation)) / sigma$sd[iso]
+    }
+    p <- 1 - stats::pnorm(k - z)
+    if (sign == "both") p <- p + stats::pnorm(-k - z)
   }
-  p <- 1 - stats::pnorm(k - z)
-  if (sign == "both") p <- p + stats::pnorm(-k - z)
   pop <- population[iso, as.character(years), drop = FALSE]
   s <- shares[shares$iso3 %in% iso, ]
   S <- stats::xtabs(share ~ iso3 + lat, s)[iso, , drop = FALSE]
@@ -616,4 +710,88 @@ exposure_by_latitude <- function(gmt, years, window, horizon, sigma, population,
   total <- crossprod(S, pop)
   data.frame(lat = rep(as.numeric(colnames(S)), times = length(years)), year = rep(years, each = ncol(S)),
              exposed = as.vector(100 * exposed / total), population = as.vector(total))
+}
+
+# The climate of a region under the global warming paths `paths` (list: name ->
+# warming named by year, `background` the one without geoengineering): the
+# population-weighted mean (`population`, named by iso3, fixed weights) of the
+# countries' change of T (C) and P (mm a year) from the climate of the
+# `horizon` years, as project_setting() builds it (T: t_slope (B - ref) + t_sai
+# (G - B), P: mean_P (p_rel_slope (B - ref) + p_sai (G - B)); `sai_pattern`
+# cider_mix()$pattern, NULL: uniform). With noise ("iid", "joint", "blocks"),
+# every path adds the same `n_paths` noise paths of the region, the countries'
+# detrended historical T and P drawn as in project_setting() (same seeds).
+# `unit`: "level", the change; "sd", the deviation from the reference climate
+# (the mean of the `window` years before, of the path itself, noise included;
+# `window` NA: the horizon climate) over the region's natural SD (the SD of
+# the weighted mean of the countries' noise).
+# Returns data (path, variable T/P, year, estimate: mean over the noise paths,
+# low/high: their 2.5-97.5%, example: the first noise path), the number of
+# countries n and the natural SDs (C, mm a year).
+regional_climate <- function(units, pattern, variability, population, paths, background, horizon,
+                             sai_pattern = NULL, noise = "none", n_paths = 0L, unit = "level", window = NA, rule = NULL) {
+  history <- seq(PROJECTION_FROM - 31L, PROJECTION_TO)
+  years <- seq(PROJECTION_FROM, PROJECTION_TO)
+  cn <- merge(units[, c("GID_0", "mean_P")], pattern, by.x = "GID_0", by.y = "iso3")
+  keep <- is.finite(cn$t_slope) & is.finite(cn$p_rel_slope) & is.finite(cn$mean_P) &
+    cn$GID_0 %in% rownames(variability$TM) & cn$GID_0 %in% names(population)[is.finite(population) & population > 0]
+  cn <- cn[keep & !duplicated(cn$GID_0), ]
+  if (!nrow(cn)) stop("None of the selected countries has the climate data.")
+  w <- population[cn$GID_0] / sum(population[cn$GID_0])
+  t_sai <- cn$t_slope
+  p_sai <- cn$p_rel_slope
+  if (!is.null(sai_pattern)) {
+    m <- match(cn$GID_0, sai_pattern$iso3)
+    ok <- is.finite(sai_pattern$t_sai[m]) & is.finite(sai_pattern$p_sai[m])
+    t_sai[ok] <- sai_pattern$t_sai[m][ok]
+    p_sai[ok] <- sai_pattern$p_sai[m][ok]
+  }
+  # (Linear in the countries: the region's own slopes.)
+  slope <- list(T = c(sum(w * cn$t_slope), sum(w * t_sai)),
+                P = 1000 * c(sum(w * cn$mean_P * cn$p_rel_slope), sum(w * cn$mean_P * p_sai)))
+  reference <- mean(background[as.character(seq(horizon[[1]], horizon[[2]]))])
+  warming <- unname(background[as.character(history)]) - reference
+  sd <- c(T = stats::sd(colSums(w * variability$TM[cn$GID_0, , drop = FALSE])),
+          P = 1000 * stats::sd(colSums(w * variability$RR[cn$GID_0, , drop = FALSE])))
+  with_noise <- noise != "none" && isTRUE(n_paths > 0)
+  if (with_noise) {
+    joint <- if (noise %in% c("joint", "blocks")) {
+      with_seed(VARIABILITY_SEED, noise_indices(n_paths, length(history), length(variability$years),
+                                                if (noise == "blocks") VARIABILITY_BLOCK else 1L))
+    }
+    region_noise <- list(T = matrix(0, length(history), n_paths), P = matrix(0, length(history), n_paths))
+    for (i in seq_len(nrow(cn))) {
+      z <- country_noise(variability, cn$GID_0[[i]], length(history), n_paths, joint)
+      region_noise$T <- region_noise$T + w[[i]] * z$TM
+      region_noise$P <- region_noise$P + 1000 * w[[i]] * z$RR
+    }
+  }
+  rows <- match(years, history)
+  data <- do.call(rbind, lapply(names(paths), function(p) {
+    sai <- unname(paths[[p]][as.character(history)] - background[as.character(history)])
+    do.call(rbind, lapply(c("T", "P"), function(v) {
+      x <- slope[[v]][[1]] * warming + slope[[v]][[2]] * sai
+      X <- if (with_noise) x + region_noise[[v]] else matrix(x, ncol = 1)
+      Y <- X[rows, , drop = FALSE]
+      if (unit == "sd") {
+        if (!is.na(window)) {
+          # (With `rule`: the trailing mean held through the spells of each path.)
+          M <- if (is.null(rule)) window_means(X, rows, window) else {
+            full <- seq(window + 1L, nrow(X))
+            spell_held_mean(X[full, , drop = FALSE], window_means(X, full, window), sd[[v]], rule)[match(rows, full), , drop = FALSE]
+          }
+          Y <- Y - M
+        }
+        Y <- Y / sd[[v]]
+      }
+      out <- data.frame(path = p, variable = v, year = years, estimate = rowMeans(Y), example = Y[, 1])
+      if (with_noise) {
+        q <- apply(Y, 1, stats::quantile, probs = c(0.025, 0.975), names = FALSE)
+        out$low <- q[1, ]
+        out$high <- q[2, ]
+      }
+      out
+    }))
+  }))
+  list(data = data, n = nrow(cn), sd = sd)
 }
