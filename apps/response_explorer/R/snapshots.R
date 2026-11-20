@@ -18,7 +18,7 @@ default_model_inputs <- function(gdp = "PWT") {
        exp_hot_measure = "dd", exp_cold_src = "tmpmin", exp_cold_value = 0, exp_cold_measure = "dd",
        exposure_mode_P = "none", exposure_channels_P = "both", exp_wet_type = "pct", exp_wet_pct = "0.99",
        exp_wet_abs = "20", exp_wet_measure = "dd", exp_dry_value = "1", exp_dry_measure = "days",
-       spell_rule = "sigma", cap_T = FALSE, cap_P = FALSE,
+       spell_rule = "sigma", dev_sd = "trailing", cap_T = FALSE, cap_P = FALSE,
        shape_T = "linear", shape_P = "linear", controls = unname(CONTROL_CHOICES),
        drop_outliers = TRUE, outlier_tail = DEFAULT_OUTLIERS)
 }
@@ -120,7 +120,7 @@ apply_model_inputs <- function(session, m) {
   }
   for (k in c("moderators", "effects", "convergence", "style", "units_T", "units_P", "shape_T", "shape_P",
               "income_form_T", "income_form_P", "exposure_channels", "exp_hot_measure", "exp_cold_measure",
-              "exposure_channels_P", "exp_wet_type", "exp_wet_measure", "exp_dry_measure", "weight", "spell_rule",
+              "exposure_channels_P", "exp_wet_type", "exp_wet_measure", "exp_dry_measure", "weight", "spell_rule", "dev_sd",
               "outlier_tail")) {
     if (has(k) && !is.null(m[[k]])) updateRadioButtons(session, k, selected = m[[k]])
   }

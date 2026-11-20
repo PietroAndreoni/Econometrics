@@ -681,15 +681,15 @@ spell_shift <- function(a, window, from, rule, s, pre = window) {
 # The deviations of the years from `from` of anomaly path `a` (named by year,
 # consecutive) held through its spells of `rule` (spell_deviations()): against
 # the trailing mean of the anomalies and the trailing SD widened by them
-# (trailing_sd(), "moving"), held through each spell, found from `pre` years
+# (trailing_sd(), `sd_mode` "moving"; "fixed": `sd` itself), held through each spell, found from `pre` years
 # after the first year of `a`; in absolute units (`scaled` FALSE) the
 # anomalies less the held mean. list(up, down).
-spell_deviation_path <- function(a, sd, window, rule, from = 0, pre = window, scaled = TRUE) {
+spell_deviation_path <- function(a, sd, window, rule, from = 0, pre = window, scaled = TRUE, sd_mode = "moving") {
   years <- as.integer(names(a))
   start <- min(years) + pre
   keep <- years >= start
   mu <- baseline_shift(a, window, start)
-  s <- trailing_sd(a, sd, window, "moving")
+  s <- trailing_sd(a, sd, window, sd_mode)
   if (length(s) > 1L) s <- s[keep]
   dev <- spell_deviations(a[keep], mu, s, rule, scaled)
   lapply(dev, function(x) drop(x)[years[keep] >= from])
@@ -743,7 +743,7 @@ gdp_path <- function(model, v, country, type, delta, horizon, sd_mode = "fixed",
     # Held through spells: a pair of deviations, the warm (wet) and the cold
     # (dry) side's (spells found from the year before the shift).
     dev <- spell_deviation_path(a, sd, window, spell_rule_of(clim_mode), 0, pre = window - 1,
-                                scaled = !identical(of_variable(model$units, v), "absolute"))
+                                scaled = !identical(of_variable(model$units, v), "absolute"), sd_mode = sd_mode)
     model_spell_deviations(model, dev$up, dev$down)
   } else {
     model_deviations(model, if (identical(model$window, "nrk")) innovation_path(a, filter_lags(model, country, v), sd)

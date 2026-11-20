@@ -37,12 +37,13 @@
 # local warm, cold, wet or dry spells (o$spell_rule, SPELL_RULES of
 # R/response.R) at the trailing mean (and SD) of the spell's start: the warm (wet) arms
 # from the warm (wet) spells, the cold (dry) arms from the cold (dry) ones.
-# The SD of deviations from a trailing baseline (SD units) goes with the
-# characteristics: fixed at the unit's (the median of its trailing SD) with
-# fixed characteristics; otherwise the trailing SD of the year, whose level is
-# then a control too, as 1 / SD as it enters the deviations (sdlev_<v>). The projections do the same (R/projection.R:
-# a fixed SD, or one widened by the shift, with the climate following the
-# baseline or held through spells). The trailing models run on the rows with all the trailing values
+# The SD of deviations from a trailing baseline (SD units; o$dev_sd; fixed with
+# fixed characteristics, otherwise a choice):
+# fixed at the unit's (the median of its trailing SD), or the trailing
+# SD of the year over the deviation's window, then with 1 / SD (as it enters
+# the deviations) as a control (sdlev_<v>). The projections do the same
+# (R/projection.R: the fixed SD, or the trailing one widened by the shift).
+# The trailing models run on the rows with all the trailing values
 # they use (the full window); a model with capital (or a PWT outcome other than
 # GDP per capita) on the rows with it.
 #
@@ -300,6 +301,11 @@ model_options <- function(o) {
   o$symmetric <- vapply(per_variable_option(o$symmetric, FALSE), isTRUE, TRUE)
   o$units <- per_variable_option(o$units, "SD")
   o$shape <- per_variable_option(o$shape, "linear")
+  # The SD of deviations from a trailing baseline (SD units): "trailing", over
+  # the deviation's own window (with 1/SD as a control), or "fixed", the
+  # unit's (the median of its trailing SD), in the estimation and the
+  # projections alike; with fixed characteristics always fixed.
+  o$dev_sd <- if (identical(o$dev_sd, "fixed") || identical(o$moderators %||% "fixed", "fixed")) "fixed" else "trailing"
   # The style: the regression unit itself, or its first difference.
   o$diff <- identical(o$style, "diff") || isTRUE(o$diff)
   # "both": the terms of the unit and, with arms of their own, those of its
@@ -367,7 +373,7 @@ interaction_key <- function(inter) {
 }
 model_key <- function(o, panels) {
   moderators <- paste0(if (o$moderators == "spells") paste0("spells ", o$spell_rule, ", held deviations") else o$moderators,
-                       if (o$share_trailing) " + share", if (o$moderators == "fixed") " (fixed SD)" else " (trailing SD, 1/SD a control)")
+                       if (o$share_trailing) " + share", if (o$dev_sd == "fixed") " (fixed SD)" else " (trailing SD, 1/SD a control)")
   per <- function(x) if (x[["TM"]] == x[["RR"]]) as.character(x[["TM"]]) else paste0("T ", x[["TM"]], ", P ", x[["RR"]])
   paste(o$gdp, o$climate, o$baseline, o$weight, per(o$units),
         paste0("T ", o$form[["TM"]], if (o$symmetric[["TM"]]) " (symmetric)",
@@ -517,16 +523,16 @@ explorer_model <- function(o, panels) {
   d <- model_rows(o, panels)
   # The demeaning of the deviations of each variable (symmetric ones as they are).
   dev_fe <- c(TM = deviation_fe(o$fe, o$symmetric[["TM"]], o$effects), RR = deviation_fe(o$fe, o$symmetric[["RR"]], o$effects))
-  # The SD of the deviations from a trailing baseline (SD units): with fixed
-  # characteristics, fixed at the unit's (the median of its trailing SD over
-  # the panel's rows, the SD of the projections: units$sd_T); otherwise the
-  # trailing SD of the year, with its level as a control (sd_level). A fixed
-  # SD is constant within the unit, so its demeaned deviations (and first
+  # The SD of the deviations from a trailing baseline (SD units, o$dev_sd):
+  # fixed at the unit's (the median of its trailing SD over the panel's rows,
+  # the SD of the projections: units$sd_T), or the trailing SD of the year over
+  # the deviation's window, with 1 / SD as a control (sd_level). A fixed SD is
+  # constant within the unit, so its demeaned deviations (and first
   # differences) are the absolute ones over it.
   sd_column <- function(v) paste0("sd_", v, "_", window)
   fixed_sd <- c(TM = FALSE, RR = FALSE)
-  if (trailing_window(window)) for (v in c("TM", "RR")) fixed_sd[[v]] <- !trailing && o$units[[v]] == "SD"
-  sd_level <- trailing_window(window) & trailing & o$units == "SD"
+  if (trailing_window(window)) for (v in c("TM", "RR")) fixed_sd[[v]] <- o$dev_sd == "fixed" && o$units[[v]] == "SD"
+  sd_level <- trailing_window(window) & o$dev_sd == "trailing" & o$units == "SD"
   names(sd_level) <- c("TM", "RR")
   unit_sd <- lapply(c(TM = "TM", RR = "RR"), function(v) {
     if (!fixed_sd[[v]]) return(NULL)
@@ -576,6 +582,9 @@ explorer_model <- function(o, panels) {
         x <- series[[v]][idx][at]
         mu <- series[[paste0("mean_", v, "_", window)]][idx][at]
         s <- series[[sd_column(v)]][idx][at]
+        # (A fixed SD: the unit's, also the threshold of the one-SD rule; the
+        # deviations from the held mean over it.)
+        if (fixed_sd[[v]]) s <- rep(unname(unit_sd[[v]][series$GID_1[idx][[1]]]), length(full))
         back <- match(y, full)
         held[idx] <- drop(spell_held_mean(x, mu, s, o$spell_rule))[back]
         dev <- spell_deviations(x, mu, s, o$spell_rule, scaled = o$units[[v]] == "SD")
@@ -892,7 +901,7 @@ explorer_model <- function(o, panels) {
     fe = o$fe, effects = o$effects, moderators = o$moderators, share_trailing = o$share_trailing,
     # The spells of held characteristics (NULL: none) and whether the SD of the
     # deviations of T, P is the trailing one with its level as a control.
-    spell_rule = o$spell_rule, sd_level = sd_level,
+    spell_rule = o$spell_rule, sd_level = sd_level, dev_sd = o$dev_sd,
     # The quadratic climate controls and their coefficients (NULL: none).
     quad = o$quad,
     quad_coef = if (length(intersect(quad_terms, rownames(ct)))) {

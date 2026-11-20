@@ -967,12 +967,15 @@ common_ui <- function(ns) {
       radioButtons(ns("spell_rule"), "Spells (as in the fixed-baseline robustness of the weather arms)",
                    SPELL_RULES, selected = "sigma")
     ),
-    helpText(paste("The same in the estimation and in the GDP paths and scenarios. With a trailing baseline in SD",
-                   "units, the SD of the deviations is fixed at the country's only with fixed characteristics;",
-                   "otherwise it is the trailing SD (in the projections, widened by the shift), whose inverse enters",
-                   "the estimation too. The level terms (of the trailing characteristics and of the SD) are",
-                   "controls: the GDP paths and projections use the deviation terms only. In the scenarios the",
-                   "trailing income and share follow the SSP.")),
+    conditionalPanel(
+      "input.moderators != 'fixed' && ['5-year', '10-year', '20-year', '30-year'].indexOf(input.baseline) > -1 && (input.units_T == 'SD' || input.units_P == 'SD')", ns = ns,
+      radioButtons(ns("dev_sd"), "SD of the trailing deviations (estimation and projections; fixed with fixed characteristics)",
+                   c("Trailing: the SD over the deviation's window (in the projections widened by the shift; 1/SD a control)" = "trailing",
+                     "Fixed: the country's SD (the median of its trailing SD)" = "fixed"), selected = "trailing")
+    ),
+    helpText(paste("The same in the estimation and in the GDP paths and scenarios. The level terms (of the trailing",
+                   "characteristics and, with the trailing SD, 1/SD) are controls: the GDP paths and projections use",
+                   "the deviation terms only. In the scenarios the trailing income and share follow the SSP.")),
     conditionalPanel(
       "input.moderators != 'fixed' && input.gdp == 'WB'", ns = ns,
       checkboxInput(ns("share_trailing"), "Trailing agricultural share too (5 years before)", value = FALSE),
@@ -1225,7 +1228,7 @@ setting_server <- function(id, n, default_country, first = NULL) {
                                   exp_wet_type = input$exp_wet_type, exp_wet_pct = input$exp_wet_pct,
                                   exp_wet_abs = input$exp_wet_abs, exp_wet_measure = input$exp_wet_measure,
                                   exp_dry_value = input$exp_dry_value, exp_dry_measure = input$exp_dry_measure,
-                                  spell_rule = input$spell_rule,
+                                  spell_rule = input$spell_rule, dev_sd = input$dev_sd,
                                   cap_T = input$cap_T, cap_P = input$cap_P, shape_T = input$shape_T, shape_P = input$shape_P,
                                   controls = input$controls,
                                   drop_outliers = input$drop_outliers, outlier_tail = input$outlier_tail))
@@ -1305,7 +1308,9 @@ setting_server <- function(id, n, default_country, first = NULL) {
       #   the baseline, or held through the spells ("spells_<rule>").
       if (moderators == "spells" && !trailing) moderators <- "trailing"
       spell_rule <- if (moderators == "spells") input$spell_rule %||% "sigma"
-      sd_mode <- if (trailing && !all(absolute) && moderators != "fixed") "moving" else "fixed"
+      # (Fixed characteristics: the SD fixed too; the choice only with trailing ones.)
+      dev_sd <- if (identical(input$dev_sd, "fixed") || moderators == "fixed") "fixed" else "trailing"
+      sd_mode <- if (trailing && !all(absolute) && dev_sd == "trailing") "moving" else "fixed"
       clim_mode <- switch(moderators, fixed = "fixed", trailing = "baseline", spells = paste0("spells_", spell_rule))
       # Per variable: the cap (only with an income, share or capital
       # interaction) and the shape (splines only with an interaction).
@@ -1338,6 +1343,7 @@ setting_server <- function(id, n, default_country, first = NULL) {
                                                     c("T", "P")[quad != "none"], collapse = ", ")),
                      if (moderators == "trailing") " · trailing characteristics",
                      if (moderators == "spells") paste0(" · trailing characteristics held through ", SPELL_RULE_SHORT[[spell_rule]]),
+                     if (trailing && !all(absolute) && dev_sd == "fixed" && moderators != "fixed") " · fixed SD",
                      if (share_trailing) " (with share)",
                      if (weight == "area") " · area weights",
                      which_vars(absolute, "absolute units"),
@@ -1356,6 +1362,7 @@ setting_server <- function(id, n, default_country, first = NULL) {
                                        effects = effects, convergence = convergence,
                                        convergence_iv = convergence_iv, quad = quad,
                                        moderators = moderators, spell_rule = spell_rule, share_trailing = share_trailing,
+                                       dev_sd = dev_sd,
                                        outcome = outcome, income_form = income$income_form, xi = income$xi,
                                        controls = controls, outliers = outliers, low_threshold = low_threshold),
                                   EXPLORER),
@@ -3768,16 +3775,18 @@ server <- function(input, output, session) {
                 paste(sprintf("%s %+.4f (SE %.4f, p = %.3g)", m$levels$term, m$levels$estimate,
                               m$levels$se, m$levels$p), collapse = "; "))
       } else ""
+      sd_text <- if (trailing_window(m$window) && any(m$units == "SD")) {
+        if (identical(m$dev_sd, "fixed")) "; the deviations over the country's fixed SD"
+        else "; the deviations over the trailing SD, 1/SD a control"
+      } else ""
       moderators <- if (m$moderators %in% c("trailing", "spells")) {
         paste0("trailing characteristics (climate: ",
                if (!trailing_window(m$window)) "horizon mean"
                else paste0("trailing ", sub("lag_", "", m$window), "-year mean",
                            if (!is.null(m$spell_rule)) paste0(", held through ", SPELL_RULE_SHORT[[m$spell_rule]])),
                "; income: 5 years before; share: ", if (m$share_trailing) "5 years before" else "sample mean",
-               if (any(m$sd_level %||% FALSE)) "; trailing SD of the deviations, its inverse a control",
-               ")")
-      } else paste0("fixed characteristics (sample means",
-                    if (trailing_window(m$window)) "; the deviations over the country's fixed SD", ")")
+               sd_text, ")")
+      } else paste0("fixed characteristics (sample means", sd_text, ")")
       effects <- m$effects %||% "both"
       effects_text <- if (effects == "year") "year effects only (no unit effects or trends)" else {
         paste(if (effects == "unit") "unit effects only (no year effects)" else "year and unit effects", "with", FE_SHORT[[m$fe]])

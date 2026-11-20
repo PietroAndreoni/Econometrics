@@ -240,7 +240,9 @@ project_country_noise <- function(model, country, anomalies, noise, sd_mode, cli
     if (spells) {
       full <- seq(window + 1L, nrow(A))
       a <- anomalies[[v]]
-      s_full <- vapply(full, function(k) sqrt(sd^2 + mean((a[k - window:1] - mean(a[k - window:1]))^2)), 0)
+      s_full <- if (sd_mode == "moving") {
+        vapply(full, function(k) sqrt(sd^2 + mean((a[k - window:1] - mean(a[k - window:1]))^2)), 0)
+      } else rep(sd, length(full))
       if (identical(of_variable(model$units, v), "absolute")) s_full <- rep(sd, length(full))
       held_dev <- spell_deviations(A[full, , drop = FALSE], window_means(A, full, window), s_full,
                                    spell_rule_of(clim_mode), scaled = !identical(of_variable(model$units, v), "absolute"))
@@ -315,7 +317,7 @@ project_country <- function(model, country, anomalies, sd_mode, clim_mode, cap, 
     # Held through spells: the warm (wet) and the cold (dry) side's deviations.
     if (!is.null(spell_rule_of(clim_mode)) && is.finite(window)) {
       dev <- spell_deviation_path(a, sd, window, spell_rule_of(clim_mode), from = from,
-                                  scaled = !identical(of_variable(model$units, v), "absolute"))
+                                  scaled = !identical(of_variable(model$units, v), "absolute"), sd_mode = sd_mode_v)
       x <- if (isTRUE(model$both)) {
         list(x = dev$up[-1], d = diff(dev$up), x_neg = dev$down[-1], d_neg = diff(dev$down))
       } else if (differenced) list(x = diff(dev$up), x_neg = diff(dev$down)) else list(x = dev$up, x_neg = dev$down)
@@ -383,9 +385,14 @@ world_growth <- function(world_gdp, loss) {
 # pattern times the global SAI change (gmt - background, zero before 2025):
 #   T: t_slope (B - ref) + t_sai (G - B),  P: mean_P (p_rel_slope (B - ref) + p_sai (G - B)).
 # A country without a SAI pattern keeps the CMIP6 one (counted in `sai_fallback`).
+#
+# Also returns `world_gdp` (the countries' SSP GDP by year) and, with
+# `keep_draws`, `draws`: the global loss of each component (loss, loss_T,
+# loss_P; % of GDP) at each coefficient draw (years x draws; the draws are
+# seeded, so they are the same in every call with the same model).
 project_setting <- function(spec, scen_data, scenario, ssp = NULL, gmt = NULL,
                             variability = NULL, noise = "none", n_paths = 500L, no_gains = FALSE,
-                            region = NULL, sai = NULL) {
+                            region = NULL, sai = NULL, keep_draws = FALSE) {
   agg <- function(x) if (isTRUE(no_gains)) pmin(x, 0) else x
   model <- spec$model
   ssp <- ssp %||% scen_data$ssp$of_scenario[[scenario]]
@@ -567,7 +574,9 @@ project_setting <- function(spec, scen_data, scenario, ssp = NULL, gmt = NULL,
                            loss = as.vector(country_loss), loss_T = as.vector(country_loss_T),
                            loss_P = as.vector(country_loss_P)),
     coverage = coverage, n = nrow(countries), follow = follow, followed = followed, ssp = ssp,
-    no_gains = isTRUE(no_gains), sai_fallback = sai_fallback
+    no_gains = isTRUE(no_gains), sai_fallback = sai_fallback,
+    world_gdp = stats::setNames(world_gdp, years),
+    draws = if (isTRUE(keep_draws)) global_draws
   )
 }
 
